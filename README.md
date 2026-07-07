@@ -2,7 +2,7 @@
 
 NVIDIA Fleet Intelligence Agent - Host agent for GPU telemetry collection and attestation.
 
-Built on top of [leptonai/gpud](https://github.com/leptonai/gpud)
+For complete documentation on NVIDIA Fleet Intelligence, including the service dashboard, enrollment, and user guide, see the [NVIDIA Fleet Intelligence Documentation](https://docs.nvidia.com/fleet-intelligence/latest/index.html).
 
 ## Overview
 
@@ -33,15 +33,13 @@ Built on top of [leptonai/gpud](https://github.com/leptonai/gpud)
 
 ## Documentation
 
-**Important:** Documentation links are relative to the branch or tag you are viewing. The default GitHub view uses `main`, which may describe unreleased changes. When installing or upgrading a specific agent version, switch to that version's release tag first.
-
-- [Helm Installation](docs/install-helm.md) - Kubernetes (Helm) installation and troubleshooting
-- [DEB Installation](docs/install-deb.md) - Ubuntu package install, update, and uninstall
-- [RPM Installation](docs/install-rpm.md) - RHEL/Rocky/Alma/Amazon package install, update, and uninstall
-- [Architecture](docs/architecture.md) - Bare metal and Kubernetes architecture, dependencies, and runtime flow
-- [Usage](docs/usage.md) - Commands, HTTP API, integration, and troubleshooting
-- [Configuration](docs/configuration.md) - Environment variables and service configuration
-- [Development](docs/development.md) - Building from source and contributing
+- [Helm Installation](https://docs.nvidia.com/fleet-intelligence/latest/agent/install-helm.html) - Kubernetes (Helm) installation and troubleshooting
+- [DEB Installation](https://docs.nvidia.com/fleet-intelligence/latest/agent/install-deb.html) - Ubuntu package install, update, and uninstall
+- [RPM Installation](https://docs.nvidia.com/fleet-intelligence/latest/agent/install-rpm.html) - RHEL/Rocky/Alma/Amazon package install, update, and uninstall
+- [Architecture](https://docs.nvidia.com/fleet-intelligence/latest/agent/architecture.html) - Bare metal and Kubernetes architecture, dependencies, and runtime flow
+- [Usage](https://docs.nvidia.com/fleet-intelligence/latest/agent/usage.html) - Commands, HTTP API, integration, and troubleshooting
+- [Configuration](https://docs.nvidia.com/fleet-intelligence/latest/agent/configuration.html) - Environment variables and service configuration
+- [Development](https://docs.nvidia.com/fleet-intelligence/latest/agent/development.html) - Building from source and contributing
 
 ## Contributing
 
