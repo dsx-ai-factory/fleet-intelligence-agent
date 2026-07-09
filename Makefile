@@ -150,13 +150,13 @@ test: ## run tests with coverage
 	@echo "Coverage report generated: coverage/coverage.html"
 	@$(GO) tool cover -func=coverage/coverage.out | tail -1
 
-vuln: fleetint ## run vulnerability check
+vuln: ## run vulnerability check
 	@echo "Running vulnerability check..."
 	@if ! command -v govulncheck >/dev/null 2>&1; then \
 		echo "Installing govulncheck..."; \
 		$(GO) install golang.org/x/vuln/cmd/govulncheck@latest; \
 	fi
-	@govulncheck -mode=binary ./bin/fleetint
+	@govulncheck ./...
 
 clean: ## clean up binaries and build artifacts
 	@echo "Cleaning up..."
