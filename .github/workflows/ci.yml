@@ -7,7 +7,7 @@ on:
     branches: [ main, 'release/**' ]
 
 env:
-  GO_VERSION: '1.26.4'
+  GO_VERSION: '1.26.5'
   GOFLAGS: '-trimpath'
 
 permissions:

@@ -1,6 +1,6 @@
 ARG DCGM_VERSION="4.4.2-1-ubuntu22.04"
 
-FROM golang:1.26.4 AS build
+FROM golang:1.26.5 AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \

@@ -16,7 +16,7 @@
 # Run specific package tests:
 #   docker run --rm fleet-intelligence-agent:test go test -v ./internal/...
 #
-FROM golang:1.26.4
+FROM golang:1.26.5
 
 ARG TARGETARCH
 
@@ -46,7 +46,7 @@ RUN if [ "${TARGETARCH}" = "amd64" ]; then \
     fi
 
 # Install golangci-lint (matches CI / make lint)
-RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin
+RUN curl -sSfL https://golangci-lint.run/install.sh | sh -s v2.12.2
 # Install govulncheck up front (avoids runtime installs as non-root user)
 RUN go install golang.org/x/vuln/cmd/govulncheck@latest && mv /go/bin/govulncheck /usr/local/bin/govulncheck
 

@@ -7,7 +7,7 @@ Please start all enhancement, bugfix, or change requests by opening a GitHub iss
 ## Development
 
 ### Prerequisites
-- Go 1.26.4+ (see `go.mod`)
+- Go 1.26.5+ (see `go.mod`)
 - Make
 - golangci-lint (optional locally, required in CI)
 
