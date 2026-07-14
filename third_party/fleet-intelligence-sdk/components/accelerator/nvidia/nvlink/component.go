@@ -41,10 +41,23 @@ const (
 	SignalLinkErrorMask       = "link_error_mask"
 	SignalFabricHealthMask    = "fabric_health_mask"
 	SignalFabricHealthStatus  = "fabric_health_status"
+	SignalFabricState         = "fabric_state"
+	SignalFabricStatusCode    = "fabric_status_code"
 	SignalLinkCount           = "link_count"
 	SignalLinkCountStatus     = "link_count_status"
 	SignalCommonSpeed         = "common_speed_mbytes_per_sec"
 	SignalCommonSpeedStatus   = "common_speed_status"
+
+	SignalAllLinksSupportP2P           = "all_links_support_p2p"
+	SignalAllLinksSupportSysmemAccess  = "all_links_support_sysmem_access"
+	SignalAllLinksSupportP2PAtomics    = "all_links_support_p2p_atomics"
+	SignalAllLinksSupportSysmemAtomics = "all_links_support_sysmem_atomics"
+	SignalAllLinksSupportSLI           = "all_links_support_sli"
+	SignalAllLinksSupportLink          = "all_links_support_link"
+	SignalCapabilitiesStatus           = "capabilities_status"
+
+	SignalUnhealthyP2PPeerCount       = "unhealthy_p2p_peer_count"
+	SignalUnhealthyP2PPeerCountStatus = "unhealthy_p2p_peer_count_status"
 )
 
 var _ components.Component = &component{}
@@ -191,6 +204,7 @@ func (c *component) dcgmGPUIndexes() map[string]string {
 }
 
 type nvlinkSourceDevice interface {
+	nvml.Device
 	UUID() string
 	GetFabricState() (nvmldevice.FabricState, error)
 	GetNvLinkState(link int) (nvml.EnableState, nvml.Return)
@@ -205,7 +219,7 @@ type nvlinkSourceMetric struct {
 }
 
 func collectNVLinkSourceMetrics[D nvlinkSourceDevice](devices map[string]D, gpuIndexes map[string]string) []nvlinkSourceMetric {
-	metrics := make([]nvlinkSourceMetric, 0, len(devices)*12)
+	metrics := make([]nvlinkSourceMetric, 0, len(devices)*23)
 	for key, dev := range devices {
 		gpuUUID := dev.UUID()
 		if gpuUUID == "" {
@@ -216,8 +230,13 @@ func collectNVLinkSourceMetrics[D nvlinkSourceDevice](devices map[string]D, gpuI
 			gpuIndex = gpuIndexes[gpuUUID]
 		}
 		links := collectLinkObservations(dev)
-		fabric := collectFabricHealthMask(dev)
+		fabric := collectFabricObservations(dev)
 		linkCount, speed := collectLinkCountAndSpeed(dev)
+		capabilities := collectCapabilities(dev, links.presentMask)
+		if links.status == CollectionStatusError {
+			capabilities.status = CollectionStatusError
+		}
+		p2p := collectP2P(dev, devices)
 
 		metrics = append(metrics,
 			nvlinkSourceMetric{signal: SignalLinkProbeStatus, value: float64(links.status), uuid: gpuUUID, gpu: gpuIndex},
@@ -226,12 +245,23 @@ func collectNVLinkSourceMetrics[D nvlinkSourceDevice](devices map[string]D, gpuI
 			nvlinkSourceMetric{signal: SignalLinkEnabledMask, value: float64(links.enabledMask), uuid: gpuUUID, gpu: gpuIndex},
 			nvlinkSourceMetric{signal: SignalLinkUnsupportedMask, value: float64(links.unsupportedMask), uuid: gpuUUID, gpu: gpuIndex},
 			nvlinkSourceMetric{signal: SignalLinkErrorMask, value: float64(links.errorMask), uuid: gpuUUID, gpu: gpuIndex},
-			nvlinkSourceMetric{signal: SignalFabricHealthMask, value: fabric.value, uuid: gpuUUID, gpu: gpuIndex},
+			nvlinkSourceMetric{signal: SignalFabricHealthMask, value: fabric.healthMask, uuid: gpuUUID, gpu: gpuIndex},
 			nvlinkSourceMetric{signal: SignalFabricHealthStatus, value: float64(fabric.status), uuid: gpuUUID, gpu: gpuIndex},
+			nvlinkSourceMetric{signal: SignalFabricState, value: fabric.state, uuid: gpuUUID, gpu: gpuIndex},
+			nvlinkSourceMetric{signal: SignalFabricStatusCode, value: fabric.statusCode, uuid: gpuUUID, gpu: gpuIndex},
 			nvlinkSourceMetric{signal: SignalLinkCount, value: linkCount.value, uuid: gpuUUID, gpu: gpuIndex},
 			nvlinkSourceMetric{signal: SignalLinkCountStatus, value: float64(linkCount.status), uuid: gpuUUID, gpu: gpuIndex},
 			nvlinkSourceMetric{signal: SignalCommonSpeed, value: speed.value, uuid: gpuUUID, gpu: gpuIndex},
 			nvlinkSourceMetric{signal: SignalCommonSpeedStatus, value: float64(speed.status), uuid: gpuUUID, gpu: gpuIndex},
+			nvlinkSourceMetric{signal: SignalAllLinksSupportP2P, value: boolMetricValue(capabilities.allLinksSupportP2P), uuid: gpuUUID, gpu: gpuIndex},
+			nvlinkSourceMetric{signal: SignalAllLinksSupportSysmemAccess, value: boolMetricValue(capabilities.allLinksSupportSysmemAccess), uuid: gpuUUID, gpu: gpuIndex},
+			nvlinkSourceMetric{signal: SignalAllLinksSupportP2PAtomics, value: boolMetricValue(capabilities.allLinksSupportP2PAtomics), uuid: gpuUUID, gpu: gpuIndex},
+			nvlinkSourceMetric{signal: SignalAllLinksSupportSysmemAtomics, value: boolMetricValue(capabilities.allLinksSupportSysmemAtomics), uuid: gpuUUID, gpu: gpuIndex},
+			nvlinkSourceMetric{signal: SignalAllLinksSupportSLI, value: boolMetricValue(capabilities.allLinksSupportSLI), uuid: gpuUUID, gpu: gpuIndex},
+			nvlinkSourceMetric{signal: SignalAllLinksSupportLink, value: boolMetricValue(capabilities.allLinksSupportLink), uuid: gpuUUID, gpu: gpuIndex},
+			nvlinkSourceMetric{signal: SignalCapabilitiesStatus, value: float64(capabilities.status), uuid: gpuUUID, gpu: gpuIndex},
+			nvlinkSourceMetric{signal: SignalUnhealthyP2PPeerCount, value: p2p.value, uuid: gpuUUID, gpu: gpuIndex},
+			nvlinkSourceMetric{signal: SignalUnhealthyP2PPeerCountStatus, value: float64(p2p.status), uuid: gpuUUID, gpu: gpuIndex},
 		)
 	}
 	return metrics
@@ -249,7 +279,12 @@ func countCollectionErrors(metrics []nvlinkSourceMetric) int {
 
 func isStatusSignal(signal string) bool {
 	switch signal {
-	case SignalLinkProbeStatus, SignalFabricHealthStatus, SignalLinkCountStatus, SignalCommonSpeedStatus:
+	case SignalLinkProbeStatus,
+		SignalFabricHealthStatus,
+		SignalLinkCountStatus,
+		SignalCommonSpeedStatus,
+		SignalCapabilitiesStatus,
+		SignalUnhealthyP2PPeerCountStatus:
 		return true
 	default:
 		return false
@@ -270,15 +305,27 @@ type linkObservations struct {
 	status          int
 }
 
-func collectFabricHealthMask(dev nvlinkSourceDevice) sourceObservation {
+type fabricObservations struct {
+	healthMask float64
+	state      float64
+	statusCode float64
+	status     int
+}
+
+func collectFabricObservations(dev nvlinkSourceDevice) fabricObservations {
 	state, err := dev.GetFabricState()
 	if err != nil {
 		if isUnsupportedError(err) {
-			return sourceObservation{status: CollectionStatusUnsupported}
+			return fabricObservations{status: CollectionStatusUnsupported}
 		}
-		return sourceObservation{status: CollectionStatusError}
+		return fabricObservations{status: CollectionStatusError}
 	}
-	return sourceObservation{value: float64(state.HealthMask), status: CollectionStatusCollected}
+	return fabricObservations{
+		healthMask: float64(state.HealthMask),
+		state:      float64(state.State),
+		statusCode: float64(state.Status),
+		status:     CollectionStatusCollected,
+	}
 }
 
 func collectLinkObservations(dev nvlinkSourceDevice) linkObservations {
@@ -337,6 +384,87 @@ func collectLinkCountAndSpeed(dev nvlinkSourceDevice) (sourceObservation, source
 	return decodeUnsignedIntField(values[0]), decodeUnsignedIntField(values[1])
 }
 
+type capabilityObservations struct {
+	allLinksSupportP2P           bool
+	allLinksSupportSysmemAccess  bool
+	allLinksSupportP2PAtomics    bool
+	allLinksSupportSysmemAtomics bool
+	allLinksSupportSLI           bool
+	allLinksSupportLink          bool
+	status                       int
+}
+
+type nvlinkCapabilitySignal struct {
+	capability nvml.NvLinkCapability
+	clear      func(*capabilityObservations)
+}
+
+var nvlinkCapabilitySignals = []nvlinkCapabilitySignal{
+	{capability: nvml.NVLINK_CAP_P2P_SUPPORTED, clear: func(c *capabilityObservations) { c.allLinksSupportP2P = false }},
+	{capability: nvml.NVLINK_CAP_SYSMEM_ACCESS, clear: func(c *capabilityObservations) { c.allLinksSupportSysmemAccess = false }},
+	{capability: nvml.NVLINK_CAP_P2P_ATOMICS, clear: func(c *capabilityObservations) { c.allLinksSupportP2PAtomics = false }},
+	{capability: nvml.NVLINK_CAP_SYSMEM_ATOMICS, clear: func(c *capabilityObservations) { c.allLinksSupportSysmemAtomics = false }},
+	{capability: nvml.NVLINK_CAP_SLI_BRIDGE, clear: func(c *capabilityObservations) { c.allLinksSupportSLI = false }},
+	{capability: nvml.NVLINK_CAP_VALID, clear: func(c *capabilityObservations) { c.allLinksSupportLink = false }},
+}
+
+func collectCapabilities(dev nvlinkSourceDevice, presentMask uint64) capabilityObservations {
+	result := capabilityObservations{
+		allLinksSupportP2P:           true,
+		allLinksSupportSysmemAccess:  true,
+		allLinksSupportP2PAtomics:    true,
+		allLinksSupportSysmemAtomics: true,
+		allLinksSupportSLI:           true,
+		allLinksSupportLink:          true,
+		status:                       CollectionStatusCollected,
+	}
+	if presentMask == 0 {
+		return result
+	}
+
+	for link := 0; link < nvml.NVLINK_MAX_LINKS; link++ {
+		if presentMask&(uint64(1)<<link) == 0 {
+			continue
+		}
+		for _, signal := range nvlinkCapabilitySignals {
+			value, ret := dev.GetNvLinkCapability(link, signal.capability)
+			if ret != nvml.SUCCESS {
+				if nvmlerrors.IsNotSupportError(ret) {
+					result.status = CollectionStatusUnsupported
+				} else {
+					result.status = CollectionStatusError
+				}
+				return result
+			}
+			if value == 0 {
+				signal.clear(&result)
+			}
+		}
+	}
+	return result
+}
+
+func collectP2P[D nvlinkSourceDevice](dev D, devices map[string]D) sourceObservation {
+	var unhealthy int64
+	selfUUID := dev.UUID()
+	for _, peer := range devices {
+		if peer.UUID() == selfUUID {
+			continue
+		}
+		status, ret := dev.GetP2PStatus(peer, nvml.P2P_CAPS_INDEX_NVLINK)
+		if ret != nvml.SUCCESS {
+			if nvmlerrors.IsNotSupportError(ret) {
+				return sourceObservation{status: CollectionStatusUnsupported}
+			}
+			return sourceObservation{status: CollectionStatusError}
+		}
+		if status != nvml.P2P_STATUS_OK {
+			unhealthy++
+		}
+	}
+	return sourceObservation{value: float64(unhealthy), status: CollectionStatusCollected}
+}
+
 func decodeUnsignedIntField(value nvml.FieldValue) sourceObservation {
 	ret := nvml.Return(value.NvmlReturn)
 	if ret != nvml.SUCCESS {
@@ -356,6 +484,13 @@ func decodeUnsignedIntField(value nvml.FieldValue) sourceObservation {
 
 func isUnsupportedError(err error) bool {
 	return strings.Contains(strings.ToLower(fmt.Sprint(err)), "not supported")
+}
+
+func boolMetricValue(value bool) float64 {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 var _ components.CheckResult = &checkResult{}
