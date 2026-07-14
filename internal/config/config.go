@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"reflect"
 	"strings"
 	"time"
@@ -135,6 +136,12 @@ type HealthExporterConfig struct {
 	// RetryMaxAttempts is the maximum number of retry attempts for failed requests
 	RetryMaxAttempts int `json:"retry_max_attempts"`
 
+	// CollectorEndpoint is the base URL of an OTel gateway collector (e.g. http://otel-gateway:4318).
+	// When set, the agent sends OTLP to {CollectorEndpoint}/v1/metrics and /v1/logs.
+	// Agent enrollment remains independent, and backend credentials are not forwarded
+	// to the gateway. Agent identity flows through OTLP resource attributes.
+	CollectorEndpoint string `json:"collector_endpoint,omitempty"`
+
 	// Offline mode configuration
 	// OfflineMode controls whether to use offline mode (write to files instead of HTTP endpoint)
 	OfflineMode bool `json:"offline_mode"`
@@ -171,6 +178,16 @@ func (config *Config) Validate() error {
 	}
 	// Validate health exporter configuration if present
 	if config.HealthExporter != nil {
+		if endpoint := config.HealthExporter.CollectorEndpoint; endpoint != "" {
+			parsed, err := url.Parse(endpoint)
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+				return fmt.Errorf("collector_endpoint must be an absolute HTTP(S) URL")
+			}
+			if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+				return fmt.Errorf("collector_endpoint must not contain credentials, a query, or a fragment")
+			}
+		}
+
 		// Validate health check interval
 		if config.HealthExporter.HealthCheckInterval.Duration != 0 {
 			if config.HealthExporter.HealthCheckInterval.Duration < time.Second {
@@ -416,8 +433,9 @@ func extractHealthExporterEntries(cfg *HealthExporterConfig) []ConfigEntry {
 			continue
 		}
 		key := strings.Split(jsonTag, ",")[0]
-		// Skip sensitive/enrollment-assigned field
-		if key == "auth_token" || key == "metrics_endpoint" || key == "logs_endpoint" {
+		// Skip sensitive/enrollment-assigned fields
+		if key == "auth_token" || key == "metrics_endpoint" || key == "logs_endpoint" ||
+			key == "collector_endpoint" {
 			continue
 		}
 

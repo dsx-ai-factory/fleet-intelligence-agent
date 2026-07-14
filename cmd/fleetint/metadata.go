@@ -73,11 +73,7 @@ func metadataCommand(cliContext *cli.Context) error {
 	log.Logger.Debugw("successfully read metadata")
 
 	for k, v := range metadata {
-		// Mask sensitive tokens (JWT and SAK)
-		if k == pkgmetadata.MetadataKeyToken || k == "sak_token" {
-			v = pkgmetadata.MaskToken(v)
-		}
-		fmt.Printf("%s: %s\n", k, v)
+		fmt.Printf("%s: %s\n", k, maskMetadataValue(k, v))
 	}
 
 	setKey := cliContext.String("set-key")
@@ -113,4 +109,11 @@ func metadataCommand(cliContext *cli.Context) error {
 
 	fmt.Printf("%s successfully updated metadata\n", cmdutil.CheckMark)
 	return nil
+}
+
+func maskMetadataValue(key, value string) string {
+	if key == pkgmetadata.MetadataKeyToken || key == "sak_token" {
+		return pkgmetadata.MaskToken(value)
+	}
+	return value
 }

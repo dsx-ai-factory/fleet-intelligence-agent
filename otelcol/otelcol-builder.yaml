@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# OpenTelemetry Collector Builder manifest for fleetint-otelcol.
+#
+# Build:
+#   builder --config=otelcol-builder.yaml
+#
+# The builder generates main.go + go.mod into a temp dir and compiles the binary
+# to dist.output_path. The sakauth extension is built from the local module.
+
+dist:
+  name: fleetint-otelcol
+  description: "Fleet Intelligence OTel Collector (SAK auth)"
+  output_path: ./bin
+
+extensions:
+  - gomod: github.com/NVIDIA/fleet-intelligence-agent/otelcol/auth/sakauth v0.0.0
+    path: ./auth/sakauth
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.156.0
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.156.0
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.156.0
+  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.156.0
+
+exporters:
+  - gomod: go.opentelemetry.io/collector/exporter/otlphttpexporter v0.156.0
+
+providers:
+  - gomod: go.opentelemetry.io/collector/confmap/provider/envprovider v1.62.0
+  - gomod: go.opentelemetry.io/collector/confmap/provider/fileprovider v1.62.0

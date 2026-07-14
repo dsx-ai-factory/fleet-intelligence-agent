@@ -97,6 +97,21 @@ jobs:
           fi
           echo "EOF" >> "$GITHUB_OUTPUT"
 
+      - name: Prepare fleetint-otelcol image tags
+        id: otelcol_image
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          GHCR_IMAGE="ghcr.io/${OWNER_LC}/fleetint-otelcol"
+          echo "ghcr_image=${GHCR_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
+          echo "${GHCR_IMAGE}:${VERSION}" >> "$GITHUB_OUTPUT"
+          if [ "${{ steps.version.outputs.is_prerelease }}" = "false" ]; then
+            echo "${GHCR_IMAGE}:latest" >> "$GITHUB_OUTPUT"
+          fi
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -123,6 +138,15 @@ jobs:
             VERSION=${{ steps.version.outputs.version }}
             REVISION=${{ steps.version.outputs.commit }}
             BUILD_TIMESTAMP=${{ steps.version.outputs.build_timestamp }}
+
+      - name: Build and push fleetint-otelcol image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./otelcol/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.otelcol_image.outputs.tags }}
 
       - name: Package Helm chart
         run: |
@@ -190,6 +214,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**fleet-intelligence-agent image tags:**" >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.agent_image_ghcr.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**fleetint-otelcol image tags:**" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.otelcol_image.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Helm chart (GHCR OCI):**" >> $GITHUB_STEP_SUMMARY
           echo "repo: oci://ghcr.io/${{ steps.agent_image_ghcr.outputs.owner_lc }}/charts" >> $GITHUB_STEP_SUMMARY
