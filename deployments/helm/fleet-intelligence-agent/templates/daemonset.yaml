@@ -148,6 +148,10 @@ spec:
                   fieldPath: spec.nodeName
             - name: IS_RUNTIME_K8S
               value: "true"
+            {{- if .Values.otelGateway.enabled }}
+            - name: FLEETINT_COLLECTOR_ENDPOINT
+              value: {{ printf "http://%s-otel-gateway:%d" (include "fleet-intelligence-agent.fullname" .) (int .Values.otelGateway.service.port) | quote }}
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.ports.http }}

@@ -1,9 +1,11 @@
 .git
 .github
+.cache
 coverage
 dist
 bin
 build
+otelcol/bin
 **/*.test
 **/*.out
 **/*.log

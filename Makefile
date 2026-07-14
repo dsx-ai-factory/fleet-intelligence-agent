@@ -17,7 +17,7 @@ ROOTDIR=$(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 BUILD_TIMESTAMP ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 VERSION ?= $(shell git describe --match 'v[0-9]*' --dirty='.m' --always)
-REVISION=$(shell git rev-parse HEAD)$(shell if ! git diff --no-ext-diff --quiet --exit-code; then echo .m; fi)
+REVISION ?= $(shell git rev-parse HEAD)$(shell if ! git diff --no-ext-diff --quiet --exit-code; then echo .m; fi)
 PACKAGE=github.com/NVIDIA/fleet-intelligence-agent
 
 ifneq "$(strip $(shell command -v $(GO) 2>/dev/null))" ""
@@ -118,7 +118,7 @@ docker-test: ## build test image and run tests in container
 		-t $(TEST_IMAGE) \
 		.
 	@echo "Running tests..."
-	@$(DOCKER) run --rm $(TEST_IMAGE)
+	@$(DOCKER) run --rm -e VERSION=$(VERSION) -e REVISION=$(REVISION) $(TEST_IMAGE)
 
 # Specific target for fleetint (your main binary)
 fleetint: bin/fleetint ## build fleetint binary

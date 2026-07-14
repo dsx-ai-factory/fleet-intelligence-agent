@@ -786,6 +786,36 @@ func TestExportNow(t *testing.T) {
 
 // TestRefreshConfigFromMetadata tests the refreshConfigFromMetadata function
 func TestRefreshConfigFromMetadata(t *testing.T) {
+	t.Run("collector endpoint overrides backend metadata and credentials", func(t *testing.T) {
+		tmpDB := setupTestDB(t)
+		defer tmpDB.Close()
+
+		ctx := context.Background()
+		require.NoError(t, pkgmetadata.SetMetadata(ctx, tmpDB, "backend_base_url", "https://backend.example.com"))
+		require.NoError(t, pkgmetadata.SetMetadata(ctx, tmpDB, pkgmetadata.MetadataKeyToken, "backend-jwt"))
+
+		cfg := &config.HealthExporterConfig{
+			Interval:          metav1.Duration{Duration: time.Minute},
+			Timeout:           metav1.Duration{Duration: 30 * time.Second},
+			CollectorEndpoint: "http://fleetint-otel-gateway:4318/",
+			AuthToken:         "stale-token",
+		}
+		exporter, err := New(ctx,
+			WithConfig(cfg),
+			WithDatabaseConnections(tmpDB, tmpDB),
+			WithMachineID("test-machine-id"),
+		)
+		require.NoError(t, err)
+
+		he := exporter.(*healthExporter)
+		he.refreshConfigFromMetadata(ctx)
+
+		assert.Equal(t, "http://fleetint-otel-gateway:4318/v1/metrics", he.options.config.MetricsEndpoint)
+		assert.Equal(t, "http://fleetint-otel-gateway:4318/v1/logs", he.options.config.LogsEndpoint)
+		assert.Empty(t, he.options.config.AuthToken)
+		require.NoError(t, exporter.Stop())
+	})
+
 	t.Run("skips when no database connection", func(t *testing.T) {
 		cfg := &config.HealthExporterConfig{
 			Interval: metav1.Duration{Duration: 1 * time.Minute},

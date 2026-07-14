@@ -1,0 +1,124 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+{{- if .Values.otelGateway.enabled }}
+{{- if and (not .Values.otelGateway.enroll.sakToken) (not .Values.otelGateway.enroll.existingSecret) }}
+{{- fail "otelGateway.enroll.sakToken or otelGateway.enroll.existingSecret is required when otelGateway.enabled=true" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fleet-intelligence-agent.fullname" . }}-otel-gateway
+  labels:
+    {{- include "fleet-intelligence-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-gateway
+spec:
+  replicas: {{ .Values.otelGateway.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "fleet-intelligence-agent.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: otel-gateway
+  template:
+    metadata:
+      labels:
+        {{- include "fleet-intelligence-agent.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: otel-gateway
+      annotations:
+        # Force pod restart when the collector config changes.
+        checksum/config: {{ include (print $.Template.BasePath "/otel-gateway-configmap.yaml") . | sha256sum }}
+        {{- if not .Values.otelGateway.enroll.existingSecret }}
+        checksum/sak-secret: {{ include (print $.Template.BasePath "/otel-gateway-secret.yaml") . | sha256sum }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: {{ .Values.otelGateway.terminationGracePeriodSeconds }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "fleet-intelligence-agent.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: otel-gateway
+      containers:
+        - name: otel-gateway
+          image: "{{ .Values.otelGateway.image.repository }}:{{ default .Chart.AppVersion .Values.otelGateway.image.tag }}"
+          imagePullPolicy: {{ .Values.otelGateway.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          args:
+            - --config=/etc/otelcol/config.yaml
+          env:
+            - name: BACKEND_ENDPOINT
+              value: {{ required "otelGateway.backendEndpoint is required when otelGateway.enabled=true" .Values.otelGateway.backendEndpoint | trimSuffix "/" | quote }}
+            - name: ENROLL_ENDPOINT
+              value: {{ required "otelGateway.enroll.endpoint is required when otelGateway.enabled=true" .Values.otelGateway.enroll.endpoint | quote }}
+            - name: SAK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.otelGateway.enroll.existingSecret | default (printf "%s-otel-gateway-sak" (include "fleet-intelligence-agent.fullname" .)) }}
+                  key: sak-token
+          ports:
+            - name: otlp-http
+              containerPort: {{ .Values.otelGateway.service.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /
+              port: 13133
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 30
+          resources:
+            {{- toYaml .Values.otelGateway.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "fleet-intelligence-agent.fullname" . }}-otel-gateway
+{{- end }}

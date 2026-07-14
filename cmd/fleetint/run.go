@@ -219,6 +219,14 @@ func configureHealthExporterFromEnv(cfg *config.Config) error {
 		return err
 	}
 
+	// OTel gateway collector mode: when set, metrics/logs are routed to the gateway
+	// instead of the backend directly. Enrollment remains independent for inventory
+	// and attestation; backend credentials are not forwarded to the gateway.
+	if val := os.Getenv("FLEETINT_COLLECTOR_ENDPOINT"); val != "" {
+		he.CollectorEndpoint = val
+		log.Logger.Infow("set OTel gateway collector endpoint from env", "collector_endpoint", val)
+	}
+
 	return nil
 }
 

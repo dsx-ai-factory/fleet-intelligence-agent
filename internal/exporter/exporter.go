@@ -25,6 +25,7 @@ package exporter
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
@@ -272,6 +273,17 @@ func (e *healthExporter) exportToHTTP(ctx context.Context, data *collector.Healt
 
 // refreshConfigFromMetadata updates the exporter configuration from metadata table
 func (e *healthExporter) refreshConfigFromMetadata(ctx context.Context) {
+	// Collector mode is explicit runtime configuration and must take precedence
+	// over enrollment metadata, which points directly at the backend.
+	if collectorEndpoint := strings.TrimRight(e.options.config.CollectorEndpoint, "/"); collectorEndpoint != "" {
+		e.options.config.MetricsEndpoint = collectorEndpoint + "/v1/metrics"
+		e.options.config.LogsEndpoint = collectorEndpoint + "/v1/logs"
+		// Authentication to the backend is owned by the gateway. Do not forward
+		// a node JWT to the cluster-local collector.
+		e.options.config.AuthToken = ""
+		return
+	}
+
 	// Use the passed database connection instead of opening a new one
 	if e.options.dbRO == nil {
 		log.Logger.Debugw("no database connection available for metadata refresh")
