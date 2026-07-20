@@ -21,6 +21,20 @@ Built on top of [leptonai/gpud](https://github.com/leptonai/gpud)
 - Non-intrusive: Read-only operations, no system modifications
 - Production-ready: 24/7 datacenter operation
 
+## Persistent Local State
+
+The agent stores its node identity, enrollment metadata, and retained metrics and
+events in `/var/lib/fleetint/fleetint.state` by default. The
+`/var/lib/fleetint` directory must use persistent local storage that survives
+agent and host restarts, reboots, upgrades, and reinstalls.
+
+Deleting or replacing this directory removes the persisted node identity and
+enrollment credentials. The agent may then generate a new node identity and
+create a separate record for the same physical node in Fleet Intelligence. When
+using custom images, installers, or container deployments, preserve or mount
+this directory from persistent host storage and restrict access because it
+contains enrollment credentials.
+
 ## Supported Platforms
 
 | OS Family | Supported Versions | Architecture | GPU |
