@@ -40,7 +40,7 @@ func ComputeHash(snap *Snapshot) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("canonicalize GPU inventory: %w", err)
 	}
-	normalized.Resources.DiskInfo.BlockDevices, err = sortedByCanonicalJSON(snap.Resources.DiskInfo.BlockDevices)
+	normalized.Resources.DiskInfo.BlockDevices, err = normalizedBlockDevices(snap.Resources.DiskInfo.BlockDevices)
 	if err != nil {
 		return "", fmt.Errorf("canonicalize disk inventory: %w", err)
 	}
@@ -55,6 +55,18 @@ func ComputeHash(snap *Snapshot) (string, error) {
 	}
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func normalizedBlockDevices(values []BlockDevice) ([]BlockDevice, error) {
+	if values == nil {
+		return nil, nil
+	}
+
+	normalized := append([]BlockDevice(nil), values...)
+	for i := range normalized {
+		normalized[i].Parents = sortedStrings(values[i].Parents)
+	}
+	return sortedByCanonicalJSON(normalized)
 }
 
 func sortedStrings(values []string) []string {

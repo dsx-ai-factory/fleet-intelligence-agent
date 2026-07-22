@@ -82,8 +82,8 @@ func TestComputeHashIgnoresSetLikeInventoryListOrder(t *testing.T) {
 				{UUID: "GPU-b", BusID: "2"},
 			}},
 			DiskInfo: DiskInfo{BlockDevices: []BlockDevice{
-				{Name: "/dev/a", WWN: "wwn-a", Parents: []string{"parent-a-1", "parent-a-2"}},
-				{Name: "/dev/b", WWN: "wwn-b", Parents: []string{"parent-b-1", "parent-b-2"}},
+				{Name: "/dev/a", WWN: "wwn-a", Parents: []string{"parent-a-2", "parent-a-1"}},
+				{Name: "/dev/b", WWN: "wwn-b", Parents: []string{"parent-b-2", "parent-b-1"}},
 			}},
 			NICInfo: NICInfo{PrivateIPInterfaces: []NICInterface{
 				{Interface: "eth0", MAC: "00:00:00:00:00:01", IP: "10.0.0.1"},
@@ -102,6 +102,8 @@ func TestComputeHashIgnoresSetLikeInventoryListOrder(t *testing.T) {
 	require.Equal(t, []string{"gpu", "cpu"}, base.AgentConfig.EnabledComponents)
 	require.Equal(t, "GPU-b", base.Resources.GPUInfo.GPUs[0].UUID)
 	require.Equal(t, "/dev/b", base.Resources.DiskInfo.BlockDevices[0].Name)
+	require.Equal(t, []string{"parent-b-1", "parent-b-2"}, base.Resources.DiskInfo.BlockDevices[0].Parents)
+	require.Equal(t, []string{"parent-a-2", "parent-a-1"}, reordered.Resources.DiskInfo.BlockDevices[0].Parents)
 	require.Equal(t, "eth1", base.Resources.NICInfo.PrivateIPInterfaces[0].Interface)
 }
 
@@ -125,10 +127,17 @@ func TestComputeHashDetectsInventoryItemChanges(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, baseHash, changedGPUHash)
 
-	changedParentOrder := *base
-	changedParentOrder.Resources.DiskInfo.BlockDevices = append([]BlockDevice(nil), base.Resources.DiskInfo.BlockDevices...)
-	changedParentOrder.Resources.DiskInfo.BlockDevices[0].Parents = []string{"root-parent", "immediate-parent"}
-	changedParentHash, err := ComputeHash(&changedParentOrder)
+	reorderedParents := *base
+	reorderedParents.Resources.DiskInfo.BlockDevices = append([]BlockDevice(nil), base.Resources.DiskInfo.BlockDevices...)
+	reorderedParents.Resources.DiskInfo.BlockDevices[0].Parents = []string{"root-parent", "immediate-parent"}
+	reorderedParentHash, err := ComputeHash(&reorderedParents)
+	require.NoError(t, err)
+	require.Equal(t, baseHash, reorderedParentHash)
+
+	changedParent := *base
+	changedParent.Resources.DiskInfo.BlockDevices = append([]BlockDevice(nil), base.Resources.DiskInfo.BlockDevices...)
+	changedParent.Resources.DiskInfo.BlockDevices[0].Parents = []string{"different-parent", "root-parent"}
+	changedParentHash, err := ComputeHash(&changedParent)
 	require.NoError(t, err)
 	require.NotEqual(t, baseHash, changedParentHash)
 }
