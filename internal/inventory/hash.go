@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -31,6 +32,22 @@ func ComputeHash(snap *Snapshot) (string, error) {
 	normalized := *snap
 	normalized.CollectedAt = time.Time{}
 	normalized.InventoryHash = ""
+	normalized.AgentConfig.EnabledComponents = sortedStrings(snap.AgentConfig.EnabledComponents)
+	normalized.AgentConfig.DisabledComponents = sortedStrings(snap.AgentConfig.DisabledComponents)
+
+	var err error
+	normalized.Resources.GPUInfo.GPUs, err = sortedByCanonicalJSON(snap.Resources.GPUInfo.GPUs)
+	if err != nil {
+		return "", fmt.Errorf("canonicalize GPU inventory: %w", err)
+	}
+	normalized.Resources.DiskInfo.BlockDevices, err = normalizedBlockDevices(snap.Resources.DiskInfo.BlockDevices)
+	if err != nil {
+		return "", fmt.Errorf("canonicalize disk inventory: %w", err)
+	}
+	normalized.Resources.NICInfo.PrivateIPInterfaces, err = sortedByCanonicalJSON(snap.Resources.NICInfo.PrivateIPInterfaces)
+	if err != nil {
+		return "", fmt.Errorf("canonicalize NIC inventory: %w", err)
+	}
 
 	payload, err := json.Marshal(normalized)
 	if err != nil {
@@ -38,4 +55,56 @@ func ComputeHash(snap *Snapshot) (string, error) {
 	}
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func normalizedBlockDevices(values []BlockDevice) ([]BlockDevice, error) {
+	if values == nil {
+		return nil, nil
+	}
+
+	normalized := append([]BlockDevice(nil), values...)
+	for i := range normalized {
+		normalized[i].Parents = sortedStrings(values[i].Parents)
+	}
+	return sortedByCanonicalJSON(normalized)
+}
+
+func sortedStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	sorted := append([]string(nil), values...)
+	sort.Strings(sorted)
+	return sorted
+}
+
+// sortedByCanonicalJSON treats a slice as order-insensitive for hashing purposes.
+// Comparing the complete serialized values avoids relying on optional identity
+// fields and automatically includes fields added to an inventory item in the future.
+func sortedByCanonicalJSON[T any](values []T) ([]T, error) {
+	if values == nil {
+		return nil, nil
+	}
+
+	type sortableValue struct {
+		value   T
+		encoded string
+	}
+	items := make([]sortableValue, len(values))
+	for i, value := range values {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return nil, fmt.Errorf("marshal inventory list item: %w", err)
+		}
+		items[i] = sortableValue{value: value, encoded: string(encoded)}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].encoded < items[j].encoded
+	})
+
+	sorted := make([]T, len(items))
+	for i := range items {
+		sorted[i] = items[i].value
+	}
+	return sorted, nil
 }
