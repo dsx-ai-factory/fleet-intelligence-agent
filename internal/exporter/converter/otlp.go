@@ -396,8 +396,10 @@ func (c *otlpConverter) convertToOTLPLogs(data *collector.HealthData) []*logsv1.
 
 			health := componentInfo["health"]
 			reason := componentInfo["reason"]
+			errorMsg := componentInfo["error"]
 			timeVal := componentInfo["time"]
 			extraInfo := componentInfo["extra_info"]
+			suggestedActions := componentInfo["suggested_actions"]
 			incidents := componentInfo["incidents"]
 
 			attributes := []*commonv1.KeyValue{
@@ -428,6 +430,15 @@ func (c *otlpConverter) convertToOTLPLogs(data *collector.HealthData) []*logsv1.
 			}
 
 			// Add optional fields
+			if errStr, ok := errorMsg.(string); ok && errStr != "" {
+				attributes = append(attributes, &commonv1.KeyValue{
+					Key: "error",
+					Value: &commonv1.AnyValue{
+						Value: &commonv1.AnyValue_StringValue{StringValue: errStr},
+					},
+				})
+			}
+
 			if timeVal != nil {
 				attributes = append(attributes, &commonv1.KeyValue{
 					Key: "time",
@@ -442,6 +453,18 @@ func (c *otlpConverter) convertToOTLPLogs(data *collector.HealthData) []*logsv1.
 				if err == nil {
 					attributes = append(attributes, &commonv1.KeyValue{
 						Key: "extra_info",
+						Value: &commonv1.AnyValue{
+							Value: &commonv1.AnyValue_StringValue{StringValue: string(jsonBytes)},
+						},
+					})
+				}
+			}
+
+			if suggestedActions != nil {
+				jsonBytes, err := json.Marshal(suggestedActions)
+				if err == nil && string(jsonBytes) != "null" {
+					attributes = append(attributes, &commonv1.KeyValue{
+						Key: "suggested_actions",
 						Value: &commonv1.AnyValue{
 							Value: &commonv1.AnyValue_StringValue{StringValue: string(jsonBytes)},
 						},

@@ -279,15 +279,21 @@ func (c *collector) collectComponentData(data *HealthData) error {
 
 		health := "Unknown"
 		reason := "No health data"
+		errorMsg := ""
 		var timeValue interface{}
 		var extraInfo interface{} = map[string]interface{}{} // Default to empty map for JSON marshaling
+		var suggestedActions interface{}
 		var incidents interface{} = []apiv1.HealthStateIncident{}
 
 		if len(healthStates) > 0 {
 			firstState := healthStates[0]
 			health = string(firstState.Health)
 			reason = firstState.Reason
+			errorMsg = firstState.Error
 			timeValue = firstState.Time
+			if firstState.SuggestedActions != nil {
+				suggestedActions = firstState.SuggestedActions
+			}
 			if len(firstState.Incidents) > 0 {
 				incidents = firstState.Incidents
 			}
@@ -314,12 +320,14 @@ func (c *collector) collectComponentData(data *HealthData) error {
 		}
 
 		componentData[componentName] = map[string]interface{}{
-			"component_name": componentName,
-			"health":         health,
-			"reason":         reason,
-			"time":           timeValue,
-			"extra_info":     extraInfo,
-			"incidents":      incidents,
+			"component_name":    componentName,
+			"health":            health,
+			"reason":            reason,
+			"error":             errorMsg,
+			"time":              timeValue,
+			"extra_info":        extraInfo,
+			"suggested_actions": suggestedActions,
+			"incidents":         incidents,
 		}
 	}
 
