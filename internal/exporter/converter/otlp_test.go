@@ -302,11 +302,16 @@ func TestOTLPConverter_Convert_WithComponentData(t *testing.T) {
 			"gpu": map[string]any{
 				"time":           metav1.Time{Time: time.Now()},
 				"component_name": "gpu",
-				"health":         "healthy",
-				"reason":         "All checks passed",
+				"health":         "Unhealthy",
+				"reason":         "failed to get recent events",
+				"error":          "database is locked",
 				"extra_info": map[string]any{
 					"device_uuid": "PCI:0000:04:00",
 					"data":        rawData,
+				},
+				"suggested_actions": &apiv1.SuggestedActions{
+					Description:   "reboot the node",
+					RepairActions: []apiv1.RepairActionType{apiv1.RepairActionTypeRebootSystem},
 				},
 				"incidents": []apiv1.HealthStateIncident{
 					{
@@ -335,11 +340,18 @@ func TestOTLPConverter_Convert_WithComponentData(t *testing.T) {
 	// Find component data log
 	found := false
 	for _, log := range logs {
-		if contains(log.Body.GetStringValue(), "gpu") && contains(log.Body.GetStringValue(), "healthy") {
+		if contains(log.Body.GetStringValue(), "gpu") && contains(log.Body.GetStringValue(), "Unhealthy") {
+			assert.Equal(t, "database is locked", findAttribute(t, log.Attributes, "error").GetStringValue())
+
 			extraInfo := findAttribute(t, log.Attributes, "extra_info").GetStringValue()
 			require.NotEmpty(t, extraInfo)
 			assert.Contains(t, extraInfo, `"device_uuid":"PCI:0000:04:00"`)
 			assert.Contains(t, extraInfo, `"data":"{\"time\":\"2026-02-20T23:22:44Z\",\"data_source\":\"kmsg\",\"xid\":149}"`)
+
+			suggestedActions := findAttribute(t, log.Attributes, "suggested_actions").GetStringValue()
+			require.NotEmpty(t, suggestedActions)
+			assert.Contains(t, suggestedActions, `"description":"reboot the node"`)
+			assert.Contains(t, suggestedActions, `"REBOOT_SYSTEM"`)
 
 			incidents := findAttribute(t, log.Attributes, "incidents").GetArrayValue()
 			require.NotNil(t, incidents)

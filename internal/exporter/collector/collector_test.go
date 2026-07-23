@@ -440,8 +440,13 @@ func TestCollector_CollectComponentData_WithComponents(t *testing.T) {
 				Component: "test-component",
 				Health:    "Healthy",
 				Reason:    "All checks passed",
+				Error:     "detailed error info",
 				Time:      metav1.Time{Time: time.Now()},
 				ExtraInfo: map[string]string{"key": "value"},
+				SuggestedActions: &apiv1.SuggestedActions{
+					Description:   "reboot the node",
+					RepairActions: []apiv1.RepairActionType{apiv1.RepairActionTypeRebootSystem},
+				},
 				Incidents: []apiv1.HealthStateIncident{
 					{
 						EntityID: "GPU-1234",
@@ -472,6 +477,11 @@ func TestCollector_CollectComponentData_WithComponents(t *testing.T) {
 	assert.Equal(t, "test-component", dataMap["component_name"])
 	assert.Equal(t, "Healthy", dataMap["health"])
 	assert.Equal(t, "All checks passed", dataMap["reason"])
+	assert.Equal(t, "detailed error info", dataMap["error"])
+	suggestedActions, ok := dataMap["suggested_actions"].(*apiv1.SuggestedActions)
+	require.True(t, ok, "suggested_actions should preserve the typed SuggestedActions pointer")
+	require.NotNil(t, suggestedActions)
+	assert.Equal(t, "reboot the node", suggestedActions.Description)
 	incidents, ok := dataMap["incidents"].([]apiv1.HealthStateIncident)
 	require.True(t, ok, "incidents should preserve the typed health incidents slice")
 	require.Len(t, incidents, 1)
@@ -504,6 +514,8 @@ func TestCollector_CollectComponentData_NoHealthStates(t *testing.T) {
 	compData := data.ComponentData["empty-component"].(map[string]interface{})
 	assert.Equal(t, "Unknown", compData["health"])
 	assert.Equal(t, "No health data", compData["reason"])
+	assert.Equal(t, "", compData["error"])
+	assert.Nil(t, compData["suggested_actions"])
 }
 
 func TestCollector_AllFeaturesEnabled(t *testing.T) {
