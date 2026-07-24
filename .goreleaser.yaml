@@ -151,6 +151,9 @@ release:
   github:
     owner: NVIDIA
     name: fleet-intelligence-agent
+  # Keep unsigned GoReleaser output private until the release workflow replaces
+  # DEB/RPM assets with their verified 3S-signed versions and refreshes checksums.
+  draft: true
   header: |
     ## NVIDIA Fleet Intelligence Agent v{{.Version}}
     
