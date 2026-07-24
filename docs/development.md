@@ -101,8 +101,17 @@ The GitHub Actions workflow will:
 - Build packages for all supported platforms (amd64, arm64)
 - Create `.deb` packages for Ubuntu
 - Create `.rpm` packages for RHEL/Rocky/AlmaLinux 8, 9, 10
+- Keep the GitHub release in draft state while 3S signs every DEB and RPM
+- Verify each package with the pinned Fleet Intelligence public key
+- Regenerate `checksums.txt` after package signing
 - Generate binary tarballs
-- Publish the release with all artifacts to GitHub Releases
+- Replace the draft package and checksum assets, then publish the verified release
+
+The signing workflow uses the `LINUX_PACKAGE_FLEET_INTELLIGENCE` 3S job and
+the `SIGNING_LINUX_PACKAGE_FLEET_INTELLIGENCE` SSA scope by default. CI must
+provide `NVSEC_SSA_CLIENT_ID` and `NVSEC_SSA_CLIENT_SECRET` as GitHub Actions
+secrets. The public verification key is stored at
+`deployments/packages/keys/fleet-intelligence.pub.asc`.
 
 ## Testing
 

@@ -55,7 +55,82 @@ jobs:
         env:
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
+
+      - name: Set up Python for nvsec
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install nvsec
+        run: |
+          python -m venv "$RUNNER_TEMP/nvsec-venv"
+          "$RUNNER_TEMP/nvsec-venv/bin/pip" install nvsec \
+            --index-url "https://gitlab-master.nvidia.com/api/v4/projects/25923/packages/pypi/simple" \
+            --extra-index-url "https://urm.nvidia.com/artifactory/api/pypi/sw-cftt-pypi-local/simple"
+          echo "$RUNNER_TEMP/nvsec-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Sign and verify DEB and RPM packages
+        run: |
+          scripts/sign-linux-packages.sh \
+            dist \
+            deployments/packages/keys/fleet-intelligence.pub.asc
+        env:
+          NVSEC_SSA_CLIENT_ID: ${{ secrets.NVSEC_SSA_CLIENT_ID }}
+          NVSEC_SSA_CLIENT_SECRET: ${{ secrets.NVSEC_SSA_CLIENT_SECRET }}
+          NVSEC_LINUX_PACKAGE_SSA_SCOPE: ${{ vars.NVSEC_LINUX_PACKAGE_SSA_SCOPE || 'SIGNING_LINUX_PACKAGE_FLEET_INTELLIGENCE' }}
+          NVSEC_LINUX_PACKAGE_JOB_TYPE: ${{ vars.NVSEC_LINUX_PACKAGE_JOB_TYPE || 'LINUX_PACKAGE_FLEET_INTELLIGENCE' }}
+          NSPECT_ID: ${{ vars.NSPECT_ID }}
+
+      - name: Refresh checksums for signed packages
+        run: |
+          scripts/refresh-checksums.sh \
+            dist/checksums.txt \
+            deployments/packages/keys/fleet-intelligence.pub.asc \
+            scripts/verify-linux-package-signature.sh
+
+      - name: Replace signed assets in draft release
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const release = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag: context.ref.replace("refs/tags/", ""),
+            });
+            if (!release.data.draft) {
+              throw new Error("Refusing to replace assets in a published release");
+            }
+
+            const files = fs.readdirSync("dist")
+              .filter((name) => name.endsWith(".deb") || name.endsWith(".rpm") || name === "checksums.txt")
+              .map((name) => path.join("dist", name));
+            files.push(
+              "deployments/packages/keys/fleet-intelligence.pub.asc",
+              "scripts/verify-linux-package-signature.sh",
+            );
+
+            const existing = new Map(release.data.assets.map((asset) => [asset.name, asset.id]));
+            for (const file of files) {
+              const name = path.basename(file);
+              const existingID = existing.get(name);
+              if (existingID) {
+                await github.rest.repos.deleteReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  asset_id: existingID,
+                });
+              }
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.data.id,
+                name,
+                data: fs.readFileSync(file),
+              });
+            }
       - name: Get version and commit info
         id: version
         run: |
@@ -203,7 +278,27 @@ jobs:
             "sw-dgxc-gpuhealth-generic-local/KITMAKER/release/fleetint/linux-sbsa/${{ steps.version.outputs.version }}/" \
             --flat=true \
             --target-props "component_name=fleetint;branch=${{ steps.version.outputs.branch }};os=linux;arch=sbsa;platform=linux-sbsa;version=${{ steps.version.outputs.version }};changelist=${{ steps.version.outputs.commit }};source=${{ steps.version.outputs.source }};category=toolkit"
-      
+
+      - name: Publish verified GitHub release
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const release = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag: context.ref.replace("refs/tags/", ""),
+            });
+            if (!release.data.draft) {
+              throw new Error("Release is already published");
+            }
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release.data.id,
+              draft: false,
+            });
+
       - name: Summary
         run: |
           echo "### Release Build Complete" >> $GITHUB_STEP_SUMMARY
@@ -221,6 +316,8 @@ jobs:
           echo "**Helm chart (GHCR OCI):**" >> $GITHUB_STEP_SUMMARY
           echo "repo: oci://ghcr.io/${{ steps.agent_image_ghcr.outputs.owner_lc }}/charts" >> $GITHUB_STEP_SUMMARY
           echo "chart: fleet-intelligence-agent:${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Linux package signatures:** verified with Fleet Intelligence key \`087199B3\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           if [[ "${{ steps.version.outputs.is_prerelease }}" == "true" ]]; then
