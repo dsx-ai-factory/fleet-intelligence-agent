@@ -102,18 +102,23 @@ jobs:
           NSPECT_ID: ${{ vars.NSPECT_ID }}
 
       - name: Replace signed assets in draft release
-        uses: actions/github-script@v7
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require("fs");
             const path = require("path");
-            const release = await github.rest.repos.getReleaseByTag({
+            const tag = context.ref.replace("refs/tags/", "");
+            const releases = await github.paginate(github.rest.repos.listReleases, {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              tag: context.ref.replace("refs/tags/", ""),
+              per_page: 100,
             });
-            if (!release.data.draft) {
+            const release = releases.find((candidate) => candidate.tag_name === tag);
+            if (!release) {
+              throw new Error(`Draft release not found for tag ${tag}`);
+            }
+            if (!release.draft) {
               throw new Error("Refusing to replace assets in a published release");
             }
 
@@ -130,7 +135,7 @@ jobs:
               "scripts/verify-linux-package-signature.sh",
             );
 
-            const existing = new Map(release.data.assets.map((asset) => [asset.name, asset.id]));
+            const existing = new Map(release.assets.map((asset) => [asset.name, asset.id]));
             for (const file of files) {
               const name = path.basename(file);
               const existingID = existing.get(name);
@@ -144,7 +149,7 @@ jobs:
               await github.rest.repos.uploadReleaseAsset({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                release_id: release.data.id,
+                release_id: release.id,
                 name,
                 data: fs.readFileSync(file),
               });
@@ -274,22 +279,27 @@ jobs:
             --target-props "component_name=fleetint;branch=${{ steps.version.outputs.branch }};os=linux;arch=sbsa;platform=linux-sbsa;version=${{ steps.version.outputs.version }};changelist=${{ steps.version.outputs.commit }};source=${{ steps.version.outputs.source }};category=toolkit"
 
       - name: Publish verified GitHub release
-        uses: actions/github-script@v7
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const release = await github.rest.repos.getReleaseByTag({
+            const tag = context.ref.replace("refs/tags/", "");
+            const releases = await github.paginate(github.rest.repos.listReleases, {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              tag: context.ref.replace("refs/tags/", ""),
+              per_page: 100,
             });
-            if (!release.data.draft) {
+            const release = releases.find((candidate) => candidate.tag_name === tag);
+            if (!release) {
+              throw new Error(`Draft release not found for tag ${tag}`);
+            }
+            if (!release.draft) {
               throw new Error("Release is already published");
             }
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              release_id: release.data.id,
+              release_id: release.id,
               draft: false,
             });
 
