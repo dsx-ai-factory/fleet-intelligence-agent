@@ -76,6 +76,18 @@ verify_deb() {
     exit 1
   }
 
+  require_signed_member() {
+    local member_pattern="$1"
+    local member_description="$2"
+    awk -v pattern="$member_pattern" '$4 ~ pattern { found = 1 } END { exit !found }' "$manifest_file" || {
+      echo "DEB signature does not cover required member: $member_description" >&2
+      exit 1
+    }
+  }
+  require_signed_member '^debian-binary$' 'debian-binary'
+  require_signed_member '^control[.]tar([.](gz|xz|zst|bz2|lzma))?$' 'control.tar.*'
+  require_signed_member '^data[.]tar([.](gz|xz|zst|bz2|lzma))?$' 'data.tar.*'
+
   while read -r expected_md5 expected_sha1 expected_size member_name; do
     [[ "$member_name" != */* && "$member_name" != "_gpgbuilder" ]] || {
       echo "Unsafe DEB member in signed manifest: $member_name" >&2
@@ -121,7 +133,7 @@ verify_rpm() {
     echo "RPM signature was not made by the expected Fleet Intelligence key" >&2
     exit 1
   }
-  if grep -Eiq "NOT OK|NOKEY|NOTTRUSTED" "$rpm_status"; then
+  if grep -Eiq "NOT OK|NOKEY|NOTTRUSTED|BAD" "$rpm_status"; then
     echo "RPM signature or digest validation failed" >&2
     exit 1
   fi

@@ -106,6 +106,7 @@ Then verify the checksum manifest, package digest, and embedded package
 signature:
 
 ```bash
+gpg --show-keys --fingerprint fleet-intelligence.pub.asc
 gpg --import fleet-intelligence.pub.asc
 gpg --verify checksums.txt.asc checksums.txt
 sha256sum -c --ignore-missing checksums.txt
