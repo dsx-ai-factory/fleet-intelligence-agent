@@ -56,15 +56,18 @@ jobs:
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Python for nvsec
-        uses: actions/setup-python@v5
+      - name: Set up uv for nvsec
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          python-version: "3.13"
+          version: "0.11.31"
 
       - name: Install nvsec
         run: |
-          python -m venv "$RUNNER_TEMP/nvsec-venv"
-          "$RUNNER_TEMP/nvsec-venv/bin/pip" install "nvsec==2.9.2" \
+          uv python install 3.13
+          uv venv --python 3.13 "$RUNNER_TEMP/nvsec-venv"
+          uv pip install \
+            --python "$RUNNER_TEMP/nvsec-venv/bin/python" \
+            "nvsec==2.9.2" \
             --index-url "https://gitlab-master.nvidia.com/api/v4/projects/25923/packages/pypi/simple" \
             --extra-index-url "https://urm.nvidia.com/artifactory/api/pypi/sw-cftt-pypi-local/simple"
           echo "$RUNNER_TEMP/nvsec-venv/bin" >> "$GITHUB_PATH"
