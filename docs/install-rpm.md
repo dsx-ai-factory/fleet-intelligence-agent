@@ -71,8 +71,8 @@ After adding the CUDA repository, package dependencies (`datacenter-gpu-manager-
 
 ## Install package
 
-Download the package, `fleet-intelligence.pub.asc`,
-`verify-linux-package-signature.sh`, and `checksums.txt` from the
+Download the package, `fleet-intelligence.pub.asc`, `checksums.txt`,
+`checksums.txt.asc`, and `verify-linux-package-signature.sh` from the
 [latest stable release](https://github.com/NVIDIA/fleet-intelligence-agent/releases/latest).
 Confirm that the public key fingerprint is:
 
@@ -83,6 +83,8 @@ FE0C 8B74 CA66 357C 13BE 197D CCE3 C963 0871 99B3
 Verify the package signature and digest before installation:
 
 ```bash
+gpg --import fleet-intelligence.pub.asc
+gpg --verify checksums.txt.asc checksums.txt
 sha256sum -c --ignore-missing checksums.txt
 chmod 755 verify-linux-package-signature.sh
 ./verify-linux-package-signature.sh \

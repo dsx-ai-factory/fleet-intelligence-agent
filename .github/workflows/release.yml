@@ -81,12 +81,24 @@ jobs:
           NVSEC_LINUX_PACKAGE_JOB_TYPE: ${{ vars.NVSEC_LINUX_PACKAGE_JOB_TYPE || 'LINUX_PACKAGE_FLEET_INTELLIGENCE' }}
           NSPECT_ID: ${{ vars.NSPECT_ID }}
 
-      - name: Refresh checksums for signed packages
+      - name: Refresh checksums for signed release artifacts
         run: |
           scripts/refresh-checksums.sh \
             dist/checksums.txt \
             deployments/packages/keys/fleet-intelligence.pub.asc \
             scripts/verify-linux-package-signature.sh
+
+      - name: Sign and verify checksum manifest
+        run: |
+          scripts/sign-checksum-manifest.sh \
+            dist/checksums.txt \
+            deployments/packages/keys/fleet-intelligence.pub.asc
+        env:
+          NVSEC_SSA_CLIENT_ID: ${{ secrets.NVSEC_SSA_CLIENT_ID }}
+          NVSEC_SSA_CLIENT_SECRET: ${{ secrets.NVSEC_SSA_CLIENT_SECRET }}
+          NVSEC_CHECKSUM_SSA_SCOPE: ${{ vars.NVSEC_CHECKSUM_SSA_SCOPE || 'SIGNING_FLEET_INTELLIGENCE' }}
+          NVSEC_CHECKSUM_JOB_TYPE: ${{ vars.NVSEC_CHECKSUM_JOB_TYPE || 'FLEET_INTELLIGENCE' }}
+          NSPECT_ID: ${{ vars.NSPECT_ID }}
 
       - name: Replace signed assets in draft release
         uses: actions/github-script@v7
@@ -105,7 +117,12 @@ jobs:
             }
 
             const files = fs.readdirSync("dist")
-              .filter((name) => name.endsWith(".deb") || name.endsWith(".rpm") || name === "checksums.txt")
+              .filter((name) =>
+                name.endsWith(".deb") ||
+                name.endsWith(".rpm") ||
+                name === "checksums.txt.asc" ||
+                name === "checksums.txt"
+              )
               .map((name) => path.join("dist", name));
             files.push(
               "deployments/packages/keys/fleet-intelligence.pub.asc",
@@ -245,7 +262,7 @@ jobs:
             "sw-dgxc-gpuhealth-generic-local/KITMAKER/release/fleetint/linux-x86_64/${{ steps.version.outputs.version }}/" \
             --flat=true \
             --target-props "component_name=fleetint;branch=${{ steps.version.outputs.branch }};os=linux;arch=x86_64;platform=linux-x86_64;version=${{ steps.version.outputs.version }};changelist=${{ steps.version.outputs.commit }};source=${{ steps.version.outputs.source }};category=toolkit"
-      
+
       - name: Upload sbsa tarball to Artifactory
         if: steps.version.outputs.is_prerelease == 'false'
         run: |
@@ -290,7 +307,7 @@ jobs:
           echo "repo: oci://ghcr.io/${{ steps.agent_image_ghcr.outputs.owner_lc }}/charts" >> $GITHUB_STEP_SUMMARY
           echo "chart: fleet-intelligence-agent:${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Linux package signatures:** verified with Fleet Intelligence key \`087199B3\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Linux packages and checksum manifest:** verified with Fleet Intelligence key \`087199B3\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           if [[ "${{ steps.version.outputs.is_prerelease }}" == "true" ]]; then
