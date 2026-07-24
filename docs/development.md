@@ -104,13 +104,16 @@ The GitHub Actions workflow will:
 - Keep the GitHub release in draft state while 3S signs every DEB and RPM
 - Verify each package with the pinned Fleet Intelligence public key
 - Regenerate `checksums.txt` after package signing
+- Create and verify a detached OpenPGP signature for the final checksum manifest
 - Generate binary tarballs
 - Replace the draft package and checksum assets, then publish the verified release
 
-The signing workflow uses the `LINUX_PACKAGE_FLEET_INTELLIGENCE` 3S job and
-the `SIGNING_LINUX_PACKAGE_FLEET_INTELLIGENCE` SSA scope by default. CI must
-provide `NVSEC_SSA_CLIENT_ID` and `NVSEC_SSA_CLIENT_SECRET` as GitHub Actions
-secrets. The public verification key is stored at
+The package-signing workflow uses the `LINUX_PACKAGE_FLEET_INTELLIGENCE` 3S job
+and the `SIGNING_LINUX_PACKAGE_FLEET_INTELLIGENCE` SSA scope by default. The
+checksum manifest uses the `FLEET_INTELLIGENCE` job and
+`SIGNING_FLEET_INTELLIGENCE` scope. CI must provide `NVSEC_SSA_CLIENT_ID` and
+`NVSEC_SSA_CLIENT_SECRET` as GitHub Actions secrets, and that SSA client must
+have both scopes. The public verification key is stored at
 `deployments/packages/keys/fleet-intelligence.pub.asc`.
 
 ## Testing
