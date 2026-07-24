@@ -39,7 +39,7 @@ cleanup() {
 trap cleanup EXIT
 
 artifact_count=0
-while read -r _ artifact_name extra; do
+while read -r _ artifact_name extra || [[ -n "${artifact_name:-}" ]]; do
   [[ -z "${extra:-}" ]] || {
     echo "Unsupported checksum line for an artifact containing whitespace: $artifact_name $extra" >&2
     exit 1

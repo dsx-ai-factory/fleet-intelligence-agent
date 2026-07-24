@@ -182,6 +182,7 @@ release:
     `FE0C 8B74 CA66 357C 13BE 197D CCE3 C963 0871 99B3`, then authenticate
     the checksum manifest:
     ```bash
+    gpg --show-keys --fingerprint fleet-intelligence.pub.asc
     gpg --import fleet-intelligence.pub.asc
     gpg --verify checksums.txt.asc checksums.txt
     ```
