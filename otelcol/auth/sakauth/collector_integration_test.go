@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net"
@@ -130,6 +131,16 @@ func TestCollectorGatewayEndToEnd(t *testing.T) {
 
 	receiverPort := availableTCPPort(t)
 	healthPort := availableTCPPort(t)
+
+	// sakauth rejects insecure_skip_verify, so trust the test server's
+	// certificate explicitly. This also makes the test exercise real
+	// certificate verification rather than skipping it.
+	caPath := filepath.Join(t.TempDir(), "backend-ca.pem")
+	require.NoError(t, os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: backend.Certificate().Raw,
+	}), 0o600))
+
 	configPath := filepath.Join(t.TempDir(), "collector.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte(fmt.Sprintf(`
 extensions:
@@ -137,7 +148,7 @@ extensions:
     enroll_endpoint: %[1]s/enroll
     sak_token: integration-sak
     tls:
-      insecure_skip_verify: true
+      ca_file: %[4]s
   health_check:
     endpoint: 127.0.0.1:%[2]d
 receivers:
@@ -155,7 +166,7 @@ exporters:
     logs_endpoint: %[1]s/logs
     compression: none
     tls:
-      insecure_skip_verify: true
+      ca_file: %[4]s
     auth:
       authenticator: sakauth
 service:
@@ -169,7 +180,7 @@ service:
       receivers: [otlp]
       processors: [batch]
       exporters: [otlp_http/backend]
-`, backend.URL, healthPort, receiverPort)), 0o600))
+`, backend.URL, healthPort, receiverPort, caPath)), 0o600))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	logPath := filepath.Join(t.TempDir(), "collector.log")
