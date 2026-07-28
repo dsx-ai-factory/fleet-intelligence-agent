@@ -310,6 +310,10 @@ func TestValidateHealthExporter(t *testing.T) {
 		"http://user:password@collector.example",
 		"http://collector.example?token=secret",
 		"http://collector.example#fragment",
+		// url.Parse reports these as ForceQuery and as no fragment at all,
+		// so they slip past the credentials/query/fragment checks.
+		"http://collector.example?",
+		"http://collector.example#",
 	} {
 		t.Run("invalid collector endpoint "+endpoint, func(t *testing.T) {
 			cfg := &Config{

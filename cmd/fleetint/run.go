@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -224,7 +225,14 @@ func configureHealthExporterFromEnv(cfg *config.Config) error {
 	// and attestation; backend credentials are not forwarded to the gateway.
 	if val := os.Getenv("FLEETINT_COLLECTOR_ENDPOINT"); val != "" {
 		he.CollectorEndpoint = val
-		log.Logger.Infow("set OTel gateway collector endpoint from env", "collector_endpoint", val)
+		// Log only the host. The raw value is operator-supplied and may carry
+		// credentials in userinfo or a token in the path. Config.Validate
+		// rejects those, but it runs after this point.
+		host := "(unparseable)"
+		if parsed, err := url.Parse(val); err == nil && parsed.Host != "" {
+			host = parsed.Host
+		}
+		log.Logger.Infow("set OTel gateway collector endpoint from env", "collector_endpoint_host", host)
 	}
 
 	return nil

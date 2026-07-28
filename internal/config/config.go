@@ -186,6 +186,12 @@ func (config *Config) Validate() error {
 			if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 				return fmt.Errorf("collector_endpoint must not contain credentials, a query, or a fragment")
 			}
+			// url.Parse records a bare trailing "?" as ForceQuery with an empty
+			// RawQuery, and drops a bare trailing "#" altogether, so neither is
+			// caught above. Both corrupt the URL once "/v1/metrics" is appended.
+			if parsed.ForceQuery || strings.HasSuffix(endpoint, "#") {
+				return fmt.Errorf("collector_endpoint must not end with a bare '?' or '#'")
+			}
 		}
 
 		// Validate health check interval
