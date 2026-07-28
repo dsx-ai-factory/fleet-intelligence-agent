@@ -80,6 +80,15 @@ jobs:
           version: latest
           args: --timeout=5m
 
+      # otelcol/auth/sakauth is a separate Go module, so the root run above does
+      # not descend into it. It resolves the same root .golangci.yml.
+      - name: Run golangci-lint (sakauth module)
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          working-directory: otelcol/auth/sakauth
+          args: --timeout=5m
+
       - name: Check license headers in third_party
         run: |
           missing=$(find third_party -name "*.go" | xargs grep -rL "Copyright\|SPDX" 2>/dev/null)
@@ -190,6 +199,11 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # This job installs and executes third-party tooling (the OTel
+          # Collector Builder and its transitive dependencies). Do not leave
+          # GITHUB_TOKEN in the git config where that tooling can read it.
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -207,6 +221,11 @@ jobs:
           CGO_ENABLED: 0
         run: builder --config=otelcol-builder.yaml
 
+      # The sakauth unit and config tests run in the unit_test job, since
+      # `make test` now descends into the nested module. This step covers only
+      # the integration test, which needs the collector binary built above and
+      # self-skips without FLEETINT_OTELCOL_INTEGRATION=1.
+      # Only on amd64: the runner cannot execute arm64 test binaries.
       - name: Run OTel gateway integration test
         if: matrix.goarch == 'amd64'
         working-directory: otelcol/auth/sakauth
