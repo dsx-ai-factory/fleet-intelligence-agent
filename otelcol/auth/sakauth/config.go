@@ -57,5 +57,11 @@ func (c *Config) Validate() error {
 	if c.TLS.Insecure {
 		return fmt.Errorf("sakauth: tls.insecure is not allowed; enroll_endpoint must use HTTPS")
 	}
+	// Disabling certificate verification keeps the https:// scheme but lets any
+	// man-in-the-middle present its own certificate and capture both the SAK
+	// sent on enrollment and the JWT returned by it.
+	if c.TLS.InsecureSkipVerify {
+		return fmt.Errorf("sakauth: tls.insecure_skip_verify is not allowed; the SAK and the enrollment JWT must not be exposed to an unverified peer")
+	}
 	return nil
 }

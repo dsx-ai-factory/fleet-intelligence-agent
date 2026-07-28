@@ -82,6 +82,13 @@ func TestConfigValidateRequiresSecureEndpoint(t *testing.T) {
 		SAKToken:       configopaque.String("sak"),
 		TLS:            configtls.ClientConfig{Insecure: true},
 	}).Validate(), "tls.insecure is not allowed")
+	// insecure_skip_verify keeps the https:// scheme, so it passes every check
+	// above and must be rejected on its own.
+	require.ErrorContains(t, (&Config{
+		EnrollEndpoint: "https://backend.example/api/v1/health/enroll",
+		SAKToken:       configopaque.String("sak"),
+		TLS:            configtls.ClientConfig{InsecureSkipVerify: true},
+	}).Validate(), "tls.insecure_skip_verify is not allowed")
 
 	cfg := &Config{SAKToken: configopaque.String("sak-token")}
 	require.Equal(t, "[REDACTED]", cfg.SAKToken.String())
@@ -409,6 +416,67 @@ func TestResponseHeaderRefreshesJWT(t *testing.T) {
 		require.NoError(t, resp.Body.Close())
 	}
 	require.Equal(t, int32(2), requests.Load())
+}
+
+// Two exports start with the same token and their responses complete out of
+// order, each carrying a different refreshed JWT. The response that finishes
+// last is the one carrying the older token, and it must not overwrite the
+// newer one already installed by the response that finished first.
+func TestResponseHeaderRefreshIgnoresStaleToken(t *testing.T) {
+	initialJWT := testJWT(t, "customer-1")
+	newerJWT := testJWT(t, "customer-2")
+	staleJWT := testJWT(t, "customer-3")
+	ext := &sakAuthExtension{jwt: initialJWT, customerID: "customer-1"}
+
+	slowSnapshotted := make(chan struct{})
+	fastStored := make(chan struct{})
+
+	base := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		header := http.Header{}
+		switch req.URL.Path {
+		case "/slow":
+			// initialJWT is already snapshotted by the time base is reached,
+			// so let the other request overtake this one.
+			close(slowSnapshotted)
+			<-fastStored
+			header.Set("jwt_assertion", staleJWT)
+		case "/fast":
+			<-slowSnapshotted
+			header.Set("jwt_assertion", newerJWT)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: header, Body: http.NoBody}, nil
+	})
+
+	transport, err := ext.RoundTripper(base)
+	require.NoError(t, err)
+
+	// Errors are returned rather than asserted, since require must only be
+	// called from the goroutine running the test.
+	export := func(path string) error {
+		req, reqErr := http.NewRequest(http.MethodPost, "https://backend.example"+path, http.NoBody)
+		if reqErr != nil {
+			return reqErr
+		}
+		resp, rtErr := transport.RoundTrip(req)
+		if rtErr != nil {
+			return rtErr
+		}
+		return resp.Body.Close()
+	}
+
+	errs := make(chan error, 2)
+	go func() { errs <- export("/slow") }()
+	go func() {
+		exportErr := export("/fast")
+		close(fastStored)
+		errs <- exportErr
+	}()
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+
+	jwt, customerID := ext.snapshot()
+	require.Equal(t, newerJWT, jwt, "late response overwrote a newer token")
+	require.Equal(t, "customer-2", customerID)
 }
 
 func TestConcurrentUnauthorizedResponsesSingleRefresh(t *testing.T) {

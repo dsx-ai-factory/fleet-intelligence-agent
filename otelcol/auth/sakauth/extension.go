@@ -245,10 +245,19 @@ func (rt *sakRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 
 	// The backend proactively sends a refreshed JWT in the response header when
 	// the current token is near expiry (>80% of max age). Store it immediately.
-	if newJWT := resp.Header.Get("jwt_assertion"); newJWT != "" {
+	//
+	// Only install it if the stored token is still the one this request used.
+	// Exports run concurrently and responses can complete out of order, so an
+	// unconditional write lets a slow response overwrite a newer token already
+	// installed by another response or by the 401 refresh below, leaving every
+	// subsequent export authenticating with a stale JWT.
+	if newJWT := resp.Header.Get("jwt_assertion"); newJWT != "" && newJWT != usedJWT {
+		newCustomerID := extractCustomerID(newJWT)
 		rt.ext.mu.Lock()
-		rt.ext.jwt = newJWT
-		rt.ext.customerID = extractCustomerID(newJWT)
+		if rt.ext.jwt == usedJWT {
+			rt.ext.jwt = newJWT
+			rt.ext.customerID = newCustomerID
+		}
 		rt.ext.mu.Unlock()
 	}
 
