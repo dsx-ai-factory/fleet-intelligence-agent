@@ -116,11 +116,14 @@ jobs:
         run: make test
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
-          file: ./coverage/coverage.out
+          # "file" was renamed to "files" in v5.
+          files: ./coverage/coverage.out
           flags: unittests
           name: codecov-umbrella
+          # Coverage upload is informational; a Codecov outage must not fail CI.
+          fail_ci_if_error: false
 
   build_check:
     name: Build Check
