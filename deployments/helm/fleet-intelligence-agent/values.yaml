@@ -148,10 +148,20 @@ otelGateway:
     enabled: true
     minAvailable: 1
 
+  # Collector memory_limiter thresholds, as a percentage of the memory available
+  # to the pod. The collector reads the container's cgroup memory limit, so these
+  # track resources.limits.memory automatically: raising the limit to 2Gi raises
+  # the limiter with it, with no change needed here.
+  #
+  # The percentages are only meaningful while a limit is set. Without one the
+  # collector falls back to total node memory, which on a large node means the
+  # limiter never engages before the kernel OOM-kills the pod. Rendering the
+  # gateway with no resources.limits.memory is therefore rejected outright.
   memoryLimiter:
     limitPercentage: 80
     spikeLimitPercentage: 20
 
+  # limits.memory is required when the gateway is enabled; see memoryLimiter above.
   resources:
     limits:
       cpu: "500m"

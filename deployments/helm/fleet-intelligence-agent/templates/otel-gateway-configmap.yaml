@@ -14,6 +14,16 @@
 # limitations under the License.
 
 {{- if .Values.otelGateway.enabled }}
+{{- /*
+memory_limiter is configured by percentage, and the collector derives the
+percentage from the container's cgroup memory limit, falling back to total node
+memory when no limit is set. On a large node an unlimited pod would size the
+limiter against the node and be OOM-killed long before the limiter engages, so
+require an explicit memory limit rather than fail at runtime.
+*/}}
+{{- if not (dig "limits" "memory" "" (.Values.otelGateway.resources | default dict)) }}
+{{- fail "otelGateway.resources.limits.memory must be set when otelGateway.enabled is true: memory_limiter uses limit_percentage, which is derived from the pod's cgroup memory limit" }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
