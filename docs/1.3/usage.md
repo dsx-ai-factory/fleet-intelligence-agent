@@ -108,13 +108,13 @@ The command prints each check result and exits non-zero if any hard requirement 
 
 ```bash
 # Pass token directly (visible in process list)
-sudo fleetint enroll --endpoint=https://api.example.com --token=<your-sak-token>
+sudo fleetint enroll --endpoint=https://data.fleet-intelligence.nvidia.com --token=<your-sak-token>
 
 # Read token from a file (recommended)
-sudo fleetint enroll --endpoint=https://api.example.com --token-file=/path/to/token
+sudo fleetint enroll --endpoint=https://data.fleet-intelligence.nvidia.com --token-file=/path/to/token
 
 # Read token from stdin
-echo "$TOKEN" | sudo fleetint enroll --endpoint=https://api.example.com --token-file=-
+echo "$TOKEN" | sudo fleetint enroll --endpoint=https://data.fleet-intelligence.nvidia.com --token-file=-
 ```
 
 Enrolls the agent with the Fleet Intelligence backend by exchanging a Service Account Key (SAK) token for a JWT token. The JWT token and backend endpoints are stored locally for subsequent data exports.
