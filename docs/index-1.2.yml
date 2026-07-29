@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+navigation:
+  - page: Architecture
+    path: 1.2/architecture.md
+    slug: architecture
+  - page: Usage
+    path: 1.2/usage.md
+    slug: usage
+  - page: Configuration
+    path: 1.2/configuration.md
+    slug: configuration
+  - page: DEB Installation
+    path: 1.2/install-deb.md
+    slug: install-deb
+  - page: RPM Installation
+    path: 1.2/install-rpm.md
+    slug: install-rpm
+  - page: Helm Installation
+    path: 1.2/install-helm.md
+    slug: install-helm
+  - page: Development
+    path: 1.2/development.md
+    slug: development

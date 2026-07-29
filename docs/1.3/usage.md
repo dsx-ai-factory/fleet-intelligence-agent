@@ -384,7 +384,7 @@ scrape_configs:
 
 ### High resource usage
 
-The agent should use <500MB RAM and <1% CPU. Higher usage might indicate:
+The agent should use &lt;500MB RAM and &lt;1% CPU. Higher usage might indicate:
 
 - Very frequent collection intervals (check `FLEETINT_COLLECT_INTERVAL`)
 - Large lookback windows (check `FLEETINT_METRICS_LOOKBACK` and `FLEETINT_EVENTS_LOOKBACK`)

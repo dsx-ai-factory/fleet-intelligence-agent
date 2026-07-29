@@ -11,7 +11,7 @@ cd fleet-intelligence-agent
 
 ### Prerequisites
 
-- **Go**: 1.26.5
+- **Go**: 1.26.2
 - **GoReleaser**: For building packages (install from [goreleaser.com](https://goreleaser.com/install/))
 - **For ARM64 cross-compilation** (optional): `gcc-aarch64-linux-gnu` and `g++-aarch64-linux-gnu`
 
@@ -191,4 +191,4 @@ make package-snapshot  # Build packages (no git tag required)
 
 ## Contributing
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for detailed contribution guidelines.
+See [CONTRIBUTING.md](https://github.com/NVIDIA/fleet-intelligence-agent/blob/main/CONTRIBUTING.md) for detailed contribution guidelines.

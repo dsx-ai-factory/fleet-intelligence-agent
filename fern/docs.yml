@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+instances:
+  - url: fleet-intelligence-agent.docs.buildwithfern.com/fleet-intel/agent
+    custom-domain: docs.nvidia.com/fleet-intel/agent
+    multi-source: true
+
+title: NVIDIA Fleet Intelligence Agent
+
+global-theme: nvidia
+
+metadata:
+  canonical-host: "docs.nvidia.com/fleet-intel/agent"
+
+versions:
+  - display-name: "1.3 (Current)"
+    path: ../docs/index-1.3.yml
+    slug: "1.3"
+  - display-name: "1.2"
+    path: ../docs/index-1.2.yml
+    slug: "1.2"
+
+redirects:
+  - source: "/fleet-intel/agent/index.html"
+    destination: "/fleet-intel/agent/"
+
+logo:
+  href: /fleet-intel/agent
+  right-text: Fleet Intelligence Agent
+
+navbar-links:
+  - type: secondary
+    text: Fleet Intelligence Docs
+    url: https://docs.nvidia.com/fleet-intel
+  - type: github
+    value: https://github.com/NVIDIA/fleet-intelligence-agent
+
+experimental:
+  mdx-components:
+    - ./components
