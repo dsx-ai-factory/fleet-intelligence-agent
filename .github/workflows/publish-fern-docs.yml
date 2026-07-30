@@ -41,6 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     # runs-on: linux-amd64-cpu8  # NVIDIA self-hosted runner
     timeout-minutes: 20
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -61,7 +62,7 @@ jobs:
           fern generate --docs 2>&1 | tee /tmp/fern-output.log
           URL=$(grep -oP 'Published docs to \K.*(?= \()' /tmp/fern-output.log || true)
           if [ -z "$URL" ]; then
-            echo "::error::Failed to determine the published documentation URL."
+            echo "::error::Fern did not emit a published URL — verify the publish succeeded"
             exit 1
           fi
           echo "### Published: [$URL]($URL)" >> "$GITHUB_STEP_SUMMARY"
