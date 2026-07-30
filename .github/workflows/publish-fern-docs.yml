@@ -60,6 +60,8 @@ jobs:
           set -o pipefail
           fern generate --docs 2>&1 | tee /tmp/fern-output.log
           URL=$(grep -oP 'Published docs to \K.*(?= \()' /tmp/fern-output.log || true)
-          if [ -n "$URL" ]; then
-            echo "### Published: [$URL]($URL)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$URL" ]; then
+            echo "::error::Failed to determine the published documentation URL."
+            exit 1
           fi
+          echo "### Published: [$URL]($URL)" >> "$GITHUB_STEP_SUMMARY"
