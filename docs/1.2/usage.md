@@ -108,7 +108,7 @@ The command prints each check result and exits non-zero if any hard requirement 
 
 ```bash
 # Pass token directly (visible in process list)
-sudo fleetint enroll --endpoint=https://data.fleet-intelligence.nvidia.com--token=<your-sak-token>
+sudo fleetint enroll --endpoint=https://data.fleet-intelligence.nvidia.com --token=<your-sak-token>
 
 # Read token from a file (recommended)
 sudo fleetint enroll --endpoint=https://data.fleet-intelligence.nvidia.com --token-file=/path/to/token
