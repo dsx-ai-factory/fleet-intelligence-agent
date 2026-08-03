@@ -30,7 +30,7 @@ make test
 
 ## Project Structure
 
-```test
+```text
 fleetint/
 ├── cmd/
 │   └── fleetint/          # Main CLI application

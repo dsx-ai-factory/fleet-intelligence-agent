@@ -144,7 +144,7 @@ Metadata update behavior for `--node-group` and `--compute-zone`:
 5. The stored credentials are used automatically by the agent for data export
 
 **Example output:**
-```
+```text
 Enrollment succeeded
 ```
 
@@ -276,7 +276,7 @@ Returns metrics data in JSON format from all monitored components
 curl "http://localhost:15133/v1/metrics?startTime=$(date -d '1 hour ago' +%s)"
 
 # Get metrics for specific component
-curl "http://localhost:15133/v1/metrics?components=accelerator-nvidia-temperature"
+curl "http://localhost:15133/v1/metrics?components=accelerator-nvidia-dcgm-thermal"
 ```
 
 ### Component Events

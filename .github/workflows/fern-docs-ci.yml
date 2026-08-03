@@ -103,7 +103,14 @@ jobs:
           node-version: '20'
 
       - name: Install Fern CLI
-        run: npm install -g fern-api@$(jq -r .version fern/fern.config.json)
+        run: |
+          set -euo pipefail
+          VERSION=$(jq -r .version fern/fern.config.json)
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+            echo "::error::fern.config.json .version '$VERSION' is not a valid semver"
+            exit 1
+          fi
+          npm install -g "fern-api@${VERSION}"
 
       - name: Check MDX safety
         run: |
