@@ -13,13 +13,33 @@ global-theme: nvidia
 metadata:
   canonical-host: "docs.nvidia.com/fleet-intel/agent"
 
-versions:
-  - display-name: "1.3 (Current)"
-    path: ../docs/index-1.3.yml
-    slug: "1.3"
-  - display-name: "1.2"
-    path: ../docs/index-1.2.yml
-    slug: "1.2"
+# HEAD navigation — used by fern check (PRs) and fern docs dev (local preview).
+# The publish workflow replaces this block with a versioned `versions:` list
+# built from release tags at publish time. Do not edit the versions: block here;
+# it is entirely CI-managed. Update this navigation: block when pages are added
+# or removed from docs/.
+navigation:
+  - page: Architecture
+    path: ../docs/architecture.md
+    slug: architecture
+  - page: Usage
+    path: ../docs/usage.md
+    slug: usage
+  - page: Configuration
+    path: ../docs/configuration.md
+    slug: configuration
+  - page: DEB Installation
+    path: ../docs/install-deb.md
+    slug: install-deb
+  - page: RPM Installation
+    path: ../docs/install-rpm.md
+    slug: install-rpm
+  - page: Helm Installation
+    path: ../docs/install-helm.md
+    slug: install-helm
+  - page: Development
+    path: ../docs/development.md
+    slug: development
 
 redirects:
   - source: "/fleet-intel/agent/index.html"

@@ -92,7 +92,7 @@ Validates the local prerequisites required for installation and enrollment.
 
 **What it checks:**
 - NVIDIA GPU presence
-- supported GPU architecture (`Hopper`, `Blackwell`, `Rubin`)
+- supported GPU architecture (`Ampere`, `Ada Lovelace`, `Hopper`, `Blackwell`, `Rubin`)
 - NVIDIA driver major version (`510` or newer)
 - DCGM HostEngine reachability
 - DCGM HostEngine minimum version (`4.2.3`)
@@ -128,12 +128,19 @@ One of `--token` or `--token-file` is required.
 
 **Optional Flags:**
 - `--force`: Continue enrollment even if `fleetint precheck` fails
+- `--node-group`: Optional node group metadata persisted in local agent metadata
+- `--compute-zone`: Optional compute zone metadata persisted in local agent metadata
+
+Metadata update behavior for `--node-group` and `--compute-zone`:
+- If the flag is omitted, the existing stored value is preserved.
+- If the flag is provided, the stored value is overwritten with the provided value.
+- Providing an empty value (for example `--node-group=""`) clears the stored value.
 
 **What it does:**
 1. Runs the same prerequisite validation as `fleetint precheck`
 2. Validates the endpoint URL (must be HTTPS)
 3. Makes an enrollment request to exchange the SAK token for a JWT token
-4. Stores the JWT token and backend endpoints (metrics, logs, nonce) in the local metadata database
+4. Stores the JWT token, backend endpoints (metrics, logs, nonce), and optional enrollment metadata (`node_group`, `compute_zone`) in the local metadata database
 5. The stored credentials are used automatically by the agent for data export
 
 **Example output:**
@@ -306,6 +313,9 @@ Returns metrics in Prometheus exposition format for integration with monitoring 
 By default, fleetint uses a Unix socket for security. To allow external monitoring tools like Prometheus to scrape metrics over the network, switch to a TCP listener with the `--listen-address` flag:
 
 ```bash
+# Expose only on localhost
+sudo fleetint run --listen-address=127.0.0.1:15133
+
 # Expose on all interfaces
 sudo fleetint run --listen-address=0.0.0.0:15133
 
@@ -377,7 +387,7 @@ scrape_configs:
 
 ### High resource usage
 
-The agent should use &lt;100MB RAM and &lt;1% CPU. Higher usage might indicate:
+The agent should use &lt;500MB RAM and &lt;1% CPU. Higher usage might indicate:
 
 - Very frequent collection intervals (check `FLEETINT_COLLECT_INTERVAL`)
 - Large lookback windows (check `FLEETINT_METRICS_LOOKBACK` and `FLEETINT_EVENTS_LOOKBACK`)

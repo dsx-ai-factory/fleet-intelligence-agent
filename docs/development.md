@@ -11,7 +11,7 @@ cd fleet-intelligence-agent
 
 ### Prerequisites
 
-- **Go**: 1.26.2
+- **Go**: 1.26.4
 - **GoReleaser**: For building packages (install from [goreleaser.com](https://goreleaser.com/install/))
 - **For ARM64 cross-compilation** (optional): `gcc-aarch64-linux-gnu` and `g++-aarch64-linux-gnu`
 
@@ -30,7 +30,7 @@ make test
 
 ## Project Structure
 
-```
+```test
 fleetint/
 ├── cmd/
 │   └── fleetint/          # Main CLI application
