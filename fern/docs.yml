@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+instances:
+  - url: fleet-intelligence-agent.docs.buildwithfern.com/fleet-intel/agent
+    custom-domain: docs.nvidia.com/fleet-intel/agent
+    multi-source: true
+
+title: NVIDIA Fleet Intelligence Agent
+
+global-theme: nvidia
+
+metadata:
+  canonical-host: "docs.nvidia.com/fleet-intel/agent"
+
+# HEAD navigation — used by fern check (PRs) and fern docs dev (local preview).
+# The publish workflow replaces this block with a versioned `versions:` list
+# built from release tags at publish time. Do not edit the versions: block here;
+# it is entirely CI-managed. Update this navigation: block when pages are added
+# or removed from docs/.
+navigation:
+  - page: Architecture
+    path: ../docs/architecture.md
+    slug: architecture
+  - page: Usage
+    path: ../docs/usage.md
+    slug: usage
+  - page: Configuration
+    path: ../docs/configuration.md
+    slug: configuration
+  - page: DEB Installation
+    path: ../docs/install-deb.md
+    slug: install-deb
+  - page: RPM Installation
+    path: ../docs/install-rpm.md
+    slug: install-rpm
+  - page: Helm Installation
+    path: ../docs/install-helm.md
+    slug: install-helm
+  - page: Development
+    path: ../docs/development.md
+    slug: development
+
+redirects:
+  - source: "/fleet-intel/agent/index.html"
+    destination: "/fleet-intel/agent/"
+
+logo:
+  href: /fleet-intel/agent
+  right-text: Fleet Intelligence Agent
+
+navbar-links:
+  - type: secondary
+    text: Fleet Intelligence Docs
+    url: https://docs.nvidia.com/fleet-intel
+  - type: github
+    value: https://github.com/NVIDIA/fleet-intelligence-agent
+
+experimental:
+  mdx-components:
+    - ./components

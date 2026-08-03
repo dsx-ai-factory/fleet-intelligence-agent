@@ -47,15 +47,9 @@ contains enrollment credentials.
 
 ## Documentation
 
-**Important:** Documentation links are relative to the branch or tag you are viewing. The default GitHub view uses `main`, which may describe unreleased changes. When installing or upgrading a specific agent version, switch to that version's release tag first.
+Full documentation is available at **[docs.nvidia.com/fleet-intel/agent](https://docs.nvidia.com/fleet-intel/agent)**, including installation guides, configuration reference, architecture overview, and usage examples.
 
-- [Helm Installation](docs/install-helm.md) - Kubernetes (Helm) installation and troubleshooting
-- [DEB Installation](docs/install-deb.md) - Ubuntu package install, update, and uninstall
-- [RPM Installation](docs/install-rpm.md) - RHEL/Rocky/Alma/Amazon package install, update, and uninstall
-- [Architecture](docs/architecture.md) - Bare metal and Kubernetes architecture, dependencies, and runtime flow
-- [Usage](docs/usage.md) - Commands, HTTP API, integration, and troubleshooting
-- [Configuration](docs/configuration.md) - Environment variables and service configuration
-- [Development](docs/development.md) - Building from source and contributing
+For the broader Fleet Intelligence platform documentation, see [docs.nvidia.com/fleet-intel](https://docs.nvidia.com/fleet-intel).
 
 ## Contributing
 

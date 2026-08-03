@@ -63,6 +63,7 @@ Notes:
 - Duration-valued environment variables use Go duration syntax such as `30s`, `1m`, `10m`, or `24h`.
 - These environment variables modify the telemetry exporter configuration and runtime loop intervals used by `fleetint run`.
 - `DCGM_URL` and `DCGM_URL_IS_UNIX_SOCKET` configure connectivity to DCGM HostEngine for DCGM-backed components.
+- `MALLOC_ARENA_MAX` is a Linux process-level tuning parameter (not a Fleet Intelligence setting) that caps the number of glibc memory arenas to constrain RSS growth in cgo-heavy workloads such as DCGM integration.
 
 ### Bare Metal Example
 

@@ -44,6 +44,64 @@ To run tests locally:
 make test
 ```
 
+## Documentation
+
+The agent documentation lives in `docs/` and is published to
+[docs.nvidia.com/fleet-intel/agent](https://docs.nvidia.com/fleet-intel/agent).
+Published docs are built from release tags — editing `docs/*.md` on your branch
+is all that is needed; the CI publish workflow handles versioning automatically
+when a release is cut.
+
+### Prerequisites
+
+Install the Fern CLI (requires Node.js 18+):
+
+```bash
+npm install -g fern-api
+```
+
+### Previewing HEAD docs (your working changes)
+
+To preview the current state of `docs/` as it would appear in the docs site:
+
+```bash
+fern docs dev
+```
+
+This uses the `navigation:` block in `fern/docs.yml` to serve your local
+`docs/*.md` files directly. No version selector is shown — this mode is
+intentional for quickly reviewing in-progress edits.
+
+### Previewing with the version selector
+
+To preview with the full version selector (current and previous versions as
+they appear on the published site), first fetch the versioned content from
+release tags:
+
+```bash
+python3 scripts/docs-fetch-versions.py --patch-fern-docs
+fern docs dev
+```
+
+The `--patch-fern-docs` flag temporarily replaces the `navigation:` block in
+`fern/docs.yml` with a versioned `versions:` block. When you are done
+previewing, restore the file:
+
+```bash
+git checkout fern/docs.yml
+```
+
+> **Note:** `fern/versions/` is gitignored. Its contents are generated locally
+> by the script and by CI at publish time — never commit them.
+
+### Adding or removing a doc page
+
+1. Add or remove the `.md` file under `docs/`.
+2. Update the `navigation:` block in `fern/docs.yml` to match.
+3. If the filename is non-obvious, add a title entry to `TITLE_MAP` in
+   `scripts/docs-fetch-versions.py`.
+4. Run `fern check` to validate the configuration before opening a PR.
+
 ## Developer Certificate of Origin (DCO)
 
 ```

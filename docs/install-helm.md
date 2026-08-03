@@ -38,9 +38,9 @@ kubectl create namespace "$NS" || true
 If you need to enroll nodes, create the token Secret. The secret name should match the `ENROLL_TOKEN_SECRET_NAME` variable set above:
 
 ```bash
-kubectl create secret generic "$ENROLL_TOKEN_SECRET_NAME" \
+printf '%s' "$ENROLL_TOKEN" | kubectl create secret generic "$ENROLL_TOKEN_SECRET_NAME" \
   --namespace "$NS" \
-  --from-literal=token="$ENROLL_TOKEN"
+  --from-file=token=/dev/stdin
 ```
 
 ## Install or upgrade
