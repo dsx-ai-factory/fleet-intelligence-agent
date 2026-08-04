@@ -74,7 +74,7 @@ func NewEntityCatalog(info *machineinfo.MachineInfo, dcgmGPUIndexes map[string]s
 	catalog.GPUDriverVersion = strings.TrimSpace(info.GPUDriverVersion)
 	catalog.CUDADriverVersion = strings.TrimSpace(info.CUDAVersion)
 	if !info.Uptime.IsZero() {
-		catalog.BootTime = info.Uptime.Time.UTC()
+		catalog.BootTime = info.Uptime.UTC()
 	}
 	if info.GPUInfo == nil {
 		return catalog
