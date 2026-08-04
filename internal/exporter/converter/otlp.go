@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,7 +35,10 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/exporter/collector"
 )
 
-var osHostname = os.Hostname
+var (
+	osHostname     = os.Hostname
+	agentStartTime = time.Now().UTC()
+)
 
 // OTLPData holds both metrics and logs for OTLP export
 type OTLPData struct {
@@ -119,13 +123,8 @@ func (c *otlpConverter) createOTLPResource(data *collector.HealthData) *resource
 		},
 	}
 
-	if hostname := resolveOTLPHostname(); hostname != "" {
-		attributes = append(attributes, &commonv1.KeyValue{
-			Key: "host.name",
-			Value: &commonv1.AnyValue{
-				Value: &commonv1.AnyValue_StringValue{StringValue: hostname},
-			},
-		})
+	if hostname := identityHostname(data); hostname != "" {
+		attributes = append(attributes, &commonv1.KeyValue{Key: "host.name", Value: stringAnyValue(hostname)})
 	}
 	if data.NodeGroup != "" {
 		attributes = append(attributes, &commonv1.KeyValue{
@@ -171,16 +170,26 @@ func resolveOTLPHostname() string {
 	return strings.TrimSpace(hostname)
 }
 
+func identityHostname(data *collector.HealthData) string {
+	if data.EntityCatalog != nil && data.EntityCatalog.Hostname != "" {
+		return data.EntityCatalog.Hostname
+	}
+	if data.MachineInfo != nil && strings.TrimSpace(data.MachineInfo.Hostname) != "" {
+		return strings.TrimSpace(data.MachineInfo.Hostname)
+	}
+	return resolveOTLPHostname()
+}
+
 // convertMetricsToOTLP converts health metrics to OTLP metrics format
 func (c *otlpConverter) convertMetricsToOTLP(data *collector.HealthData) []*metricsv1.Metric {
 	var otlpMetrics []*metricsv1.Metric
 
-	gpuUUIDToIndex := buildGPUUUIDToIndexMap(data)
+	identity := newIdentityContext(data)
 
 	// Convert regular metrics if available
 	if len(data.Metrics) > 0 {
 		for _, metric := range data.Metrics {
-			otlpMetrics = append(otlpMetrics, c.convertMetricToOTLP(metric, gpuUUIDToIndex))
+			otlpMetrics = append(otlpMetrics, c.convertMetricToOTLP(metric, identity))
 		}
 	}
 
@@ -240,17 +249,113 @@ func (c *otlpConverter) convertMetricsToOTLP(data *collector.HealthData) []*metr
 		},
 	}
 	otlpMetrics = append(otlpMetrics, upMetric)
+	if !data.Timestamp.IsZero() && !data.Timestamp.Before(agentStartTime) {
+		otlpMetrics = append(otlpMetrics, gaugeMetric(
+			"fleetint_agent_uptime_seconds",
+			"Time elapsed since the Fleet Intelligence agent process started.",
+			"",
+			data.Timestamp,
+			data.Timestamp.Sub(agentStartTime).Seconds(),
+			nil,
+		))
+	}
+	otlpMetrics = append(otlpMetrics, inventoryMetrics(data, identity.catalog)...)
 
 	return otlpMetrics
 }
 
-func (c *otlpConverter) convertMetricToOTLP(metric pkgmetrics.Metric, gpuUUIDToIndex map[string]string) *metricsv1.Metric {
+func inventoryMetrics(data *collector.HealthData, catalog *collector.EntityCatalog) []*metricsv1.Metric {
+	if catalog == nil {
+		return nil
+	}
+
+	var inventory []*metricsv1.Metric
+	softwareLabels := map[string]string{}
+	addLabelIfMissing(softwareLabels, "gpu_driver_version", catalog.GPUDriverVersion)
+	addLabelIfMissing(softwareLabels, "cuda_driver_version", catalog.CUDADriverVersion)
+	if len(softwareLabels) > 0 {
+		inventory = append(inventory, gaugeMetric(
+			"fleetint_node_software_info",
+			"Node-scoped GPU software version information.",
+			"",
+			data.Timestamp,
+			1,
+			softwareLabels,
+		))
+	}
+
+	if !catalog.BootTime.IsZero() && !data.Timestamp.IsZero() && !data.Timestamp.Before(catalog.BootTime) {
+		inventory = append(inventory, gaugeMetric(
+			"fleetint_node_uptime_seconds",
+			"Time elapsed since the node last booted.",
+			"",
+			data.Timestamp,
+			data.Timestamp.Sub(catalog.BootTime).Seconds(),
+			nil,
+		))
+	}
+
+	uuids := make([]string, 0, len(catalog.GPUsByUUID))
+	for uuid := range catalog.GPUsByUUID {
+		uuids = append(uuids, uuid)
+	}
+	sort.Strings(uuids)
+
+	firmwarePoints := make([]*metricsv1.NumberDataPoint, 0, len(uuids))
+	for _, uuid := range uuids {
+		gpu := catalog.GPUsByUUID[uuid]
+		if gpu.GPUSerial == "" && gpu.VBIOSVersion == "" {
+			continue
+		}
+		labels := map[string]string{}
+		addLabelIfMissing(labels, "gpu", gpu.GPU)
+		addLabelIfMissing(labels, "uuid", gpu.UUID)
+		addLabelIfMissing(labels, "gpu_serial", gpu.GPUSerial)
+		addLabelIfMissing(labels, "vbios_version", gpu.VBIOSVersion)
+		firmwarePoints = append(firmwarePoints, gaugeDataPoint(data.Timestamp, 1, labels))
+	}
+	if len(firmwarePoints) > 0 {
+		inventory = append(inventory, &metricsv1.Metric{
+			Name:        "fleetint_gpu_firmware_info",
+			Description: "Per-GPU serial number and VBIOS version information.",
+			Data: &metricsv1.Metric_Gauge{Gauge: &metricsv1.Gauge{
+				DataPoints: firmwarePoints,
+			}},
+		})
+	}
+
+	return inventory
+}
+
+func gaugeMetric(name, description, unit string, timestamp time.Time, value float64, labels map[string]string) *metricsv1.Metric {
+	return &metricsv1.Metric{
+		Name:        name,
+		Description: description,
+		Unit:        unit,
+		Data: &metricsv1.Metric_Gauge{Gauge: &metricsv1.Gauge{
+			DataPoints: []*metricsv1.NumberDataPoint{gaugeDataPoint(timestamp, value, labels)},
+		}},
+	}
+}
+
+func gaugeDataPoint(timestamp time.Time, value float64, labels map[string]string) *metricsv1.NumberDataPoint {
+	return &metricsv1.NumberDataPoint{
+		TimeUnixNano: uint64(timestamp.UnixNano()),
+		Value: &metricsv1.NumberDataPoint_AsDouble{
+			AsDouble: value,
+		},
+		Attributes: labelsToOTLPAttributes(labels),
+	}
+}
+
+func (c *otlpConverter) convertMetricToOTLP(metric pkgmetrics.Metric, identity identityContext) *metricsv1.Metric {
+	labels := identity.enrichLabels(metric.Labels)
 	dataPoint := &metricsv1.NumberDataPoint{
 		TimeUnixNano: uint64(metric.UnixMilliseconds) * 1_000_000,
 		Value: &metricsv1.NumberDataPoint_AsDouble{
 			AsDouble: metric.Value,
 		},
-		Attributes: c.convertLabelsToOTLPAttributes(metric.Labels, gpuUUIDToIndex),
+		Attributes: labelsToOTLPAttributes(labels),
 	}
 
 	otlpMetric := &metricsv1.Metric{
@@ -277,55 +382,93 @@ func (c *otlpConverter) convertMetricToOTLP(metric pkgmetrics.Metric, gpuUUIDToI
 	return otlpMetric
 }
 
-// convertLabelsToOTLPAttributes converts metric labels to OTLP attributes.
-// If the labels contain a "uuid" key but no "gpu" key, it enriches the
-// attributes with the GPU index looked up from the machine info mapping.
-// DCGM metrics already carry a "gpu" label and are left unchanged.
-func (c *otlpConverter) convertLabelsToOTLPAttributes(labels map[string]string, gpuUUIDToIndex map[string]string) []*commonv1.KeyValue {
-	var attributes []*commonv1.KeyValue
-	for key, value := range labels {
-		attributes = append(attributes, &commonv1.KeyValue{
-			Key: key,
-			Value: &commonv1.AnyValue{
-				Value: &commonv1.AnyValue_StringValue{StringValue: value},
-			},
-		})
+// convertLabelsToOTLPAttributes adds stable physical-entity identity without
+// overwriting labels emitted by a component. MIG is intentionally unsupported.
+func (c *otlpConverter) convertLabelsToOTLPAttributes(labels map[string]string, identity identityContext) []*commonv1.KeyValue {
+	enriched := identity.enrichLabels(labels)
+	keys := make([]string, 0, len(enriched))
+	for key := range enriched {
+		keys = append(keys, key)
 	}
+	sort.Strings(keys)
 
-	if _, hasGPU := labels["gpu"]; !hasGPU {
-		if uuid, hasUUID := labels["uuid"]; hasUUID {
-			if gpuIndex, ok := gpuUUIDToIndex[uuid]; ok {
-				attributes = append(attributes, &commonv1.KeyValue{
-					Key: "gpu",
-					Value: &commonv1.AnyValue{
-						Value: &commonv1.AnyValue_StringValue{StringValue: gpuIndex},
-					},
-				})
-			}
-		}
+	attributes := make([]*commonv1.KeyValue, 0, len(keys))
+	for _, key := range keys {
+		attributes = append(attributes, &commonv1.KeyValue{Key: key, Value: stringAnyValue(enriched[key])})
 	}
-
 	return attributes
 }
 
-// buildGPUUUIDToIndexMap builds a UUID → GPU index lookup from the collector snapshot.
-func buildGPUUUIDToIndexMap(data *collector.HealthData) map[string]string {
-	m := make(map[string]string)
-	if len(data.GPUUUIDToIndex) == 0 {
-		return m
+type identityContext struct {
+	catalog *collector.EntityCatalog
+}
+
+func newIdentityContext(data *collector.HealthData) identityContext {
+	catalog := data.EntityCatalog
+	if catalog == nil && data.MachineInfo != nil {
+		catalog = collector.NewEntityCatalog(data.MachineInfo, data.GPUUUIDToIndex)
 	}
-	for uuid, gpuIndex := range data.GPUUUIDToIndex {
-		if uuid == "" || gpuIndex == "" {
-			continue
+	ctx := identityContext{catalog: catalog}
+	return ctx
+}
+
+func (ctx identityContext) enrichLabels(labels map[string]string) map[string]string {
+	enriched := make(map[string]string, len(labels)+6)
+	for key, value := range labels {
+		if value = strings.TrimSpace(value); value != "" {
+			enriched[key] = value
 		}
-		m[uuid] = gpuIndex
 	}
-	return m
+
+	if cpuID := enriched["cpu_id"]; cpuID != "" {
+		addLabelIfMissing(enriched, "cpu", cpuID)
+	}
+
+	if ctx.catalog == nil {
+		return enriched
+	}
+
+	uuid := enriched["uuid"]
+	isGPUParentNVLink := enriched["gpu_uuid"] != ""
+	if isGPUParentNVLink {
+		uuid = enriched["gpu_uuid"]
+	}
+	if uuid == "" && enriched["gpu"] != "" {
+		uuid = ctx.catalog.GPUUUIDByIndex[enriched["gpu"]]
+	}
+	if uuid == "" {
+		return enriched
+	}
+
+	gpuIdentity, ok := ctx.catalog.GPUsByUUID[uuid]
+	if !ok {
+		return enriched
+	}
+	if isGPUParentNVLink {
+		addLabelIfMissing(enriched, "gpu_uuid", gpuIdentity.UUID)
+	} else {
+		addLabelIfMissing(enriched, "uuid", gpuIdentity.UUID)
+	}
+	addLabelIfMissing(enriched, "gpu", gpuIdentity.GPU)
+	addLabelIfMissing(enriched, "pci_bus_id", gpuIdentity.PCIBusID)
+	addLabelIfMissing(enriched, "device", gpuIdentity.Device)
+	addLabelIfMissing(enriched, "model_name", gpuIdentity.ModelName)
+	addLabelIfMissing(enriched, "gpu_serial", gpuIdentity.GPUSerial)
+	addLabelIfMissing(enriched, "cluster_uuid", gpuIdentity.ClusterUUID)
+	addLabelIfMissing(enriched, "clique_id", gpuIdentity.CliqueID)
+	return enriched
+}
+
+func addLabelIfMissing(labels map[string]string, key, value string) {
+	if labels[key] == "" && strings.TrimSpace(value) != "" {
+		labels[key] = strings.TrimSpace(value)
+	}
 }
 
 // convertToOTLPLogs converts HealthData events and component data to OTLP log records
 func (c *otlpConverter) convertToOTLPLogs(data *collector.HealthData) []*logsv1.LogRecord {
 	var logRecords []*logsv1.LogRecord
+	identity := newIdentityContext(data)
 
 	// Add events as log records
 	if len(data.Events) > 0 {
@@ -362,9 +505,13 @@ func (c *otlpConverter) convertToOTLPLogs(data *collector.HealthData) []*logsv1.
 					},
 				},
 			}
-			extraInfo := event.ExtraInfo
-			if extraInfo == nil {
-				extraInfo = map[string]string{}
+			extraInfo := cloneStringMap(event.ExtraInfo)
+			eventIdentity := identity.identityForEvent(extraInfo)
+			if len(eventIdentity) > 0 {
+				if rawIdentity, err := json.Marshal(eventIdentity); err == nil {
+					extraInfo["identity"] = string(rawIdentity)
+				}
+				attributes = append(attributes, labelsToOTLPAttributes(eventIdentity)...)
 			}
 			attributes = append(attributes, &commonv1.KeyValue{
 				Key:   "extra_info",
@@ -475,7 +622,7 @@ func (c *otlpConverter) convertToOTLPLogs(data *collector.HealthData) []*logsv1.
 			if typedIncidents, ok := toHealthStateIncidents(incidents); ok && len(typedIncidents) > 0 {
 				attributes = append(attributes, &commonv1.KeyValue{
 					Key:   "incidents",
-					Value: incidentsToOTLPArrayValue(typedIncidents),
+					Value: incidentsToOTLPArrayValue(typedIncidents, identity),
 				})
 			}
 
@@ -497,6 +644,73 @@ func (c *otlpConverter) convertToOTLPLogs(data *collector.HealthData) []*logsv1.
 	return logRecords
 }
 
+func cloneStringMap(src map[string]string) map[string]string {
+	dst := make(map[string]string, len(src)+1)
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
+
+func labelsToOTLPAttributes(labels map[string]string) []*commonv1.KeyValue {
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	attributes := make([]*commonv1.KeyValue, 0, len(keys))
+	for _, key := range keys {
+		attributes = append(attributes, &commonv1.KeyValue{Key: key, Value: stringAnyValue(labels[key])})
+	}
+	return attributes
+}
+
+func (ctx identityContext) identityForEvent(extraInfo map[string]string) map[string]string {
+	labels := make(map[string]string)
+	for _, key := range []string{"uuid", "gpu_uuid", "device_uuid", "gpu", "entity_id", "nvlink", "nvswitch", "cpu", "cpucore"} {
+		if value := strings.TrimSpace(extraInfo[key]); value != "" {
+			labels[key] = value
+		}
+	}
+
+	if labels["uuid"] == "" {
+		labels["uuid"] = labels["device_uuid"]
+	}
+	delete(labels, "device_uuid")
+	if key, value := identityFromEntityID(labels["entity_id"]); key != "" && labels[key] == "" {
+		labels[key] = value
+	}
+	delete(labels, "entity_id")
+
+	if labels["uuid"] == "" && labels["gpu_uuid"] == "" && labels["gpu"] == "" && labels["nvlink"] == "" &&
+		labels["nvswitch"] == "" && labels["cpu"] == "" && labels["cpucore"] == "" {
+		return nil
+	}
+	return ctx.enrichLabels(labels)
+}
+
+func identityFromEntityID(entityID string) (string, string) {
+	prefix, id, ok := strings.Cut(strings.TrimSpace(entityID), "-")
+	if !ok || strings.TrimSpace(id) == "" {
+		return "", ""
+	}
+	switch strings.ToLower(strings.TrimSpace(prefix)) {
+	case "gpu":
+		return "gpu", strings.TrimSpace(id)
+	case "nvswitch":
+		return "nvswitch", strings.TrimSpace(id)
+	case "nvlink":
+		return "nvlink", strings.TrimSpace(id)
+	case "cpu":
+		return "cpu", strings.TrimSpace(id)
+	case "cpucore", "cpu_core":
+		return "cpucore", strings.TrimSpace(id)
+	default:
+		return "", ""
+	}
+}
+
 func extraInfoToAnyValue(extraInfo map[string]string) *commonv1.AnyValue {
 	values := make([]*commonv1.KeyValue, 0, len(extraInfo))
 	for key, raw := range extraInfo {
@@ -513,7 +727,7 @@ func extraInfoToAnyValue(extraInfo map[string]string) *commonv1.AnyValue {
 	}
 }
 
-func incidentsToOTLPArrayValue(incidents []apiv1.HealthStateIncident) *commonv1.AnyValue {
+func incidentsToOTLPArrayValue(incidents []apiv1.HealthStateIncident, identity identityContext) *commonv1.AnyValue {
 	values := make([]*commonv1.AnyValue, 0, len(incidents))
 	for _, inc := range incidents {
 		kvs := []*commonv1.KeyValue{
@@ -522,6 +736,8 @@ func incidentsToOTLPArrayValue(incidents []apiv1.HealthStateIncident) *commonv1.
 			{Key: "severity", Value: stringAnyValue(string(inc.Health))},
 			{Key: "error", Value: stringAnyValue(inc.Error)},
 		}
+		incidentIdentity := identity.identityForEvent(map[string]string{"entity_id": inc.EntityID})
+		kvs = append(kvs, labelsToOTLPAttributes(incidentIdentity)...)
 		values = append(values, &commonv1.AnyValue{
 			Value: &commonv1.AnyValue_KvlistValue{
 				KvlistValue: &commonv1.KeyValueList{Values: kvs},

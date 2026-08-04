@@ -556,7 +556,7 @@ func TestOTLPConverter_ConvertLabelsToOTLPAttributes(t *testing.T) {
 	}
 
 	converter := &otlpConverter{}
-	attrs := converter.convertLabelsToOTLPAttributes(labels, nil)
+	attrs := converter.convertLabelsToOTLPAttributes(labels, identityContext{})
 
 	assert.Len(t, attrs, 3)
 
@@ -575,15 +575,29 @@ func TestOTLPConverter_ConvertLabelsToOTLPAttributes_EmptyLabels(t *testing.T) {
 	labels := map[string]string{}
 
 	converter := &otlpConverter{}
-	attrs := converter.convertLabelsToOTLPAttributes(labels, nil)
+	attrs := converter.convertLabelsToOTLPAttributes(labels, identityContext{})
 
 	assert.Empty(t, attrs)
 }
 
 func TestOTLPConverter_ConvertLabelsToOTLPAttributes_EnrichesGPUIndex(t *testing.T) {
-	gpuUUIDToIndex := map[string]string{
-		"GPU-abc-123": "0",
-		"GPU-def-456": "1",
+	converter := &otlpConverter{}
+	identity := identityContext{
+		catalog: &collector.EntityCatalog{
+			GPUsByUUID: map[string]collector.GPUIdentity{
+				"GPU-abc-123": {
+					UUID:        "GPU-abc-123",
+					GPU:         "0",
+					PCIBusID:    "0000:01:00.0",
+					Device:      "nvidia0",
+					ModelName:   "NVIDIA H100",
+					GPUSerial:   "GPU-SERIAL-123",
+					ClusterUUID: "11111111-2222-3333-4444-555555555555",
+					CliqueID:    "7",
+				},
+			},
+			GPUUUIDByIndex: map[string]string{"0": "GPU-abc-123"},
+		},
 	}
 
 	t.Run("adds gpu label when uuid present but gpu absent", func(t *testing.T) {
@@ -592,8 +606,7 @@ func TestOTLPConverter_ConvertLabelsToOTLPAttributes_EnrichesGPUIndex(t *testing
 			"gpud_component": "accelerator-nvidia-utilization",
 		}
 
-		converter := &otlpConverter{}
-		attrs := converter.convertLabelsToOTLPAttributes(labels, gpuUUIDToIndex)
+		attrs := converter.convertLabelsToOTLPAttributes(labels, identity)
 
 		attrMap := make(map[string]string)
 		for _, attr := range attrs {
@@ -602,6 +615,13 @@ func TestOTLPConverter_ConvertLabelsToOTLPAttributes_EnrichesGPUIndex(t *testing
 
 		assert.Equal(t, "0", attrMap["gpu"], "should enrich with gpu index from machine info")
 		assert.Equal(t, "GPU-abc-123", attrMap["uuid"])
+		assert.Equal(t, "0000:01:00.0", attrMap["pci_bus_id"])
+		assert.Equal(t, "nvidia0", attrMap["device"])
+		assert.Equal(t, "NVIDIA H100", attrMap["model_name"])
+		assert.Equal(t, "GPU-SERIAL-123", attrMap["gpu_serial"])
+		assert.Equal(t, "11111111-2222-3333-4444-555555555555", attrMap["cluster_uuid"])
+		assert.Equal(t, "7", attrMap["clique_id"])
+		assert.NotContains(t, attrMap, "hostname")
 	})
 
 	t.Run("skips enrichment when gpu label already present (DCGM)", func(t *testing.T) {
@@ -611,8 +631,7 @@ func TestOTLPConverter_ConvertLabelsToOTLPAttributes_EnrichesGPUIndex(t *testing
 			"gpud_component": "accelerator-nvidia-dcgm-clock",
 		}
 
-		converter := &otlpConverter{}
-		attrs := converter.convertLabelsToOTLPAttributes(labels, gpuUUIDToIndex)
+		attrs := converter.convertLabelsToOTLPAttributes(labels, identity)
 
 		gpuCount := 0
 		for _, attr := range attrs {
@@ -629,8 +648,7 @@ func TestOTLPConverter_ConvertLabelsToOTLPAttributes_EnrichesGPUIndex(t *testing
 			"gpud_component": "accelerator-nvidia-utilization",
 		}
 
-		converter := &otlpConverter{}
-		attrs := converter.convertLabelsToOTLPAttributes(labels, gpuUUIDToIndex)
+		attrs := converter.convertLabelsToOTLPAttributes(labels, identity)
 
 		attrMap := make(map[string]string)
 		for _, attr := range attrs {
@@ -647,8 +665,7 @@ func TestOTLPConverter_ConvertLabelsToOTLPAttributes_EnrichesGPUIndex(t *testing
 			"mount_point":    "/",
 		}
 
-		converter := &otlpConverter{}
-		attrs := converter.convertLabelsToOTLPAttributes(labels, gpuUUIDToIndex)
+		attrs := converter.convertLabelsToOTLPAttributes(labels, identity)
 
 		attrMap := make(map[string]string)
 		for _, attr := range attrs {
@@ -665,8 +682,7 @@ func TestOTLPConverter_ConvertLabelsToOTLPAttributes_EnrichesGPUIndex(t *testing
 			"gpud_component": "accelerator-nvidia-utilization",
 		}
 
-		converter := &otlpConverter{}
-		attrs := converter.convertLabelsToOTLPAttributes(labels, nil)
+		attrs := converter.convertLabelsToOTLPAttributes(labels, identityContext{})
 
 		attrMap := make(map[string]string)
 		for _, attr := range attrs {
@@ -676,50 +692,121 @@ func TestOTLPConverter_ConvertLabelsToOTLPAttributes_EnrichesGPUIndex(t *testing
 		_, hasGPU := attrMap["gpu"]
 		assert.False(t, hasGPU, "should not add gpu label when mapping is nil")
 	})
+
+	t.Run("resolves GPU identity from gpu index", func(t *testing.T) {
+		attrs := converter.convertLabelsToOTLPAttributes(map[string]string{"gpu": "0"}, identity)
+		attrMap := make(map[string]string)
+		for _, attr := range attrs {
+			attrMap[attr.Key] = attr.Value.GetStringValue()
+		}
+
+		assert.Equal(t, "GPU-abc-123", attrMap["uuid"])
+		assert.Equal(t, "NVIDIA H100", attrMap["model_name"])
+		assert.Equal(t, "GPU-SERIAL-123", attrMap["gpu_serial"])
+		assert.Equal(t, "11111111-2222-3333-4444-555555555555", attrMap["cluster_uuid"])
+		assert.Equal(t, "7", attrMap["clique_id"])
+	})
+
+	t.Run("uses gpu_uuid contract for GPU-parent NVLink", func(t *testing.T) {
+		attrs := converter.convertLabelsToOTLPAttributes(map[string]string{
+			"gpu_uuid": "GPU-abc-123",
+			"nvlink":   "3",
+		}, identity)
+		attrMap := make(map[string]string)
+		for _, attr := range attrs {
+			attrMap[attr.Key] = attr.Value.GetStringValue()
+		}
+
+		assert.Equal(t, "GPU-abc-123", attrMap["gpu_uuid"])
+		assert.NotContains(t, attrMap, "uuid")
+		assert.Equal(t, "0", attrMap["gpu"])
+		assert.Equal(t, "3", attrMap["nvlink"])
+		assert.Equal(t, "NVIDIA H100", attrMap["model_name"])
+		assert.Equal(t, "GPU-SERIAL-123", attrMap["gpu_serial"])
+	})
+
+	t.Run("normalizes CPU identity without duplicating host name", func(t *testing.T) {
+		attrs := converter.convertLabelsToOTLPAttributes(map[string]string{"cpu_id": "1"}, identity)
+		attrMap := make(map[string]string)
+		for _, attr := range attrs {
+			attrMap[attr.Key] = attr.Value.GetStringValue()
+		}
+
+		assert.Equal(t, "1", attrMap["cpu"])
+		assert.Equal(t, "1", attrMap["cpu_id"])
+		assert.NotContains(t, attrMap, "hostname")
+	})
+
+	t.Run("does not overwrite source labels", func(t *testing.T) {
+		attrs := converter.convertLabelsToOTLPAttributes(map[string]string{
+			"uuid":         "GPU-abc-123",
+			"pci_bus_id":   "source-pci",
+			"device":       "source-device",
+			"model_name":   "source-model",
+			"gpu_serial":   "source-serial",
+			"cluster_uuid": "source-cluster",
+			"clique_id":    "9",
+			"hostname":     "source-host",
+		}, identity)
+		attrMap := make(map[string]string)
+		for _, attr := range attrs {
+			attrMap[attr.Key] = attr.Value.GetStringValue()
+		}
+
+		assert.Equal(t, "source-pci", attrMap["pci_bus_id"])
+		assert.Equal(t, "source-device", attrMap["device"])
+		assert.Equal(t, "source-model", attrMap["model_name"])
+		assert.Equal(t, "source-serial", attrMap["gpu_serial"])
+		assert.Equal(t, "source-cluster", attrMap["cluster_uuid"])
+		assert.Equal(t, "9", attrMap["clique_id"])
+		assert.Equal(t, "source-host", attrMap["hostname"])
+	})
 }
 
-func TestBuildGPUUUIDToIndexMap(t *testing.T) {
-	t.Run("builds map from machine info", func(t *testing.T) {
-		data := &collector.HealthData{
-			GPUUUIDToIndex: map[string]string{
-				"GPU-abc-123": "0",
-				"GPU-def-456": "1",
+func TestOTLPConverter_EnrichesGPUEventIdentity(t *testing.T) {
+	data := &collector.HealthData{
+		Timestamp: time.Now(),
+		MachineID: "test-machine",
+		EntityCatalog: &collector.EntityCatalog{
+			Hostname: "gpu-node-01",
+			GPUsByUUID: map[string]collector.GPUIdentity{
+				"GPU-abc": {
+					UUID:        "GPU-abc",
+					GPU:         "0",
+					PCIBusID:    "0000:01:00.0",
+					Device:      "nvidia0",
+					ModelName:   "NVIDIA H100",
+					GPUSerial:   "GPU-SERIAL-123",
+					ClusterUUID: "11111111-2222-3333-4444-555555555555",
+					CliqueID:    "7",
+				},
 			},
-		}
+			GPUUUIDByIndex: map[string]string{"0": "GPU-abc"},
+		},
+		Events: eventstore.Events{{
+			Time:      time.Now(),
+			Component: "accelerator-nvidia-error-xid",
+			Name:      "xid",
+			Type:      "critical",
+			ExtraInfo: map[string]string{"device_uuid": "GPU-abc"},
+		}},
+	}
 
-		m := buildGPUUUIDToIndexMap(data)
-		assert.Equal(t, "0", m["GPU-abc-123"])
-		assert.Equal(t, "1", m["GPU-def-456"])
-		assert.Len(t, m, 2)
-	})
+	logs := NewOTLPConverter().Convert(data).Logs.ResourceLogs[0].ScopeLogs[0].LogRecords
+	require.Len(t, logs, 1)
+	assert.Equal(t, "0", findAttribute(t, logs[0].Attributes, "gpu").GetStringValue())
+	assert.Equal(t, "NVIDIA H100", findAttribute(t, logs[0].Attributes, "model_name").GetStringValue())
+	assert.Equal(t, "GPU-SERIAL-123", findAttribute(t, logs[0].Attributes, "gpu_serial").GetStringValue())
+	assert.Equal(t, "11111111-2222-3333-4444-555555555555", findAttribute(t, logs[0].Attributes, "cluster_uuid").GetStringValue())
+	assert.Equal(t, "7", findAttribute(t, logs[0].Attributes, "clique_id").GetStringValue())
 
-	t.Run("returns empty map when machine info is nil", func(t *testing.T) {
-		data := &collector.HealthData{}
-		m := buildGPUUUIDToIndexMap(data)
-		assert.Empty(t, m)
-	})
-
-	t.Run("returns empty map when mapping is nil", func(t *testing.T) {
-		data := &collector.HealthData{
-			GPUUUIDToIndex: nil,
-		}
-		m := buildGPUUUIDToIndexMap(data)
-		assert.Empty(t, m)
-	})
-
-	t.Run("skips entries with empty uuid or index", func(t *testing.T) {
-		data := &collector.HealthData{
-			GPUUUIDToIndex: map[string]string{
-				"GPU-abc-123": "0",
-				"":            "1",
-				"GPU-ghi-789": "",
-			},
-		}
-
-		m := buildGPUUUIDToIndexMap(data)
-		assert.Equal(t, "0", m["GPU-abc-123"])
-		assert.Len(t, m, 1)
-	})
+	extraInfo := findAttribute(t, logs[0].Attributes, "extra_info").GetKvlistValue()
+	identity := findMapValue(t, extraInfo.Values, "identity").GetKvlistValue()
+	require.NotNil(t, identity)
+	assert.Equal(t, "GPU-abc", findMapValue(t, identity.Values, "uuid").GetStringValue())
+	for _, value := range identity.Values {
+		assert.NotEqual(t, "hostname", value.Key)
+	}
 }
 
 func TestOTLPConverter_SummaryMetric(t *testing.T) {
@@ -772,6 +859,10 @@ func TestOTLPConverter_SummaryMetric(t *testing.T) {
 
 func TestOTLPConverter_UpMetric(t *testing.T) {
 	timestamp := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
+	originalAgentStartTime := agentStartTime
+	agentStartTime = timestamp.Add(-15*time.Minute - 4*time.Second)
+	t.Cleanup(func() { agentStartTime = originalAgentStartTime })
+
 	data := &collector.HealthData{
 		Timestamp: timestamp,
 		MachineID: "test-machine",
@@ -802,6 +893,129 @@ func TestOTLPConverter_UpMetric(t *testing.T) {
 	assert.Equal(t, uint64(timestamp.UnixNano()), point.TimeUnixNano)
 	assert.Equal(t, int64(1), point.GetAsInt())
 	assert.Empty(t, point.Attributes)
+
+	uptimeMetric := findOTLPMetric(metrics, "fleetint_agent_uptime_seconds")
+	require.NotNil(t, uptimeMetric, "Should have fleetint_agent_uptime_seconds metric")
+	assert.Empty(t, uptimeMetric.Unit)
+	assert.Contains(t, uptimeMetric.Description, "process started")
+	require.Len(t, uptimeMetric.GetGauge().DataPoints, 1)
+	uptimePoint := uptimeMetric.GetGauge().DataPoints[0]
+	assert.Equal(t, uint64(timestamp.UnixNano()), uptimePoint.TimeUnixNano)
+	assert.Equal(t, 904.0, uptimePoint.GetAsDouble())
+	assert.Empty(t, uptimePoint.Attributes)
+}
+
+func TestOTLPConverter_AgentUptimeOmitsFutureStartTime(t *testing.T) {
+	timestamp := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
+	originalAgentStartTime := agentStartTime
+	agentStartTime = timestamp.Add(time.Second)
+	t.Cleanup(func() { agentStartTime = originalAgentStartTime })
+
+	converted := NewOTLPConverter().Convert(&collector.HealthData{
+		Timestamp: timestamp,
+		MachineID: "test-machine",
+	})
+	convertedMetrics := converted.Metrics.ResourceMetrics[0].ScopeMetrics[0].Metrics
+	assert.Nil(t, findOTLPMetric(convertedMetrics, "fleetint_agent_uptime_seconds"))
+}
+
+func TestOTLPConverter_InventoryMetrics(t *testing.T) {
+	timestamp := time.Date(2026, 8, 4, 14, 0, 0, 0, time.UTC)
+	data := &collector.HealthData{
+		Timestamp: timestamp,
+		MachineID: "test-machine",
+		EntityCatalog: &collector.EntityCatalog{
+			GPUDriverVersion:  "575.57.08",
+			CUDADriverVersion: "12.9",
+			BootTime:          timestamp.Add(-2*time.Hour - 3*time.Second),
+			GPUsByUUID: map[string]collector.GPUIdentity{
+				"GPU-b": {
+					UUID:         "GPU-b",
+					GPU:          "1",
+					GPUSerial:    "SERIAL-b",
+					VBIOSVersion: "97.00.82.00.5F",
+				},
+				"GPU-a": {
+					UUID:         "GPU-a",
+					GPU:          "0",
+					GPUSerial:    "SERIAL-a",
+					VBIOSVersion: "97.00.82.00.5E",
+				},
+				"GPU-no-firmware-data": {
+					UUID: "GPU-no-firmware-data",
+					GPU:  "2",
+				},
+			},
+		},
+	}
+
+	converted := NewOTLPConverter().Convert(data)
+	convertedMetrics := converted.Metrics.ResourceMetrics[0].ScopeMetrics[0].Metrics
+
+	software := findOTLPMetric(convertedMetrics, "fleetint_node_software_info")
+	require.NotNil(t, software)
+	require.Len(t, software.GetGauge().DataPoints, 1)
+	softwarePoint := software.GetGauge().DataPoints[0]
+	assert.Equal(t, 1.0, softwarePoint.GetAsDouble())
+	assert.Equal(t, map[string]string{
+		"cuda_driver_version": "12.9",
+		"gpu_driver_version":  "575.57.08",
+	}, stringAttributeMap(softwarePoint.Attributes))
+
+	uptime := findOTLPMetric(convertedMetrics, "fleetint_node_uptime_seconds")
+	require.NotNil(t, uptime)
+	assert.Empty(t, uptime.Unit)
+	require.Len(t, uptime.GetGauge().DataPoints, 1)
+	assert.Equal(t, 7203.0, uptime.GetGauge().DataPoints[0].GetAsDouble())
+	assert.Empty(t, uptime.GetGauge().DataPoints[0].Attributes)
+
+	firmware := findOTLPMetric(convertedMetrics, "fleetint_gpu_firmware_info")
+	require.NotNil(t, firmware)
+	require.Len(t, firmware.GetGauge().DataPoints, 2)
+	assert.Equal(t, map[string]string{
+		"gpu":           "0",
+		"gpu_serial":    "SERIAL-a",
+		"uuid":          "GPU-a",
+		"vbios_version": "97.00.82.00.5E",
+	}, stringAttributeMap(firmware.GetGauge().DataPoints[0].Attributes))
+	assert.Equal(t, map[string]string{
+		"gpu":           "1",
+		"gpu_serial":    "SERIAL-b",
+		"uuid":          "GPU-b",
+		"vbios_version": "97.00.82.00.5F",
+	}, stringAttributeMap(firmware.GetGauge().DataPoints[1].Attributes))
+	for _, point := range firmware.GetGauge().DataPoints {
+		assert.Equal(t, 1.0, point.GetAsDouble())
+		assert.Equal(t, uint64(timestamp.UnixNano()), point.TimeUnixNano)
+	}
+}
+
+func TestOTLPConverter_InventoryMetricsOmitUnavailableValues(t *testing.T) {
+	timestamp := time.Date(2026, 8, 4, 14, 0, 0, 0, time.UTC)
+	data := &collector.HealthData{
+		Timestamp: timestamp,
+		MachineID: "test-machine",
+		EntityCatalog: &collector.EntityCatalog{
+			BootTime: timestamp.Add(time.Minute),
+			GPUsByUUID: map[string]collector.GPUIdentity{
+				"GPU-a": {UUID: "GPU-a", GPU: "0"},
+			},
+		},
+	}
+
+	converted := NewOTLPConverter().Convert(data)
+	convertedMetrics := converted.Metrics.ResourceMetrics[0].ScopeMetrics[0].Metrics
+	assert.Nil(t, findOTLPMetric(convertedMetrics, "fleetint_node_software_info"))
+	assert.Nil(t, findOTLPMetric(convertedMetrics, "fleetint_node_uptime_seconds"))
+	assert.Nil(t, findOTLPMetric(convertedMetrics, "fleetint_gpu_firmware_info"))
+}
+
+func stringAttributeMap(attributes []*commonv1.KeyValue) map[string]string {
+	result := make(map[string]string, len(attributes))
+	for _, attribute := range attributes {
+		result[attribute.Key] = attribute.Value.GetStringValue()
+	}
+	return result
 }
 
 func findOTLPMetric(metrics []*metricsv1.Metric, name string) *metricsv1.Metric {
@@ -819,6 +1033,9 @@ func TestOTLPConverter_ResourceAttributes(t *testing.T) {
 		MachineID:   "test-machine-123",
 		NodeGroup:   "group-a",
 		ComputeZone: "zone-a",
+		EntityCatalog: &collector.EntityCatalog{
+			Hostname: "gpu-node-01",
+		},
 		ComponentData: map[string]interface{}{
 			"comp1": map[string]any{},
 			"comp2": map[string]any{},
@@ -843,6 +1060,8 @@ func TestOTLPConverter_ResourceAttributes(t *testing.T) {
 	assert.Equal(t, "test-machine-123", attrMap["machine.id"])
 	assert.Equal(t, "group-a", attrMap["node_group"])
 	assert.Equal(t, "zone-a", attrMap["compute_zone"])
+	assert.Equal(t, "gpu-node-01", attrMap["host.name"])
+	assert.NotContains(t, attrMap, "hostname")
 
 	logResourceAttrMap := make(map[string]string)
 	for _, attr := range otlpData.Logs.ResourceLogs[0].Resource.Attributes {
@@ -852,6 +1071,29 @@ func TestOTLPConverter_ResourceAttributes(t *testing.T) {
 	}
 	assert.Equal(t, "group-a", logResourceAttrMap["node_group"])
 	assert.Equal(t, "zone-a", logResourceAttrMap["compute_zone"])
+	assert.Equal(t, "gpu-node-01", logResourceAttrMap["host.name"])
+	assert.NotContains(t, logResourceAttrMap, "hostname")
+}
+
+func TestIdentityFromEntityID(t *testing.T) {
+	tests := []struct {
+		entityID string
+		wantKey  string
+		wantID   string
+	}{
+		{entityID: "Gpu-0", wantKey: "gpu", wantID: "0"},
+		{entityID: "NvSwitch-3", wantKey: "nvswitch", wantID: "3"},
+		{entityID: "CpuCore-7", wantKey: "cpucore", wantID: "7"},
+		{entityID: "unknown-1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.entityID, func(t *testing.T) {
+			key, id := identityFromEntityID(tt.entityID)
+			assert.Equal(t, tt.wantKey, key)
+			assert.Equal(t, tt.wantID, id)
+		})
+	}
 }
 
 func TestOTLPConverter_ResourceAttributesOmitEmptyOptionalValues(t *testing.T) {

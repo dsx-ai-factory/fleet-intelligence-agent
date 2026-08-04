@@ -396,6 +396,27 @@ func GetMachineGPUInfo(nvmlInstance nvidianvml.Instance) (*apiv1.MachineGPUInfo,
 			appendCollectionError(uuid, "get_pci_bus_id", err.Error())
 		}
 
+		modelName, ret := dev.GetName()
+		if ret != nvml.SUCCESS {
+			if ret != nvml.ERROR_NOT_SUPPORTED {
+				appendCollectionError(uuid, "get_name", nvml.ErrorString(ret))
+			}
+			modelName = ""
+		}
+
+		var clusterUUID string
+		var cliqueID *uint32
+		if nvmlInstance.FabricStateSupported() {
+			fabricState, fabricErr := dev.GetFabricState()
+			if fabricErr != nil {
+				log.Logger.Debugw("failed to get NVLink fabric identity", "uuid", uuid, "error", fabricErr)
+			} else {
+				clusterUUID = fabricState.ClusterUUID
+				id := fabricState.CliqueID
+				cliqueID = &id
+			}
+		}
+
 		vbios, ret := dev.GetVbiosVersion()
 		vbiosVersion := ""
 		if ret != nvml.SUCCESS {
@@ -417,6 +438,9 @@ func GetMachineGPUInfo(nvmlInstance nvidianvml.Instance) (*apiv1.MachineGPUInfo,
 		info.GPUs = append(info.GPUs, apiv1.MachineGPUInstance{
 			UUID:         uuid,
 			GPUIndex:     gpuIndex,
+			ModelName:    modelName,
+			ClusterUUID:  clusterUUID,
+			CliqueID:     cliqueID,
 			SN:           serialID,
 			MinorID:      strconv.Itoa(minorID),
 			BoardID:      boardID,
