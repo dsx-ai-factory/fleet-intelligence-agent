@@ -30,6 +30,7 @@ type GPUIdentity struct {
 	PCIBusID     string
 	Device       string
 	ModelName    string
+	Architecture string
 	GPUSerial    string
 	VBIOSVersion string
 	ClusterUUID  string
@@ -42,6 +43,7 @@ type EntityCatalog struct {
 	Hostname          string
 	GPUDriverVersion  string
 	CUDADriverVersion string
+	KernelVersion     string
 	BootTime          time.Time
 	GPUsByUUID        map[string]GPUIdentity
 	GPUUUIDByIndex    map[string]string
@@ -73,6 +75,7 @@ func NewEntityCatalog(info *machineinfo.MachineInfo, dcgmGPUIndexes map[string]s
 	catalog.Hostname = strings.TrimSpace(info.Hostname)
 	catalog.GPUDriverVersion = strings.TrimSpace(info.GPUDriverVersion)
 	catalog.CUDADriverVersion = strings.TrimSpace(info.CUDAVersion)
+	catalog.KernelVersion = strings.TrimSpace(info.KernelVersion)
 	if !info.Uptime.IsZero() {
 		catalog.BootTime = info.Uptime.UTC()
 	}
@@ -81,6 +84,7 @@ func NewEntityCatalog(info *machineinfo.MachineInfo, dcgmGPUIndexes map[string]s
 	}
 
 	defaultModelName := strings.TrimSpace(info.GPUInfo.Product)
+	defaultArchitecture := strings.TrimSpace(info.GPUInfo.Architecture)
 	for _, gpuInfo := range info.GPUInfo.GPUs {
 		uuid := strings.TrimSpace(gpuInfo.UUID)
 		if uuid == "" {
@@ -93,6 +97,7 @@ func NewEntityCatalog(info *machineinfo.MachineInfo, dcgmGPUIndexes map[string]s
 			identity.GPU = strings.TrimSpace(gpuInfo.GPUIndex)
 		}
 		identity.PCIBusID = strings.TrimSpace(gpuInfo.BusID)
+		identity.Architecture = defaultArchitecture
 		identity.GPUSerial = strings.TrimSpace(gpuInfo.SN)
 		identity.VBIOSVersion = strings.TrimSpace(gpuInfo.VBIOSVersion)
 		identity.ModelName = strings.TrimSpace(gpuInfo.ModelName)

@@ -263,10 +263,11 @@ func inventoryMetrics(data *collector.HealthData, catalog *collector.EntityCatal
 	softwareLabels := map[string]string{}
 	addLabelIfMissing(softwareLabels, "gpu_driver_version", catalog.GPUDriverVersion)
 	addLabelIfMissing(softwareLabels, "cuda_driver_version", catalog.CUDADriverVersion)
+	addLabelIfMissing(softwareLabels, "kernel_version", catalog.KernelVersion)
 	if len(softwareLabels) > 0 {
 		inventory = append(inventory, gaugeMetric(
 			"fleetint_node_software_info",
-			"Node-scoped GPU software version information.",
+			"Node-scoped GPU software and kernel version information.",
 			"",
 			data.Timestamp,
 			1,
@@ -294,7 +295,7 @@ func inventoryMetrics(data *collector.HealthData, catalog *collector.EntityCatal
 	firmwarePoints := make([]*metricsv1.NumberDataPoint, 0, len(uuids))
 	for _, uuid := range uuids {
 		gpu := catalog.GPUsByUUID[uuid]
-		if gpu.GPUSerial == "" && gpu.VBIOSVersion == "" {
+		if gpu.GPUSerial == "" && gpu.VBIOSVersion == "" && gpu.Architecture == "" {
 			continue
 		}
 		labels := map[string]string{}
@@ -302,12 +303,13 @@ func inventoryMetrics(data *collector.HealthData, catalog *collector.EntityCatal
 		addLabelIfMissing(labels, "uuid", gpu.UUID)
 		addLabelIfMissing(labels, "gpu_serial", gpu.GPUSerial)
 		addLabelIfMissing(labels, "vbios_version", gpu.VBIOSVersion)
+		addLabelIfMissing(labels, "gpu_architecture", gpu.Architecture)
 		firmwarePoints = append(firmwarePoints, gaugeDataPoint(data.Timestamp, 1, labels))
 	}
 	if len(firmwarePoints) > 0 {
 		inventory = append(inventory, &metricsv1.Metric{
 			Name:        "fleetint_gpu_firmware_info",
-			Description: "Per-GPU serial number and VBIOS version information.",
+			Description: "Per-GPU architecture, serial number, and VBIOS version information.",
 			Data: &metricsv1.Metric_Gauge{Gauge: &metricsv1.Gauge{
 				DataPoints: firmwarePoints,
 			}},

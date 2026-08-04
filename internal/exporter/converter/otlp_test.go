@@ -893,23 +893,27 @@ func TestOTLPConverter_InventoryMetrics(t *testing.T) {
 		EntityCatalog: &collector.EntityCatalog{
 			GPUDriverVersion:  "575.57.08",
 			CUDADriverVersion: "12.9",
+			KernelVersion:     "6.14.0-27-generic",
 			BootTime:          timestamp.Add(-2*time.Hour - 3*time.Second),
 			GPUsByUUID: map[string]collector.GPUIdentity{
 				"GPU-b": {
 					UUID:         "GPU-b",
 					GPU:          "1",
+					Architecture: "blackwell",
 					GPUSerial:    "SERIAL-b",
 					VBIOSVersion: "97.00.82.00.5F",
 				},
 				"GPU-a": {
 					UUID:         "GPU-a",
 					GPU:          "0",
+					Architecture: "blackwell",
 					GPUSerial:    "SERIAL-a",
 					VBIOSVersion: "97.00.82.00.5E",
 				},
-				"GPU-no-firmware-data": {
-					UUID: "GPU-no-firmware-data",
-					GPU:  "2",
+				"GPU-architecture-only": {
+					UUID:         "GPU-architecture-only",
+					GPU:          "2",
+					Architecture: "blackwell",
 				},
 			},
 		},
@@ -926,6 +930,7 @@ func TestOTLPConverter_InventoryMetrics(t *testing.T) {
 	assert.Equal(t, map[string]string{
 		"cuda_driver_version": "12.9",
 		"gpu_driver_version":  "575.57.08",
+		"kernel_version":      "6.14.0-27-generic",
 	}, stringAttributeMap(softwarePoint.Attributes))
 
 	uptime := findOTLPMetric(convertedMetrics, "fleetint_node_uptime_seconds")
@@ -937,19 +942,26 @@ func TestOTLPConverter_InventoryMetrics(t *testing.T) {
 
 	firmware := findOTLPMetric(convertedMetrics, "fleetint_gpu_firmware_info")
 	require.NotNil(t, firmware)
-	require.Len(t, firmware.GetGauge().DataPoints, 2)
+	require.Len(t, firmware.GetGauge().DataPoints, 3)
 	assert.Equal(t, map[string]string{
-		"gpu":           "0",
-		"gpu_serial":    "SERIAL-a",
-		"uuid":          "GPU-a",
-		"vbios_version": "97.00.82.00.5E",
+		"gpu":              "0",
+		"gpu_architecture": "blackwell",
+		"gpu_serial":       "SERIAL-a",
+		"uuid":             "GPU-a",
+		"vbios_version":    "97.00.82.00.5E",
 	}, stringAttributeMap(firmware.GetGauge().DataPoints[0].Attributes))
 	assert.Equal(t, map[string]string{
-		"gpu":           "1",
-		"gpu_serial":    "SERIAL-b",
-		"uuid":          "GPU-b",
-		"vbios_version": "97.00.82.00.5F",
+		"gpu":              "2",
+		"gpu_architecture": "blackwell",
+		"uuid":             "GPU-architecture-only",
 	}, stringAttributeMap(firmware.GetGauge().DataPoints[1].Attributes))
+	assert.Equal(t, map[string]string{
+		"gpu":              "1",
+		"gpu_architecture": "blackwell",
+		"gpu_serial":       "SERIAL-b",
+		"uuid":             "GPU-b",
+		"vbios_version":    "97.00.82.00.5F",
+	}, stringAttributeMap(firmware.GetGauge().DataPoints[2].Attributes))
 	for _, point := range firmware.GetGauge().DataPoints {
 		assert.Equal(t, 1.0, point.GetAsDouble())
 		assert.Equal(t, uint64(timestamp.UnixNano()), point.TimeUnixNano)

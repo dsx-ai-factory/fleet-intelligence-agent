@@ -34,9 +34,11 @@ func TestNewEntityCatalog(t *testing.T) {
 		Hostname:         "gpu-node-01",
 		GPUDriverVersion: "575.57.08",
 		CUDAVersion:      "12.9",
+		KernelVersion:    "6.14.0-27-generic",
 		Uptime:           metav1.NewTime(bootTime),
 		GPUInfo: &apiv1.MachineGPUInfo{
-			Product: "fallback-model",
+			Product:      "fallback-model",
+			Architecture: "hopper",
 			GPUs: []apiv1.MachineGPUInstance{
 				{
 					UUID:         "GPU-abc",
@@ -63,6 +65,7 @@ func TestNewEntityCatalog(t *testing.T) {
 	assert.Equal(t, "gpu-node-01", catalog.Hostname)
 	assert.Equal(t, "575.57.08", catalog.GPUDriverVersion)
 	assert.Equal(t, "12.9", catalog.CUDADriverVersion)
+	assert.Equal(t, "6.14.0-27-generic", catalog.KernelVersion)
 	assert.Equal(t, bootTime, catalog.BootTime)
 	assert.Equal(t, GPUIdentity{
 		UUID:         "GPU-abc",
@@ -70,12 +73,14 @@ func TestNewEntityCatalog(t *testing.T) {
 		PCIBusID:     "0000:01:00.0",
 		Device:       "nvidia2",
 		ModelName:    "NVIDIA H100",
+		Architecture: "hopper",
 		GPUSerial:    "GPU-SERIAL-123",
 		VBIOSVersion: "97.00.82.00.5F",
 		ClusterUUID:  "11111111-2222-3333-4444-555555555555",
 		CliqueID:     "0",
 	}, catalog.GPUsByUUID["GPU-abc"])
 	assert.Equal(t, "fallback-model", catalog.GPUsByUUID["GPU-def"].ModelName)
+	assert.Equal(t, "hopper", catalog.GPUsByUUID["GPU-def"].Architecture)
 	assert.Empty(t, catalog.GPUsByUUID["GPU-def"].GPUSerial)
 	assert.Empty(t, catalog.GPUsByUUID["GPU-def"].Device)
 	assert.Equal(t, "GPU-abc", catalog.GPUUUIDByIndex["0"])
