@@ -50,6 +50,7 @@ func TestToNodeUpsertRequestAgentConfigJSONIncludesZeroValues(t *testing.T) {
 
 func TestToNodeUpsertRequest(t *testing.T) {
 	bootTime := time.Date(2026, 4, 28, 12, 30, 0, 0, time.FixedZone("PDT", -7*60*60))
+	cliqueID := uint32(0)
 	req := ToNodeUpsertRequest(&inventory.Snapshot{
 		Hostname:                "host-a",
 		MachineID:               "machine-id",
@@ -94,6 +95,8 @@ func TestToNodeUpsertRequest(t *testing.T) {
 				GPUs: []inventory.GPUDevice{{
 					UUID:         "GPU-1",
 					BusID:        "0000:01:00.0",
+					ClusterUUID:  "11111111-2222-3333-4444-555555555555",
+					CliqueID:     &cliqueID,
 					SN:           "serial",
 					MinorID:      "1",
 					BoardID:      7,
@@ -145,6 +148,23 @@ func TestToNodeUpsertRequest(t *testing.T) {
 	require.Equal(t, "NVIDIA", req.Resources.GPUInfo.Manufacturer)
 	require.Len(t, req.Resources.GPUInfo.GPUs, 1)
 	require.Equal(t, 7, req.Resources.GPUInfo.GPUs[0].BoardID)
+	require.Equal(t, "11111111-2222-3333-4444-555555555555", req.Resources.GPUInfo.GPUs[0].ClusterUUID)
+	require.NotNil(t, req.Resources.GPUInfo.GPUs[0].CliqueID)
+	require.Equal(t, uint32(0), *req.Resources.GPUInfo.GPUs[0].CliqueID)
+	payload, err := json.Marshal(req.Resources.GPUInfo.GPUs[0])
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+		"uuid":"GPU-1",
+		"busID":"0000:01:00.0",
+		"clusterUUID":"11111111-2222-3333-4444-555555555555",
+		"cliqueID":0,
+		"sn":"serial",
+		"minorID":"1",
+		"boardID":7,
+		"vbiosVersion":"vbios",
+		"chassisSN":"chassis",
+		"gpuIndex":"0"
+	}`, string(payload))
 	require.Equal(t, "/dev/nvme0n1", req.Resources.DiskInfo.ContainerRootDisk)
 	require.Len(t, req.Resources.DiskInfo.BlockDevices, 1)
 	require.Equal(t, "parent0", req.Resources.DiskInfo.BlockDevices[0].Parents[0])

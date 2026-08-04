@@ -89,6 +89,8 @@ type GPUInfo struct {
 type GPUDevice struct {
 	UUID         string
 	BusID        string
+	ClusterUUID  string
+	CliqueID     *uint32
 	SN           string
 	MinorID      string
 	BoardID      int

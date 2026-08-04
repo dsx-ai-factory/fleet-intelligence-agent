@@ -107,6 +107,7 @@ func ValidateNodeUpsertRequest(req *backendclient.NodeUpsertRequest) []Issue {
 		prefix := fmt.Sprintf("resources.gpuInfo.gpus[%d]", i)
 		validateLen(&issues, "length", prefix+".uuid", gpu.UUID, 255)
 		validateLen(&issues, "length", prefix+".gpuIndex", gpu.GPUIndex, 64)
+		validateLen(&issues, "length", prefix+".clusterUUID", gpu.ClusterUUID, 255)
 		validateGPUUUID(&issues, "format", prefix+".uuid", gpu.UUID)
 		if gpu.UUID != "" {
 			if _, exists := seenGPUUUID[gpu.UUID]; exists {

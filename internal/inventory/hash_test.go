@@ -127,6 +127,15 @@ func TestComputeHashDetectsInventoryItemChanges(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, baseHash, changedGPUHash)
 
+	changedNVLinkDomain := *base
+	changedNVLinkDomain.Resources.GPUInfo.GPUs = append([]GPUDevice(nil), base.Resources.GPUInfo.GPUs...)
+	cliqueID := uint32(0)
+	changedNVLinkDomain.Resources.GPUInfo.GPUs[0].ClusterUUID = "11111111-2222-3333-4444-555555555555"
+	changedNVLinkDomain.Resources.GPUInfo.GPUs[0].CliqueID = &cliqueID
+	changedNVLinkDomainHash, err := ComputeHash(&changedNVLinkDomain)
+	require.NoError(t, err)
+	require.NotEqual(t, baseHash, changedNVLinkDomainHash)
+
 	reorderedParents := *base
 	reorderedParents.Resources.DiskInfo.BlockDevices = append([]BlockDevice(nil), base.Resources.DiskInfo.BlockDevices...)
 	reorderedParents.Resources.DiskInfo.BlockDevices[0].Parents = []string{"root-parent", "immediate-parent"}
