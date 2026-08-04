@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 instances:
-  - url: fleet-intelligence-agent.docs.buildwithfern.com/fleet-intel/agent
+  - url: fleet-intel.docs.buildwithfern.com/fleet-intel/agent
     custom-domain: docs.nvidia.com/fleet-intel/agent
     multi-source: true
 
