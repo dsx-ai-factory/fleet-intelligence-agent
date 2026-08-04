@@ -108,13 +108,13 @@ The command prints each check result and exits non-zero if any hard requirement 
 
 ```bash
 # Pass token directly (visible in process list)
-sudo fleetint enroll --endpoint=https://api.example.com --token=<your-sak-token>
+sudo fleetint enroll --endpoint=https://data.fleet-intelligence.nvidia.com --token=<your-sak-token>
 
 # Read token from a file (recommended)
-sudo fleetint enroll --endpoint=https://api.example.com --token-file=/path/to/token
+sudo fleetint enroll --endpoint=https://data.fleet-intelligence.nvidia.com --token-file=/path/to/token
 
 # Read token from stdin
-echo "$TOKEN" | sudo fleetint enroll --endpoint=https://api.example.com --token-file=-
+echo "$TOKEN" | sudo fleetint enroll --endpoint=https://data.fleet-intelligence.nvidia.com --token-file=-
 ```
 
 Enrolls the agent with the Fleet Intelligence backend by exchanging a Service Account Key (SAK) token for a JWT token. The JWT token and backend endpoints are stored locally for subsequent data exports.
@@ -144,7 +144,7 @@ Metadata update behavior for `--node-group` and `--compute-zone`:
 5. The stored credentials are used automatically by the agent for data export
 
 **Example output:**
-```
+```text
 Enrollment succeeded
 ```
 
@@ -276,7 +276,7 @@ Returns metrics data in JSON format from all monitored components
 curl "http://localhost:15133/v1/metrics?startTime=$(date -d '1 hour ago' +%s)"
 
 # Get metrics for specific component
-curl "http://localhost:15133/v1/metrics?components=accelerator-nvidia-temperature"
+curl "http://localhost:15133/v1/metrics?components=accelerator-nvidia-dcgm-thermal"
 ```
 
 ### Component Events
@@ -313,6 +313,9 @@ Returns metrics in Prometheus exposition format for integration with monitoring 
 By default, fleetint uses a Unix socket for security. To allow external monitoring tools like Prometheus to scrape metrics over the network, switch to a TCP listener with the `--listen-address` flag:
 
 ```bash
+# Expose only on localhost
+sudo fleetint run --listen-address=127.0.0.1:15133
+
 # Expose on all interfaces
 sudo fleetint run --listen-address=0.0.0.0:15133
 
@@ -384,7 +387,7 @@ scrape_configs:
 
 ### High resource usage
 
-The agent should use <500MB RAM and <1% CPU. Higher usage might indicate:
+The agent should use &lt;500MB RAM and &lt;1% CPU. Higher usage might indicate:
 
 - Very frequent collection intervals (check `FLEETINT_COLLECT_INTERVAL`)
 - Large lookback windows (check `FLEETINT_METRICS_LOOKBACK` and `FLEETINT_EVENTS_LOOKBACK`)

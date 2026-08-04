@@ -30,7 +30,7 @@ make test
 
 ## Project Structure
 
-```
+```text
 fleetint/
 ├── cmd/
 │   └── fleetint/          # Main CLI application
@@ -191,4 +191,4 @@ make package-snapshot  # Build packages (no git tag required)
 
 ## Contributing
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for detailed contribution guidelines.
+See [CONTRIBUTING.md](https://github.com/NVIDIA/fleet-intelligence-agent/blob/main/CONTRIBUTING.md) for detailed contribution guidelines.

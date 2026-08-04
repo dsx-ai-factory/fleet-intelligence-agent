@@ -109,6 +109,6 @@ sudo dnf remove fleetint
 ```
 
 References:
-- DCGM: <https://docs.nvidia.com/datacenter/dcgm/latest/user-guide/getting-started.html#installation>
-- Fabric Manager: <https://docs.nvidia.com/datacenter/tesla/fabric-manager-user-guide/index.html#installing-fabric-manager>
-- NVAT (`nvattest`/`corelib`): <https://docs.nvidia.com/attestation/nv-attestation-sdk-cpp/latest/overview.html>
+- DCGM: [Installation](https://docs.nvidia.com/datacenter/dcgm/latest/user-guide/getting-started.html#installation)
+- Fabric Manager: [Installing Fabric Manager](https://docs.nvidia.com/datacenter/tesla/fabric-manager-user-guide/index.html#installing-fabric-manager)
+- NVAT (`nvattest`/`corelib`): [NV Attestation SDK](https://docs.nvidia.com/attestation/nv-attestation-sdk-cpp/latest/overview.html)
