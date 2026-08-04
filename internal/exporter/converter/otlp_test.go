@@ -228,6 +228,11 @@ func TestOTLPConverter_Convert_WithEvents_StructuredExtraInfo(t *testing.T) {
 	data := &collector.HealthData{
 		Timestamp: time.Now(),
 		MachineID: "test-machine",
+		EntityCatalog: &collector.EntityCatalog{
+			GPUsByUUID: map[string]collector.GPUIdentity{
+				"GPU-abc": {UUID: "GPU-abc", GPU: "0", PCIBusID: "0000:04:00.0"},
+			},
+		},
 		Events: eventstore.Events{
 			{
 				Time:      time.Date(2025, 11, 5, 12, 0, 0, 0, time.UTC),
@@ -256,6 +261,12 @@ func TestOTLPConverter_Convert_WithEvents_StructuredExtraInfo(t *testing.T) {
 	extraInfo := findAttribute(t, logs[0].Attributes, "extra_info").GetKvlistValue()
 	require.NotNil(t, extraInfo)
 	assert.Equal(t, "PCI:0000:04:00", findMapValue(t, extraInfo.Values, "device_uuid").GetStringValue())
+	for _, attr := range logs[0].Attributes {
+		assert.NotContains(t, []string{"uuid", "gpu", "pci_bus_id", "gpu_serial", "model_name"}, attr.Key)
+	}
+	for _, value := range extraInfo.Values {
+		assert.NotEqual(t, "identity", value.Key)
+	}
 
 	dataValue := findMapValue(t, extraInfo.Values, "data").GetKvlistValue()
 	require.NotNil(t, dataValue)
@@ -358,6 +369,7 @@ func TestOTLPConverter_Convert_WithComponentData(t *testing.T) {
 			require.Len(t, incidents.Values, 1)
 			incident := incidents.Values[0].GetKvlistValue()
 			require.NotNil(t, incident)
+			assert.Len(t, incident.Values, 4, "incident logs should not receive metric identity labels")
 			assert.Equal(t, "GPU-1234", findMapValue(t, incident.Values, "entity_id").GetStringValue())
 			assert.Equal(t, "Clock throttled", findMapValue(t, incident.Values, "message").GetStringValue())
 			assert.Equal(t, "Degraded", findMapValue(t, incident.Values, "severity").GetStringValue())
@@ -763,52 +775,6 @@ func TestOTLPConverter_ConvertLabelsToOTLPAttributes_EnrichesGPUIndex(t *testing
 	})
 }
 
-func TestOTLPConverter_EnrichesGPUEventIdentity(t *testing.T) {
-	data := &collector.HealthData{
-		Timestamp: time.Now(),
-		MachineID: "test-machine",
-		EntityCatalog: &collector.EntityCatalog{
-			Hostname: "gpu-node-01",
-			GPUsByUUID: map[string]collector.GPUIdentity{
-				"GPU-abc": {
-					UUID:        "GPU-abc",
-					GPU:         "0",
-					PCIBusID:    "0000:01:00.0",
-					Device:      "nvidia0",
-					ModelName:   "NVIDIA H100",
-					GPUSerial:   "GPU-SERIAL-123",
-					ClusterUUID: "11111111-2222-3333-4444-555555555555",
-					CliqueID:    "7",
-				},
-			},
-			GPUUUIDByIndex: map[string]string{"0": "GPU-abc"},
-		},
-		Events: eventstore.Events{{
-			Time:      time.Now(),
-			Component: "accelerator-nvidia-error-xid",
-			Name:      "xid",
-			Type:      "critical",
-			ExtraInfo: map[string]string{"device_uuid": "GPU-abc"},
-		}},
-	}
-
-	logs := NewOTLPConverter().Convert(data).Logs.ResourceLogs[0].ScopeLogs[0].LogRecords
-	require.Len(t, logs, 1)
-	assert.Equal(t, "0", findAttribute(t, logs[0].Attributes, "gpu").GetStringValue())
-	assert.Equal(t, "NVIDIA H100", findAttribute(t, logs[0].Attributes, "model_name").GetStringValue())
-	assert.Equal(t, "GPU-SERIAL-123", findAttribute(t, logs[0].Attributes, "gpu_serial").GetStringValue())
-	assert.Equal(t, "11111111-2222-3333-4444-555555555555", findAttribute(t, logs[0].Attributes, "cluster_uuid").GetStringValue())
-	assert.Equal(t, "7", findAttribute(t, logs[0].Attributes, "clique_id").GetStringValue())
-
-	extraInfo := findAttribute(t, logs[0].Attributes, "extra_info").GetKvlistValue()
-	identity := findMapValue(t, extraInfo.Values, "identity").GetKvlistValue()
-	require.NotNil(t, identity)
-	assert.Equal(t, "GPU-abc", findMapValue(t, identity.Values, "uuid").GetStringValue())
-	for _, value := range identity.Values {
-		assert.NotEqual(t, "hostname", value.Key)
-	}
-}
-
 func TestOTLPConverter_SummaryMetric(t *testing.T) {
 	data := &collector.HealthData{
 		Timestamp: time.Now(),
@@ -1028,6 +994,8 @@ func findOTLPMetric(metrics []*metricsv1.Metric, name string) *metricsv1.Metric 
 }
 
 func TestOTLPConverter_ResourceAttributes(t *testing.T) {
+	t.Setenv("HOSTNAME", "resource-host")
+
 	data := &collector.HealthData{
 		Timestamp:   time.Now(),
 		MachineID:   "test-machine-123",
@@ -1060,7 +1028,7 @@ func TestOTLPConverter_ResourceAttributes(t *testing.T) {
 	assert.Equal(t, "test-machine-123", attrMap["machine.id"])
 	assert.Equal(t, "group-a", attrMap["node_group"])
 	assert.Equal(t, "zone-a", attrMap["compute_zone"])
-	assert.Equal(t, "gpu-node-01", attrMap["host.name"])
+	assert.Equal(t, "resource-host", attrMap["host.name"])
 	assert.NotContains(t, attrMap, "hostname")
 
 	logResourceAttrMap := make(map[string]string)
@@ -1071,29 +1039,8 @@ func TestOTLPConverter_ResourceAttributes(t *testing.T) {
 	}
 	assert.Equal(t, "group-a", logResourceAttrMap["node_group"])
 	assert.Equal(t, "zone-a", logResourceAttrMap["compute_zone"])
-	assert.Equal(t, "gpu-node-01", logResourceAttrMap["host.name"])
+	assert.Equal(t, "resource-host", logResourceAttrMap["host.name"])
 	assert.NotContains(t, logResourceAttrMap, "hostname")
-}
-
-func TestIdentityFromEntityID(t *testing.T) {
-	tests := []struct {
-		entityID string
-		wantKey  string
-		wantID   string
-	}{
-		{entityID: "Gpu-0", wantKey: "gpu", wantID: "0"},
-		{entityID: "NvSwitch-3", wantKey: "nvswitch", wantID: "3"},
-		{entityID: "CpuCore-7", wantKey: "cpucore", wantID: "7"},
-		{entityID: "unknown-1"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.entityID, func(t *testing.T) {
-			key, id := identityFromEntityID(tt.entityID)
-			assert.Equal(t, tt.wantKey, key)
-			assert.Equal(t, tt.wantID, id)
-		})
-	}
 }
 
 func TestOTLPConverter_ResourceAttributesOmitEmptyOptionalValues(t *testing.T) {
@@ -1118,6 +1065,7 @@ func TestOTLPConverter_ResourceAttributesOmitEmptyOptionalValues(t *testing.T) {
 }
 
 func TestOTLPConverter_ResourceAttributes_IncludesOnlyGPUInfoGPUs(t *testing.T) {
+	cliqueID := uint32(7)
 	data := &collector.HealthData{
 		Timestamp: time.Now(),
 		MachineID: "test-machine-123",
@@ -1132,6 +1080,9 @@ func TestOTLPConverter_ResourceAttributes_IncludesOnlyGPUInfoGPUs(t *testing.T) 
 						UUID:         "GPU-123",
 						GPUIndex:     "0",
 						BusID:        "0000:01:00.0",
+						ModelName:    "NVIDIA H100",
+						ClusterUUID:  "11111111-2222-3333-4444-555555555555",
+						CliqueID:     &cliqueID,
 						SN:           "serial-123",
 						MinorID:      "0",
 						BoardID:      7,

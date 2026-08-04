@@ -123,7 +123,7 @@ func (c *otlpConverter) createOTLPResource(data *collector.HealthData) *resource
 		},
 	}
 
-	if hostname := identityHostname(data); hostname != "" {
+	if hostname := resolveOTLPHostname(); hostname != "" {
 		attributes = append(attributes, &commonv1.KeyValue{Key: "host.name", Value: stringAnyValue(hostname)})
 	}
 	if data.NodeGroup != "" {
@@ -168,16 +168,6 @@ func resolveOTLPHostname() string {
 		return ""
 	}
 	return strings.TrimSpace(hostname)
-}
-
-func identityHostname(data *collector.HealthData) string {
-	if data.EntityCatalog != nil && data.EntityCatalog.Hostname != "" {
-		return data.EntityCatalog.Hostname
-	}
-	if data.MachineInfo != nil && strings.TrimSpace(data.MachineInfo.Hostname) != "" {
-		return strings.TrimSpace(data.MachineInfo.Hostname)
-	}
-	return resolveOTLPHostname()
 }
 
 // convertMetricsToOTLP converts health metrics to OTLP metrics format
@@ -468,7 +458,6 @@ func addLabelIfMissing(labels map[string]string, key, value string) {
 // convertToOTLPLogs converts HealthData events and component data to OTLP log records
 func (c *otlpConverter) convertToOTLPLogs(data *collector.HealthData) []*logsv1.LogRecord {
 	var logRecords []*logsv1.LogRecord
-	identity := newIdentityContext(data)
 
 	// Add events as log records
 	if len(data.Events) > 0 {
@@ -505,13 +494,9 @@ func (c *otlpConverter) convertToOTLPLogs(data *collector.HealthData) []*logsv1.
 					},
 				},
 			}
-			extraInfo := cloneStringMap(event.ExtraInfo)
-			eventIdentity := identity.identityForEvent(extraInfo)
-			if len(eventIdentity) > 0 {
-				if rawIdentity, err := json.Marshal(eventIdentity); err == nil {
-					extraInfo["identity"] = string(rawIdentity)
-				}
-				attributes = append(attributes, labelsToOTLPAttributes(eventIdentity)...)
+			extraInfo := event.ExtraInfo
+			if extraInfo == nil {
+				extraInfo = map[string]string{}
 			}
 			attributes = append(attributes, &commonv1.KeyValue{
 				Key:   "extra_info",
@@ -622,7 +607,7 @@ func (c *otlpConverter) convertToOTLPLogs(data *collector.HealthData) []*logsv1.
 			if typedIncidents, ok := toHealthStateIncidents(incidents); ok && len(typedIncidents) > 0 {
 				attributes = append(attributes, &commonv1.KeyValue{
 					Key:   "incidents",
-					Value: incidentsToOTLPArrayValue(typedIncidents, identity),
+					Value: incidentsToOTLPArrayValue(typedIncidents),
 				})
 			}
 
@@ -644,14 +629,6 @@ func (c *otlpConverter) convertToOTLPLogs(data *collector.HealthData) []*logsv1.
 	return logRecords
 }
 
-func cloneStringMap(src map[string]string) map[string]string {
-	dst := make(map[string]string, len(src)+1)
-	for key, value := range src {
-		dst[key] = value
-	}
-	return dst
-}
-
 func labelsToOTLPAttributes(labels map[string]string) []*commonv1.KeyValue {
 	keys := make([]string, 0, len(labels))
 	for key := range labels {
@@ -664,51 +641,6 @@ func labelsToOTLPAttributes(labels map[string]string) []*commonv1.KeyValue {
 		attributes = append(attributes, &commonv1.KeyValue{Key: key, Value: stringAnyValue(labels[key])})
 	}
 	return attributes
-}
-
-func (ctx identityContext) identityForEvent(extraInfo map[string]string) map[string]string {
-	labels := make(map[string]string)
-	for _, key := range []string{"uuid", "gpu_uuid", "device_uuid", "gpu", "entity_id", "nvlink", "nvswitch", "cpu", "cpucore"} {
-		if value := strings.TrimSpace(extraInfo[key]); value != "" {
-			labels[key] = value
-		}
-	}
-
-	if labels["uuid"] == "" {
-		labels["uuid"] = labels["device_uuid"]
-	}
-	delete(labels, "device_uuid")
-	if key, value := identityFromEntityID(labels["entity_id"]); key != "" && labels[key] == "" {
-		labels[key] = value
-	}
-	delete(labels, "entity_id")
-
-	if labels["uuid"] == "" && labels["gpu_uuid"] == "" && labels["gpu"] == "" && labels["nvlink"] == "" &&
-		labels["nvswitch"] == "" && labels["cpu"] == "" && labels["cpucore"] == "" {
-		return nil
-	}
-	return ctx.enrichLabels(labels)
-}
-
-func identityFromEntityID(entityID string) (string, string) {
-	prefix, id, ok := strings.Cut(strings.TrimSpace(entityID), "-")
-	if !ok || strings.TrimSpace(id) == "" {
-		return "", ""
-	}
-	switch strings.ToLower(strings.TrimSpace(prefix)) {
-	case "gpu":
-		return "gpu", strings.TrimSpace(id)
-	case "nvswitch":
-		return "nvswitch", strings.TrimSpace(id)
-	case "nvlink":
-		return "nvlink", strings.TrimSpace(id)
-	case "cpu":
-		return "cpu", strings.TrimSpace(id)
-	case "cpucore", "cpu_core":
-		return "cpucore", strings.TrimSpace(id)
-	default:
-		return "", ""
-	}
 }
 
 func extraInfoToAnyValue(extraInfo map[string]string) *commonv1.AnyValue {
@@ -727,7 +659,7 @@ func extraInfoToAnyValue(extraInfo map[string]string) *commonv1.AnyValue {
 	}
 }
 
-func incidentsToOTLPArrayValue(incidents []apiv1.HealthStateIncident, identity identityContext) *commonv1.AnyValue {
+func incidentsToOTLPArrayValue(incidents []apiv1.HealthStateIncident) *commonv1.AnyValue {
 	values := make([]*commonv1.AnyValue, 0, len(incidents))
 	for _, inc := range incidents {
 		kvs := []*commonv1.KeyValue{
@@ -736,8 +668,6 @@ func incidentsToOTLPArrayValue(incidents []apiv1.HealthStateIncident, identity i
 			{Key: "severity", Value: stringAnyValue(string(inc.Health))},
 			{Key: "error", Value: stringAnyValue(inc.Error)},
 		}
-		incidentIdentity := identity.identityForEvent(map[string]string{"entity_id": inc.EntityID})
-		kvs = append(kvs, labelsToOTLPAttributes(incidentIdentity)...)
 		values = append(values, &commonv1.AnyValue{
 			Value: &commonv1.AnyValue_KvlistValue{
 				KvlistValue: &commonv1.KeyValueList{Values: kvs},

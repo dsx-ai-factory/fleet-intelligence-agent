@@ -414,13 +414,15 @@ type MachineGPUInstance struct {
 	BusID string `json:"busID,omitempty"`
 
 	// ModelName is the product name reported by NVML for this GPU.
-	ModelName string `json:"modelName,omitempty"`
+	// It is used for metric identity enrichment and intentionally excluded from
+	// the existing machine-info JSON contract.
+	ModelName string `json:"-"`
 
 	// ClusterUUID and CliqueID identify the GPU's NVLink fabric domain.
 	// CliqueID is a pointer so a valid value of zero remains distinguishable
 	// from an unavailable fabric identity.
-	ClusterUUID string  `json:"clusterUUID,omitempty"`
-	CliqueID    *uint32 `json:"cliqueID,omitempty"`
+	ClusterUUID string  `json:"-"`
+	CliqueID    *uint32 `json:"-"`
 
 	SN           string `json:"sn,omitempty"`
 	MinorID      string `json:"minorID,omitempty"`
