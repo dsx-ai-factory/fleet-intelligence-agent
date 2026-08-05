@@ -243,7 +243,7 @@ service:
 	case backendRequest := <-metricRequests:
 		require.NoError(t, backendRequest.err)
 		require.Equal(t, "Bearer "+jwt, backendRequest.authorization)
-		require.Equal(t, "integration-customer", backendRequest.actorID)
+		require.Empty(t, backendRequest.actorID, "gateway must not set Nv-Actor-Id; Envoy injects it from the verified JWT")
 		require.Equal(t, "application/x-protobuf", backendRequest.contentType)
 		require.Equal(t, 1, backendRequest.metrics.MetricCount())
 		resourceMetrics := backendRequest.metrics.ResourceMetrics()
@@ -272,7 +272,7 @@ service:
 	case backendRequest := <-logRequests:
 		require.NoError(t, backendRequest.err)
 		require.Equal(t, "Bearer "+jwt, backendRequest.authorization)
-		require.Equal(t, "integration-customer", backendRequest.actorID)
+		require.Empty(t, backendRequest.actorID, "gateway must not set Nv-Actor-Id; Envoy injects it from the verified JWT")
 		require.Equal(t, "application/x-protobuf", backendRequest.contentType)
 		require.Equal(t, 1, backendRequest.logs.LogRecordCount())
 		resourceLogs := backendRequest.logs.ResourceLogs()

@@ -33,9 +33,11 @@ metadata:
 data:
   config.yaml: |
     extensions:
-      # Fleet Intelligence auth: enrolls with the backend using the SAK token, extracts
-      # the customer ID from the returned JWT, and refreshes the JWT proactively via
-      # response headers and on 401 as a fallback.
+      # Fleet Intelligence auth: enrolls with the backend using the SAK token and
+      # refreshes the returned JWT proactively via response headers, with 401 as a
+      # fallback. Customer identity rides in the JWT's assertion.customer_id claim;
+      # the backend's Envoy ingress verifies the signature and injects Nv-Actor-Id
+      # from it, so the gateway does not set that header itself.
       sakauth:
         enroll_endpoint: ${env:ENROLL_ENDPOINT}
         sak_token: ${env:SAK_TOKEN}

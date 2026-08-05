@@ -95,14 +95,6 @@ func TestConfigValidateRequiresSecureEndpoint(t *testing.T) {
 	require.NotContains(t, cfg.SAKToken.String(), "sak-token")
 }
 
-func TestExtractCustomerID(t *testing.T) {
-	require.Equal(t, "customer-1", extractCustomerID(testJWT(t, "customer-1")))
-	require.Empty(t, extractCustomerID(""))
-	require.Empty(t, extractCustomerID("not.a.jwt.with.too.many.parts"))
-	require.Empty(t, extractCustomerID("header.%%%.signature"))
-	require.Empty(t, extractCustomerID("header.e30.signature"))
-}
-
 func TestEnrollResponseToken(t *testing.T) {
 	require.Equal(t, "current", (enrollResponse{
 		JWTAssertion:       "current",
@@ -161,6 +153,8 @@ func TestEnrollmentAndUnauthorizedRefresh(t *testing.T) {
 			}
 		case "/v1/metrics":
 			count := exports.Add(1)
+			// Nv-Actor-Id is captured to assert the extension never sets it:
+			// Envoy injects it from the verified JWT claim at ingress.
 			exportHeaders <- [2]string{
 				r.Header.Get("Authorization"),
 				r.Header.Get("Nv-Actor-Id"),
@@ -201,8 +195,8 @@ func TestEnrollmentAndUnauthorizedRefresh(t *testing.T) {
 	require.Equal(t, int32(2), exports.Load())
 	require.Equal(t, "Bearer sak-token", <-enrollmentAuth)
 	require.Equal(t, "Bearer sak-token", <-enrollmentAuth)
-	require.Equal(t, [2]string{"Bearer " + firstJWT, "customer-1"}, <-exportHeaders)
-	require.Equal(t, [2]string{"Bearer " + secondJWT, "customer-2"}, <-exportHeaders)
+	require.Equal(t, [2]string{"Bearer " + firstJWT, ""}, <-exportHeaders)
+	require.Equal(t, [2]string{"Bearer " + secondJWT, ""}, <-exportHeaders)
 	select {
 	case handlerErr := <-handlerErrors:
 		require.NoError(t, handlerErr)
@@ -388,7 +382,7 @@ func TestSecondUnauthorizedResponseIsReturnedWithoutRefreshLoop(t *testing.T) {
 func TestResponseHeaderRefreshesJWT(t *testing.T) {
 	firstJWT := testJWT(t, "customer-1")
 	secondJWT := testJWT(t, "customer-2")
-	ext := &sakAuthExtension{jwt: firstJWT, customerID: "customer-1"}
+	ext := &sakAuthExtension{jwt: firstJWT}
 
 	var requests atomic.Int32
 	base := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
@@ -402,7 +396,7 @@ func TestResponseHeaderRefreshesJWT(t *testing.T) {
 			}, nil
 		}
 		require.Equal(t, "Bearer "+secondJWT, req.Header.Get("Authorization"))
-		require.Equal(t, "customer-2", req.Header.Get("Nv-Actor-Id"))
+		require.Empty(t, req.Header.Get("Nv-Actor-Id"))
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: http.NoBody}, nil
 	})
 
@@ -426,7 +420,7 @@ func TestResponseHeaderRefreshIgnoresStaleToken(t *testing.T) {
 	initialJWT := testJWT(t, "customer-1")
 	newerJWT := testJWT(t, "customer-2")
 	staleJWT := testJWT(t, "customer-3")
-	ext := &sakAuthExtension{jwt: initialJWT, customerID: "customer-1"}
+	ext := &sakAuthExtension{jwt: initialJWT}
 
 	slowSnapshotted := make(chan struct{})
 	fastStored := make(chan struct{})
@@ -474,9 +468,7 @@ func TestResponseHeaderRefreshIgnoresStaleToken(t *testing.T) {
 	require.NoError(t, <-errs)
 	require.NoError(t, <-errs)
 
-	jwt, customerID := ext.snapshot()
-	require.Equal(t, newerJWT, jwt, "late response overwrote a newer token")
-	require.Equal(t, "customer-2", customerID)
+	require.Equal(t, newerJWT, ext.getJWT(), "late response overwrote a newer token")
 }
 
 func TestConcurrentUnauthorizedResponsesSingleRefresh(t *testing.T) {

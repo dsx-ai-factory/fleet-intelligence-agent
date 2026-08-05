@@ -18,19 +18,18 @@
 // (Authorization: Bearer) to obtain a short-lived JWT, and automatically
 // refreshes it via response headers or on 401 responses.
 //
-// The customer ID is not configured explicitly — it is extracted from the
-// JWT's assertion.customer_id claim after enrollment and forwarded as
-// Nv-Actor-Id on outbound OTLP requests.
+// Customer identity is carried by the JWT's assertion.customer_id claim. The
+// extension does not extract or forward it: the backend's Envoy ingress
+// verifies the JWT signature and injects Nv-Actor-Id from that claim itself,
+// so anything set here would be an unverified duplicate that Envoy overwrites.
 package sakauth
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -54,12 +53,11 @@ func (r enrollResponse) token() string {
 
 // sakAuthExtension implements HTTP client authentication using the SAK→JWT enrollment flow.
 type sakAuthExtension struct {
-	cfg        *Config
-	client     *http.Client
-	jwt        string
-	customerID string // extracted from JWT assertion.customer_id after enrollment
-	mu         sync.RWMutex
-	refreshMu  sync.Mutex
+	cfg       *Config
+	client    *http.Client
+	jwt       string
+	mu        sync.RWMutex
+	refreshMu sync.Mutex
 }
 
 // Ensure the extension satisfies the HTTP client authenticator interface.
@@ -96,7 +94,7 @@ func newEnrollmentHTTPClient(tlsConfig *configtls.ClientConfig) (*http.Client, e
 	}, nil
 }
 
-// Start fetches the initial JWT and extracts the customer ID from it.
+// Start fetches the initial JWT.
 func (e *sakAuthExtension) Start(ctx context.Context, _ component.Host) error {
 	jwt, err := e.performEnrollment(ctx)
 	if err != nil {
@@ -104,7 +102,6 @@ func (e *sakAuthExtension) Start(ctx context.Context, _ component.Host) error {
 	}
 	e.mu.Lock()
 	e.jwt = jwt
-	e.customerID = extractCustomerID(jwt)
 	e.mu.Unlock()
 	return nil
 }
@@ -129,12 +126,6 @@ func (e *sakAuthExtension) getJWT() string {
 	return e.jwt
 }
 
-func (e *sakAuthExtension) snapshot() (jwt, customerID string) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.jwt, e.customerID
-}
-
 func (e *sakAuthExtension) refreshJWT(ctx context.Context, staleJWT string) (string, error) {
 	e.refreshMu.Lock()
 	defer e.refreshMu.Unlock()
@@ -149,9 +140,14 @@ func (e *sakAuthExtension) refreshJWT(ctx context.Context, staleJWT string) (str
 	if err != nil {
 		return "", err
 	}
+	// Written unconditionally, unlike the response-header refresh in RoundTrip.
+	// A header refresh can land while performEnrollment is in flight, but this
+	// token was minted during that window and so is at least as fresh as one
+	// carried by a response the backend issued earlier. The caller retries a
+	// request that just 401'd with whatever is returned here, so it has to be
+	// the token we know was just issued.
 	e.mu.Lock()
 	e.jwt = jwt
-	e.customerID = extractCustomerID(jwt)
 	e.mu.Unlock()
 	return jwt, nil
 }
@@ -196,32 +192,6 @@ func (e *sakAuthExtension) performEnrollment(ctx context.Context) (string, error
 	return jwt, nil
 }
 
-// extractCustomerID decodes the JWT payload and returns assertion.customer_id.
-// Returns an empty string if the claim is absent or the token is malformed.
-func extractCustomerID(token string) string {
-	parts := strings.SplitN(token, ".", 3)
-	if len(parts) != 3 {
-		return ""
-	}
-	payload := parts[1]
-	if r := len(payload) % 4; r != 0 {
-		payload += strings.Repeat("=", 4-r)
-	}
-	b, err := base64.URLEncoding.DecodeString(payload)
-	if err != nil {
-		return ""
-	}
-	var claims struct {
-		Assertion struct {
-			CustomerID string `json:"customer_id"`
-		} `json:"assertion"`
-	}
-	if err := json.Unmarshal(b, &claims); err != nil {
-		return ""
-	}
-	return claims.Assertion.CustomerID
-}
-
 // sakRoundTripper injects the JWT and handles transparent token refresh on 401.
 type sakRoundTripper struct {
 	base http.RoundTripper
@@ -230,13 +200,8 @@ type sakRoundTripper struct {
 
 func (rt *sakRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	usedJWT, customerID := rt.ext.snapshot()
+	usedJWT := rt.ext.getJWT()
 	req.Header.Set("Authorization", "Bearer "+usedJWT)
-	if customerID != "" {
-		req.Header.Set("Nv-Actor-Id", customerID)
-	} else {
-		req.Header.Del("Nv-Actor-Id")
-	}
 
 	resp, err := rt.base.RoundTrip(req)
 	if err != nil {
@@ -252,11 +217,9 @@ func (rt *sakRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	// installed by another response or by the 401 refresh below, leaving every
 	// subsequent export authenticating with a stale JWT.
 	if newJWT := resp.Header.Get("jwt_assertion"); newJWT != "" && newJWT != usedJWT {
-		newCustomerID := extractCustomerID(newJWT)
 		rt.ext.mu.Lock()
 		if rt.ext.jwt == usedJWT {
 			rt.ext.jwt = newJWT
-			rt.ext.customerID = newCustomerID
 		}
 		rt.ext.mu.Unlock()
 	}
@@ -287,10 +250,5 @@ func (rt *sakRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	req = req.Clone(req.Context())
 	req.Body = newBody
 	req.Header.Set("Authorization", "Bearer "+newJWT)
-	if customerID := extractCustomerID(newJWT); customerID != "" {
-		req.Header.Set("Nv-Actor-Id", customerID)
-	} else {
-		req.Header.Del("Nv-Actor-Id")
-	}
 	return rt.base.RoundTrip(req)
 }
