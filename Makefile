@@ -17,8 +17,13 @@ ROOTDIR=$(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 BUILD_TIMESTAMP ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 VERSION ?= $(shell git describe --match 'v[0-9]*' --dirty='.m' --always)
-REVISION=$(shell git rev-parse HEAD)$(shell if ! git diff --no-ext-diff --quiet --exit-code; then echo .m; fi)
+REVISION ?= $(shell git rev-parse HEAD)$(shell if ! git diff --no-ext-diff --quiet --exit-code; then echo .m; fi)
 PACKAGE=github.com/NVIDIA/fleet-intelligence-agent
+
+# Nested Go module holding the OTel gateway SAK auth extension. It has its own
+# go.mod, so root-module `./...` targets do not descend into it and it must be
+# linted, vuln-checked and tested explicitly.
+OTELCOL_MODULE ?= otelcol/auth/sakauth
 
 ifneq "$(strip $(shell command -v $(GO) 2>/dev/null))" ""
 	GOOS ?= $(shell $(GO) env GOOS)
@@ -118,7 +123,7 @@ docker-test: ## build test image and run tests in container
 		-t $(TEST_IMAGE) \
 		.
 	@echo "Running tests..."
-	@$(DOCKER) run --rm $(TEST_IMAGE)
+	@$(DOCKER) run --rm -e VERSION=$(VERSION) -e REVISION=$(REVISION) $(TEST_IMAGE)
 
 # Specific target for fleetint (your main binary)
 fleetint: bin/fleetint ## build fleetint binary
@@ -127,7 +132,9 @@ fleetint: bin/fleetint ## build fleetint binary
 lint: ## run linting tools
 	@echo "Running linting..."
 	@if command -v $(GOLANGCI_LINT) >/dev/null 2>&1; then \
-		$(GOLANGCI_LINT) run ./...; \
+		$(GOLANGCI_LINT) run ./... && \
+		echo "Linting $(OTELCOL_MODULE)..." && \
+		( cd $(OTELCOL_MODULE) && $(GOLANGCI_LINT) run ./... ); \
 	else \
 		echo "golangci-lint not found, running basic checks..."; \
 		$(GOFMT) -l -s . | tee /tmp/gofmt.out; \
@@ -135,7 +142,8 @@ lint: ## run linting tools
 			echo "Code formatting issues found. Run 'make fmt' to fix."; \
 			exit 1; \
 		fi; \
-		go vet ./...; \
+		go vet ./... && \
+		( cd $(OTELCOL_MODULE) && go vet ./... ); \
 	fi
 
 fmt: ## format Go code
@@ -149,6 +157,12 @@ test: ## run tests with coverage
 	@$(GO) tool cover -html=coverage/coverage.out -o coverage/coverage.html
 	@echo "Coverage report generated: coverage/coverage.html"
 	@$(GO) tool cover -func=coverage/coverage.out | tail -1
+	@echo "Running tests in $(OTELCOL_MODULE)..."
+# Coverage is not merged into coverage.out: it is a separate module and the
+# codecov upload expects a single root profile.
+# TestCollectorGatewayEndToEnd self-skips unless FLEETINT_OTELCOL_INTEGRATION=1
+# and otelcol/bin/fleetint-otelcol exists; CI covers it in build_check_otelcol.
+	@( cd $(OTELCOL_MODULE) && $(GOTEST) $(GOFLAGS) -race ./... )
 
 vuln: ## run vulnerability check
 	@echo "Running vulnerability check..."
@@ -157,6 +171,8 @@ vuln: ## run vulnerability check
 		$(GO) install golang.org/x/vuln/cmd/govulncheck@latest; \
 	fi
 	@govulncheck ./...
+	@echo "Running vulnerability check in $(OTELCOL_MODULE)..."
+	@( cd $(OTELCOL_MODULE) && govulncheck ./... )
 
 clean: ## clean up binaries and build artifacts
 	@echo "Cleaning up..."

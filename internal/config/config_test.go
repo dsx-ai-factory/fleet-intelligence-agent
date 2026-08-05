@@ -293,6 +293,40 @@ func TestSecureStateFilePermissions(t *testing.T) {
 }
 
 func TestValidateHealthExporter(t *testing.T) {
+	t.Run("valid collector endpoint", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			HealthExporter: &HealthExporterConfig{
+				CollectorEndpoint: "http://fleetint-otel-gateway:4318",
+			},
+		}
+		require.NoError(t, cfg.Validate())
+	})
+
+	for _, endpoint := range []string{
+		"collector:4318",
+		"ftp://collector.example",
+		"http://user:password@collector.example",
+		"http://collector.example?token=secret",
+		"http://collector.example#fragment",
+		// url.Parse reports these as ForceQuery and as no fragment at all,
+		// so they slip past the credentials/query/fragment checks.
+		"http://collector.example?",
+		"http://collector.example#",
+	} {
+		t.Run("invalid collector endpoint "+endpoint, func(t *testing.T) {
+			cfg := &Config{
+				Address:         ":8080",
+				RetentionPeriod: metav1.Duration{Duration: time.Hour},
+				HealthExporter: &HealthExporterConfig{
+					CollectorEndpoint: endpoint,
+				},
+			}
+			require.ErrorContains(t, cfg.Validate(), "collector_endpoint")
+		})
+	}
+
 	t.Run("valid health check interval", func(t *testing.T) {
 		cfg := &Config{
 			Address:         ":8080",

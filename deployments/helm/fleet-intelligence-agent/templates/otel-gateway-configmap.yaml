@@ -1,0 +1,97 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+{{- if .Values.otelGateway.enabled }}
+{{- /*
+memory_limiter is configured by percentage, and the collector derives the
+percentage from the container's cgroup memory limit, falling back to total node
+memory when no limit is set. On a large node an unlimited pod would size the
+limiter against the node and be OOM-killed long before the limiter engages, so
+require an explicit memory limit rather than fail at runtime.
+*/}}
+{{- if not (dig "limits" "memory" "" (.Values.otelGateway.resources | default dict)) }}
+{{- fail "otelGateway.resources.limits.memory must be set when otelGateway.enabled is true: memory_limiter uses limit_percentage, which is derived from the pod's cgroup memory limit" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "fleet-intelligence-agent.fullname" . }}-otel-gateway
+  labels:
+    {{- include "fleet-intelligence-agent.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    extensions:
+      # Fleet Intelligence auth: enrolls with the backend using the SAK token and
+      # refreshes the returned JWT proactively via response headers, with 401 as a
+      # fallback. Customer identity rides in the JWT's assertion.customer_id claim;
+      # the backend's Envoy ingress verifies the signature and injects Nv-Actor-Id
+      # from it, so the gateway does not set that header itself.
+      sakauth:
+        enroll_endpoint: ${env:ENROLL_ENDPOINT}
+        sak_token: ${env:SAK_TOKEN}
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    receivers:
+      otlp:
+        protocols:
+          http:
+            # No inbound auth: the gateway is a ClusterIP service accessible only
+            # within the cluster. Cluster network isolation is the security boundary.
+            # The gateway uses its own SAK JWT when forwarding to the backend.
+            # Agent identity flows through OTLP resource attributes (machine.id, GPU UUIDs).
+            endpoint: 0.0.0.0:{{ .Values.otelGateway.service.port }}
+
+    processors:
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: {{ .Values.otelGateway.memoryLimiter.limitPercentage }}
+        spike_limit_percentage: {{ .Values.otelGateway.memoryLimiter.spikeLimitPercentage }}
+      batch:
+        timeout: 10s
+        send_batch_size: 1000
+
+    exporters:
+      otlp_http/backend:
+        metrics_endpoint: ${env:BACKEND_ENDPOINT}/metrics
+        logs_endpoint: ${env:BACKEND_ENDPOINT}/logs
+        compression: none
+        auth:
+          authenticator: sakauth
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+        sending_queue:
+          enabled: true
+          num_consumers: 4
+          queue_size: 1000
+
+    service:
+      extensions: [sakauth, health_check]
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlp_http/backend]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlp_http/backend]
+      telemetry:
+        logs:
+          level: warn
+{{- end }}

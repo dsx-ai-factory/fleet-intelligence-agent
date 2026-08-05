@@ -52,7 +52,11 @@ logLevel: warn
 listenAddress: 127.0.0.1:15133
 retentionPeriod: 24h
 components: all
+deployEnv: prod
 
+# Agent enrollment remains independent of the optional telemetry gateway.
+# Enrollment is still required for backend inventory and attestation workflows.
+# Requires enroll.endpoint and either enroll.tokenValue or enroll.tokenSecretName.
 enroll:
   enabled: false
   unenroll: false
@@ -94,3 +98,74 @@ serviceAccount:
   create: true
   name: ""
   automountToken: false
+
+# OTel gateway collector deployed alongside the agents in the same cluster.
+# When enabled:
+#   - A Deployment + Service for the fleetint-otelcol collector is created.
+#   - Agent OTLP traffic is sent to the gateway without backend credentials.
+#     Agent enrollment remains direct because inventory and attestation use the
+#     agent's backend identity independently of OTLP export.
+#   - Each agent sends OTLP to the gateway via FLEETINT_COLLECTOR_ENDPOINT.
+#   - The gateway authenticates outbound requests to the backend via its JWT.
+#   - Agent identity flows through OTLP resource attributes (machine.id, GPU UUIDs).
+otelGateway:
+  enabled: false
+
+  image:
+    repository: ghcr.io/nvidia/fleetint-otelcol
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  replicas: 2
+  terminationGracePeriodSeconds: 30
+
+  # Enrollment credentials for gateway→backend authentication.
+  # The gateway is the only component that holds these; agents never see them.
+  enroll:
+    # endpoint is the backend enrollment URL.
+    # Example: https://backend/api/v1/agent/enroll
+    endpoint: ""
+    # sakToken is the Service API Key used to authenticate with the API gateway
+    # on enrollment. Stored in a Kubernetes Secret; never put in plain values files.
+    # Use --set otelGateway.enroll.sakToken=nvapi-... or reference an existingSecret.
+    sakToken: ""
+    # existingSecret: if set, SAK_TOKEN is read from this secret instead of
+    # creating one from sakToken. The secret must have a key named "sak-token".
+    existingSecret: ""
+
+  # Backend OTLP HTTP base URL (e.g. https://backend/api/v1/health).
+  backendEndpoint: ""
+
+  service:
+    port: 4318
+
+  # Restrict unauthenticated OTLP ingress to this Helm release's pods.
+  # Requires a CNI plugin that enforces Kubernetes NetworkPolicy.
+  networkPolicy:
+    enabled: true
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  # Collector memory_limiter thresholds, as a percentage of the memory available
+  # to the pod. The collector reads the container's cgroup memory limit, so these
+  # track resources.limits.memory automatically: raising the limit to 2Gi raises
+  # the limiter with it, with no change needed here.
+  #
+  # The percentages are only meaningful while a limit is set. Without one the
+  # collector falls back to total node memory, which on a large node means the
+  # limiter never engages before the kernel OOM-kills the pod. Rendering the
+  # gateway with no resources.limits.memory is therefore rejected outright.
+  memoryLimiter:
+    limitPercentage: 80
+    spikeLimitPercentage: 20
+
+  # limits.memory is required when the gateway is enabled; see memoryLimiter above.
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
