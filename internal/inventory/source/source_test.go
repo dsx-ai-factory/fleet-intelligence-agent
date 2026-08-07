@@ -39,6 +39,7 @@ func (f fakeMachineInfoCollector) Collect(context.Context) (*machineinfo.Machine
 
 func TestMachineInfoSourceCollect(t *testing.T) {
 	bootTime := time.Date(2026, 4, 28, 12, 30, 0, 0, time.UTC)
+	cliqueID := uint32(0)
 	src := NewMachineInfoSource(fakeMachineInfoCollector{
 		info: &machineinfo.MachineInfo{
 			AgentVersion:            "1.2.3",
@@ -72,6 +73,8 @@ func TestMachineInfoSourceCollect(t *testing.T) {
 					UUID:         "GPU-1",
 					GPUIndex:     "0",
 					BusID:        "0000:01:00.0",
+					ClusterUUID:  "11111111-2222-3333-4444-555555555555",
+					CliqueID:     &cliqueID,
 					SN:           "serial",
 					MinorID:      "1",
 					BoardID:      7,
@@ -114,6 +117,9 @@ func TestMachineInfoSourceCollect(t *testing.T) {
 	require.Equal(t, "H100", snap.Resources.GPUInfo.Product)
 	require.Len(t, snap.Resources.GPUInfo.GPUs, 1)
 	require.Equal(t, 7, snap.Resources.GPUInfo.GPUs[0].BoardID)
+	require.Equal(t, "11111111-2222-3333-4444-555555555555", snap.Resources.GPUInfo.GPUs[0].ClusterUUID)
+	require.NotNil(t, snap.Resources.GPUInfo.GPUs[0].CliqueID)
+	require.Equal(t, uint32(0), *snap.Resources.GPUInfo.GPUs[0].CliqueID)
 	require.Equal(t, "/dev/nvme0n1", snap.Resources.DiskInfo.ContainerRootDisk)
 	require.Len(t, snap.Resources.DiskInfo.BlockDevices, 1)
 	require.Equal(t, "eth0", snap.Resources.NICInfo.PrivateIPInterfaces[0].Interface)

@@ -58,6 +58,7 @@ type HealthData struct {
 	Timestamp      time.Time
 	MachineInfo    *machineinfo.MachineInfo
 	GPUUUIDToIndex map[string]string
+	EntityCatalog  *EntityCatalog
 	Metrics        pkgmetrics.Metrics
 	Events         eventstore.Events
 	ComponentData  map[string]interface{}
@@ -109,7 +110,8 @@ func New(
 	}
 
 	var provider machineInfoProvider
-	if cfg != nil && cfg.IncludeMachineInfo && collectorOpts.nvmlInstance != nil {
+	needsIdentity := cfg != nil && (cfg.IncludeMachineInfo || cfg.IncludeMetrics || cfg.IncludeEvents || cfg.IncludeComponentData)
+	if needsIdentity && collectorOpts.nvmlInstance != nil {
 		var machineInfoOpts []machineinfo.MachineInfoOption
 		if len(dcgmGPUIndexes) > 0 {
 			machineInfoOpts = append(machineInfoOpts, machineinfo.WithDCGMGPUIndexes(dcgmGPUIndexes))
@@ -145,11 +147,17 @@ func (c *collector) Collect(ctx context.Context) (*HealthData, error) {
 		MachineID:      c.machineID,
 		Timestamp:      time.Now().UTC(),
 		GPUUUIDToIndex: cloneStringMap(c.dcgmGPUIndexes),
+		EntityCatalog:  NewEntityCatalog(nil, c.dcgmGPUIndexes),
 	}
 
-	// Collect machine info if enabled. The converter only exports selected fields.
-	if c.config.IncludeMachineInfo {
+	// Identity enrichment uses cached machine info independently of whether the
+	// full machine-info payload is enabled for export.
+	if c.machineInfoProvider != nil {
 		c.collectMachineInfo(ctx, data)
+		data.EntityCatalog = NewEntityCatalog(data.MachineInfo, c.dcgmGPUIndexes)
+		if !c.config.IncludeMachineInfo {
+			data.MachineInfo = nil
+		}
 	}
 
 	// Collect metrics if enabled

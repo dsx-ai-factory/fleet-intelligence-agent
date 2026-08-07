@@ -478,6 +478,18 @@ func TestGetMachineGPUInfo_PartialNVMLFailureIsNonFatal(t *testing.T) {
 	require.Equal(t, "GPU-failing-device", info.GPUs[0].UUID)
 }
 
+func TestGetMachineGPUInfo_CollectsFabricIdentity(t *testing.T) {
+	t.Parallel()
+
+	info, err := GetMachineGPUInfo(&fabricIdentityMockNVMLInstance{})
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	require.Len(t, info.GPUs, 1)
+	require.NotNil(t, info.GPUs[0].CliqueID)
+	assert.Equal(t, uint32(0), *info.GPUs[0].CliqueID)
+	assert.Equal(t, "11111111-2222-3333-4444-555555555555", info.GPUs[0].ClusterUUID)
+}
+
 type partialFailureMockNVMLInstance struct {
 	nvidianvml.Instance
 }
@@ -492,6 +504,10 @@ func (m *partialFailureMockNVMLInstance) Brand() string {
 
 func (m *partialFailureMockNVMLInstance) Architecture() string {
 	return "hopper"
+}
+
+func (m *partialFailureMockNVMLInstance) FabricStateSupported() bool {
+	return false
 }
 
 func (m *partialFailureMockNVMLInstance) Devices() map[string]nvmldevice.Device {
@@ -536,12 +552,41 @@ func (d *partialFailureMockGPUDevice) GetPCIBusID() (string, error) {
 	return "0000:01:00.0", fmt.Errorf("gpu lost")
 }
 
+func (d *partialFailureMockGPUDevice) GetName() (string, nvml.Return) {
+	return "", nvml.ERROR_GPU_IS_LOST
+}
+
 func (d *partialFailureMockGPUDevice) GetVbiosVersion() (string, nvml.Return) {
 	return "", nvml.ERROR_GPU_IS_LOST
 }
 
 func (d *partialFailureMockGPUDevice) GetIndex() (int, nvml.Return) {
 	return 0, nvml.ERROR_GPU_IS_LOST
+}
+
+type fabricIdentityMockNVMLInstance struct {
+	partialFailureMockNVMLInstance
+}
+
+func (m *fabricIdentityMockNVMLInstance) FabricStateSupported() bool {
+	return true
+}
+
+func (m *fabricIdentityMockNVMLInstance) Devices() map[string]nvmldevice.Device {
+	return map[string]nvmldevice.Device{
+		"GPU-fabric-device": &fabricIdentityMockGPUDevice{},
+	}
+}
+
+type fabricIdentityMockGPUDevice struct {
+	partialFailureMockGPUDevice
+}
+
+func (d *fabricIdentityMockGPUDevice) GetFabricState() (nvmldevice.FabricState, error) {
+	return nvmldevice.FabricState{
+		CliqueID:    0,
+		ClusterUUID: "11111111-2222-3333-4444-555555555555",
+	}, nil
 }
 
 // TestGetSystemResourceRootVolumeTotal_Validation tests root volume total validation

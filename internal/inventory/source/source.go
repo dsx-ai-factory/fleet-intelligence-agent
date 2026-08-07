@@ -105,9 +105,16 @@ func (s *machineInfoSource) Collect(ctx context.Context) (*inventory.Snapshot, e
 		if len(info.GPUInfo.GPUs) > 0 {
 			snap.Resources.GPUInfo.GPUs = make([]inventory.GPUDevice, 0, len(info.GPUInfo.GPUs))
 			for _, gpu := range info.GPUInfo.GPUs {
+				var cliqueID *uint32
+				if gpu.CliqueID != nil {
+					id := *gpu.CliqueID
+					cliqueID = &id
+				}
 				snap.Resources.GPUInfo.GPUs = append(snap.Resources.GPUInfo.GPUs, inventory.GPUDevice{
 					UUID:         gpu.UUID,
 					BusID:        gpu.BusID,
+					ClusterUUID:  gpu.ClusterUUID,
+					CliqueID:     cliqueID,
 					SN:           gpu.SN,
 					MinorID:      gpu.MinorID,
 					BoardID:      int(gpu.BoardID),

@@ -80,14 +80,16 @@ type GPUInfo struct {
 }
 
 type GPUDevice struct {
-	UUID         string `json:"uuid"`
-	BusID        string `json:"busID"`
-	SN           string `json:"sn"`
-	MinorID      string `json:"minorID"`
-	BoardID      int    `json:"boardID"`
-	VBIOSVersion string `json:"vbiosVersion"`
-	ChassisSN    string `json:"chassisSN"`
-	GPUIndex     string `json:"gpuIndex,omitempty"`
+	UUID         string  `json:"uuid"`
+	BusID        string  `json:"busID"`
+	ClusterUUID  string  `json:"clusterUUID,omitempty"`
+	CliqueID     *uint32 `json:"cliqueID,omitempty"`
+	SN           string  `json:"sn"`
+	MinorID      string  `json:"minorID"`
+	BoardID      int     `json:"boardID"`
+	VBIOSVersion string  `json:"vbiosVersion"`
+	ChassisSN    string  `json:"chassisSN"`
+	GPUIndex     string  `json:"gpuIndex,omitempty"`
 }
 
 type DiskInfo struct {

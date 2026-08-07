@@ -31,9 +31,16 @@ func ToNodeUpsertRequest(s *inventory.Snapshot) *backendclient.NodeUpsertRequest
 	}
 	gpus := make([]backendclient.GPUDevice, 0, len(s.Resources.GPUInfo.GPUs))
 	for _, gpu := range s.Resources.GPUInfo.GPUs {
+		var cliqueID *uint32
+		if gpu.CliqueID != nil {
+			id := *gpu.CliqueID
+			cliqueID = &id
+		}
 		gpus = append(gpus, backendclient.GPUDevice{
 			UUID:         gpu.UUID,
 			BusID:        gpu.BusID,
+			ClusterUUID:  gpu.ClusterUUID,
+			CliqueID:     cliqueID,
 			SN:           gpu.SN,
 			MinorID:      gpu.MinorID,
 			BoardID:      gpu.BoardID,
