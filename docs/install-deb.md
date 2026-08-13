@@ -46,7 +46,9 @@ After adding the CUDA repository, package dependencies (`datacenter-gpu-manager-
 
 ## Install package
 
-Download the package from [Latest stable release](https://github.com/NVIDIA/fleet-intelligence-agent/releases/latest), then install:
+Download the package from the
+[latest stable release](https://github.com/NVIDIA/fleet-intelligence-agent/releases/latest),
+then install it:
 
 ```bash
 # Ubuntu (x86_64)
@@ -61,6 +63,32 @@ Verify:
 ```bash
 sudo fleetint --version
 systemctl status fleetintd
+```
+
+## Optional: Verify package authenticity
+
+To verify a release before installation, download the package,
+`fleet-intelligence.pub.asc`, `checksums.txt`, `checksums.txt.asc`, and
+`verify-linux-package-signature.sh` from the same release.
+
+Confirm that the public key fingerprint is:
+
+```text
+FE0C 8B74 CA66 357C 13BE 197D CCE3 C963 0871 99B3
+```
+
+Then verify the checksum manifest, package digest, and embedded package
+signature:
+
+```bash
+gpg --show-keys --fingerprint fleet-intelligence.pub.asc
+gpg --import fleet-intelligence.pub.asc
+gpg --verify checksums.txt.asc checksums.txt
+sha256sum -c --ignore-missing checksums.txt
+chmod 755 verify-linux-package-signature.sh
+./verify-linux-package-signature.sh \
+  fleetint_VERSION_amd64.deb \
+  fleet-intelligence.pub.asc
 ```
 
 ## Update

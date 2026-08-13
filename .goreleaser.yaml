@@ -151,6 +151,10 @@ release:
   github:
     owner: NVIDIA
     name: fleet-intelligence-agent
+  # Keep unsigned GoReleaser output private until the release workflow replaces
+  # DEB/RPM assets with verified 3S-signed versions, refreshes checksums, and
+  # adds a verified detached signature for the final checksum manifest.
+  draft: true
   header: |
     ## NVIDIA Fleet Intelligence Agent v{{.Version}}
     
@@ -173,14 +177,24 @@ release:
     ```bash
     sha256sum -c checksums.txt
     ```
+
+    Confirm that `fleet-intelligence.pub.asc` has fingerprint
+    `FE0C 8B74 CA66 357C 13BE 197D CCE3 C963 0871 99B3`, then authenticate
+    the checksum manifest:
+    ```bash
+    gpg --show-keys --fingerprint fleet-intelligence.pub.asc
+    gpg --import fleet-intelligence.pub.asc
+    gpg --verify checksums.txt.asc checksums.txt
+    ```
     
     ### Support
     
     For issues and questions, please visit: https://github.com/NVIDIA/fleet-intelligence-agent/issues
-  draft: false
   prerelease: auto  # Auto-detect pre-release based on version (e.g., v1.0.0-beta)
-  mode: replace  # Replace existing release if it exists
-  replace_existing_artifacts: true  # Handle reruns where GitHub assets with same name already exist
+  mode: keep-existing
+  # A release version is immutable. Never delete and replace an asset with the
+  # same name if this workflow is accidentally rerun for an existing tag.
+  replace_existing_artifacts: false
   skip_upload: false
 
 # Changelog configuration

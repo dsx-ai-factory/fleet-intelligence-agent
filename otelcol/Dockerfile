@@ -6,7 +6,7 @@
 # Build from the repository root:
 #   docker build -f otelcol/Dockerfile -t fleetint-otelcol:latest .
 
-FROM golang:1.26.5 AS builder
+FROM golang:1.26.6 AS builder
 
 # Install the OTel Collector Builder at the same version as our components.
 RUN go install go.opentelemetry.io/collector/cmd/builder@v0.156.0

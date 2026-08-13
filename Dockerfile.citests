@@ -16,7 +16,7 @@
 # Run specific package tests:
 #   docker run --rm fleet-intelligence-agent:test go test -v ./internal/...
 #
-FROM golang:1.26.5
+FROM golang:1.26.6
 
 ARG TARGETARCH
 

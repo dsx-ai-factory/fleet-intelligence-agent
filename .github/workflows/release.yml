@@ -6,17 +6,50 @@ on:
       - 'v*'  # Triggers on version tags like v1.0.0, v2.1.3, etc.
 
 env:
-  GO_VERSION: '1.26.5'
+  GO_VERSION: '1.26.6'
+  RELEASE_TAG: ${{ github.ref_name }}
 
 permissions:
   contents: write  # Needed for creating GitHub releases
   packages: write  # Needed for pushing images/charts to GHCR
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release:
     name: Create Release
     runs-on: [self-hosted, rocky8]
     steps:
+      - name: Validate tag format
+        shell: bash
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$ ]]; then
+            printf 'Tag %q does not match expected format (v1.2.3, v1.2.3-beta, or v1.2.3-rc.2)\n' \
+              "$RELEASE_TAG" >&2
+            exit 1
+          fi
+
+      - name: Refuse to overwrite an existing release
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const tag = process.env.RELEASE_TAG;
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            const existing = releases.find((release) => release.tag_name === tag);
+            if (existing) {
+              throw new Error(
+                `Release ${tag} already exists (${existing.draft ? "draft" : "published"}); ` +
+                "refusing to rebuild, re-sign, or replace its artifacts",
+              );
+            }
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -39,13 +72,6 @@ jobs:
         run: |
           rm -rf ./dist || true
 
-      - name: Validate tag format
-        run: |
-          if [[ ! "${{ github.ref_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$ ]]; then
-            echo "Tag ${{ github.ref_name }} does not match expected format (v1.2.3, v1.2.3-beta, or v1.2.3-rc.2)"
-            exit 1
-          fi
-
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5
         with:
@@ -53,17 +79,108 @@ jobs:
           version: v2.4.1
           args: release --clean --config .goreleaser.yaml
         env:
-          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+          GORELEASER_CURRENT_TAG: ${{ env.RELEASE_TAG }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
+
+      - name: Verify nvsec is available
+        run: |
+          command -v nvsec >/dev/null 2>&1 || {
+            echo "nvsec must be installed on the self-hosted release runner" >&2
+            exit 1
+          }
+
+      - name: Sign and verify DEB and RPM packages
+        run: |
+          scripts/sign-linux-packages.sh \
+            dist \
+            deployments/packages/keys/fleet-intelligence.pub.asc
+        env:
+          NVSEC_SSA_CLIENT_ID: ${{ secrets.NVSEC_SSA_CLIENT_ID }}
+          NVSEC_SSA_CLIENT_SECRET: ${{ secrets.NVSEC_SSA_CLIENT_SECRET }}
+          NVSEC_LINUX_PACKAGE_SSA_SCOPE: ${{ vars.NVSEC_LINUX_PACKAGE_SSA_SCOPE || 'SIGNING_LINUX_PACKAGE_FLEET_INTELLIGENCE' }}
+          NVSEC_LINUX_PACKAGE_JOB_TYPE: ${{ vars.NVSEC_LINUX_PACKAGE_JOB_TYPE || 'LINUX_PACKAGE_FLEET_INTELLIGENCE' }}
+          NSPECT_ID: ${{ vars.NSPECT_ID }}
+
+      - name: Refresh checksums for signed release artifacts
+        run: |
+          scripts/refresh-checksums.sh \
+            dist/checksums.txt \
+            deployments/packages/keys/fleet-intelligence.pub.asc \
+            scripts/verify-linux-package-signature.sh
+
+      - name: Sign and verify checksum manifest
+        run: |
+          scripts/sign-checksum-manifest.sh \
+            dist/checksums.txt \
+            deployments/packages/keys/fleet-intelligence.pub.asc
+        env:
+          NVSEC_SSA_CLIENT_ID: ${{ secrets.NVSEC_SSA_CLIENT_ID }}
+          NVSEC_SSA_CLIENT_SECRET: ${{ secrets.NVSEC_SSA_CLIENT_SECRET }}
+          NVSEC_CHECKSUM_SSA_SCOPE: ${{ vars.NVSEC_CHECKSUM_SSA_SCOPE || 'SIGNING_FLEET_INTELLIGENCE' }}
+          NVSEC_CHECKSUM_JOB_TYPE: ${{ vars.NVSEC_CHECKSUM_JOB_TYPE || 'FLEET_INTELLIGENCE' }}
+          NSPECT_ID: ${{ vars.NSPECT_ID }}
+
+      - name: Replace signed assets in draft release
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const tag = context.ref.replace("refs/tags/", "");
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            const release = releases.find((candidate) => candidate.tag_name === tag);
+            if (!release) {
+              throw new Error(`Draft release not found for tag ${tag}`);
+            }
+            if (!release.draft) {
+              throw new Error("Refusing to replace assets in a published release");
+            }
+
+            const files = fs.readdirSync("dist")
+              .filter((name) =>
+                name.endsWith(".deb") ||
+                name.endsWith(".rpm") ||
+                name === "checksums.txt.asc" ||
+                name === "checksums.txt"
+              )
+              .map((name) => path.join("dist", name));
+            files.push(
+              "deployments/packages/keys/fleet-intelligence.pub.asc",
+              "scripts/verify-linux-package-signature.sh",
+            );
+
+            const existing = new Map(release.assets.map((asset) => [asset.name, asset.id]));
+            for (const file of files) {
+              const name = path.basename(file);
+              const existingID = existing.get(name);
+              if (existingID) {
+                await github.rest.repos.deleteReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  asset_id: existingID,
+                });
+              }
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.id,
+                name,
+                data: fs.readFileSync(file),
+              });
+            }
       - name: Get version and commit info
         id: version
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          VERSION="${RELEASE_TAG#v}"
           COMMIT_SHORT=$(git rev-parse --short=7 HEAD)
           BUILD_TIMESTAMP=$(git show -s --format=%cI HEAD)
           BRANCH="release"
-          SOURCE="https://github.com/${{ github.repository }}/archive/refs/tags/${{ github.ref_name }}.tar.gz"
+          SOURCE="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${RELEASE_TAG}.tar.gz"
           
           # Check if version contains hyphen (pre-release)
           if [[ "$VERSION" == *"-"* ]]; then
@@ -169,41 +286,31 @@ jobs:
           OWNER_LC="${{ steps.agent_image_ghcr.outputs.owner_lc }}"
           helm push "dist/fleet-intelligence-agent-${CHART_VERSION}.tgz" "oci://ghcr.io/${OWNER_LC}/charts"
       
-      - name: Setup JFrog CLI
-        if: steps.version.outputs.is_prerelease == 'false'
-        uses: jfrog/setup-jfrog-cli@v4
+      - name: Publish verified GitHub release
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
         with:
-          version: latest
-      
-      - name: Configure JFrog CLI
-        if: steps.version.outputs.is_prerelease == 'false'
-        run: |
-          jf config add nvidia \
-            --url="${{ secrets.ARTIFACTORY_URL }}" \
-            --user="${{ secrets.ARTIFACTORY_USER }}" \
-            --access-token="${{ secrets.ARTIFACTORY_TOKEN }}" \
-            --interactive=false \
-            --overwrite
-          jf config use nvidia
-      
-      - name: Upload x86_64 tarball to Artifactory
-        if: steps.version.outputs.is_prerelease == 'false'
-        run: |
-          jf rt upload \
-            "dist/fleetint-linux-x86_64-${{ steps.version.outputs.version }}.tar.gz" \
-            "sw-dgxc-gpuhealth-generic-local/KITMAKER/release/fleetint/linux-x86_64/${{ steps.version.outputs.version }}/" \
-            --flat=true \
-            --target-props "component_name=fleetint;branch=${{ steps.version.outputs.branch }};os=linux;arch=x86_64;platform=linux-x86_64;version=${{ steps.version.outputs.version }};changelist=${{ steps.version.outputs.commit }};source=${{ steps.version.outputs.source }};category=toolkit"
-      
-      - name: Upload sbsa tarball to Artifactory
-        if: steps.version.outputs.is_prerelease == 'false'
-        run: |
-          jf rt upload \
-            "dist/fleetint-linux-sbsa-${{ steps.version.outputs.version }}.tar.gz" \
-            "sw-dgxc-gpuhealth-generic-local/KITMAKER/release/fleetint/linux-sbsa/${{ steps.version.outputs.version }}/" \
-            --flat=true \
-            --target-props "component_name=fleetint;branch=${{ steps.version.outputs.branch }};os=linux;arch=sbsa;platform=linux-sbsa;version=${{ steps.version.outputs.version }};changelist=${{ steps.version.outputs.commit }};source=${{ steps.version.outputs.source }};category=toolkit"
-      
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const tag = context.ref.replace("refs/tags/", "");
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            const release = releases.find((candidate) => candidate.tag_name === tag);
+            if (!release) {
+              throw new Error(`Draft release not found for tag ${tag}`);
+            }
+            if (!release.draft) {
+              throw new Error("Release is already published");
+            }
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release.id,
+              draft: false,
+            });
+
       - name: Summary
         run: |
           echo "### Release Build Complete" >> $GITHUB_STEP_SUMMARY
@@ -222,13 +329,11 @@ jobs:
           echo "repo: oci://ghcr.io/${{ steps.agent_image_ghcr.outputs.owner_lc }}/charts" >> $GITHUB_STEP_SUMMARY
           echo "chart: fleet-intelligence-agent:${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Linux packages and checksum manifest:** verified with Fleet Intelligence key \`087199B3\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           
           if [[ "${{ steps.version.outputs.is_prerelease }}" == "true" ]]; then
             echo "GitHub release created (pre-release)" >> $GITHUB_STEP_SUMMARY
-            echo "Artifactory upload skipped (pre-release versions not uploaded to kitmaker)" >> $GITHUB_STEP_SUMMARY
           else
             echo "GitHub release created" >> $GITHUB_STEP_SUMMARY
-            echo "Artifacts uploaded to Artifactory:" >> $GITHUB_STEP_SUMMARY
-            echo "- \`sw-dgxc-gpuhealth-generic-local/KITMAKER/release/fleetint/linux-x86_64/${{ steps.version.outputs.version }}/\`" >> $GITHUB_STEP_SUMMARY
-            echo "- \`sw-dgxc-gpuhealth-generic-local/KITMAKER/release/fleetint/linux-sbsa/${{ steps.version.outputs.version }}/\`" >> $GITHUB_STEP_SUMMARY
           fi
