@@ -267,41 +267,6 @@ jobs:
           OWNER_LC="${{ steps.agent_image_ghcr.outputs.owner_lc }}"
           helm push "dist/fleet-intelligence-agent-${CHART_VERSION}.tgz" "oci://ghcr.io/${OWNER_LC}/charts"
       
-      - name: Setup JFrog CLI
-        if: steps.version.outputs.is_prerelease == 'false'
-        uses: jfrog/setup-jfrog-cli@v4
-        with:
-          version: latest
-      
-      - name: Configure JFrog CLI
-        if: steps.version.outputs.is_prerelease == 'false'
-        run: |
-          jf config add nvidia \
-            --url="${{ secrets.ARTIFACTORY_URL }}" \
-            --user="${{ secrets.ARTIFACTORY_USER }}" \
-            --access-token="${{ secrets.ARTIFACTORY_TOKEN }}" \
-            --interactive=false \
-            --overwrite
-          jf config use nvidia
-      
-      - name: Upload x86_64 tarball to Artifactory
-        if: steps.version.outputs.is_prerelease == 'false'
-        run: |
-          jf rt upload \
-            "dist/fleetint-linux-x86_64-${{ steps.version.outputs.version }}.tar.gz" \
-            "sw-dgxc-gpuhealth-generic-local/KITMAKER/release/fleetint/linux-x86_64/${{ steps.version.outputs.version }}/" \
-            --flat=true \
-            --target-props "component_name=fleetint;branch=${{ steps.version.outputs.branch }};os=linux;arch=x86_64;platform=linux-x86_64;version=${{ steps.version.outputs.version }};changelist=${{ steps.version.outputs.commit }};source=${{ steps.version.outputs.source }};category=toolkit"
-
-      - name: Upload sbsa tarball to Artifactory
-        if: steps.version.outputs.is_prerelease == 'false'
-        run: |
-          jf rt upload \
-            "dist/fleetint-linux-sbsa-${{ steps.version.outputs.version }}.tar.gz" \
-            "sw-dgxc-gpuhealth-generic-local/KITMAKER/release/fleetint/linux-sbsa/${{ steps.version.outputs.version }}/" \
-            --flat=true \
-            --target-props "component_name=fleetint;branch=${{ steps.version.outputs.branch }};os=linux;arch=sbsa;platform=linux-sbsa;version=${{ steps.version.outputs.version }};changelist=${{ steps.version.outputs.commit }};source=${{ steps.version.outputs.source }};category=toolkit"
-
       - name: Publish verified GitHub release
         uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
         with:
@@ -350,10 +315,6 @@ jobs:
           
           if [[ "${{ steps.version.outputs.is_prerelease }}" == "true" ]]; then
             echo "GitHub release created (pre-release)" >> $GITHUB_STEP_SUMMARY
-            echo "Artifactory upload skipped (pre-release versions not uploaded to kitmaker)" >> $GITHUB_STEP_SUMMARY
           else
             echo "GitHub release created" >> $GITHUB_STEP_SUMMARY
-            echo "Artifacts uploaded to Artifactory:" >> $GITHUB_STEP_SUMMARY
-            echo "- \`sw-dgxc-gpuhealth-generic-local/KITMAKER/release/fleetint/linux-x86_64/${{ steps.version.outputs.version }}/\`" >> $GITHUB_STEP_SUMMARY
-            echo "- \`sw-dgxc-gpuhealth-generic-local/KITMAKER/release/fleetint/linux-sbsa/${{ steps.version.outputs.version }}/\`" >> $GITHUB_STEP_SUMMARY
           fi
