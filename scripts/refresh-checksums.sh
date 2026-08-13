@@ -39,9 +39,15 @@ cleanup() {
 trap cleanup EXIT
 
 artifact_count=0
-while read -r _ artifact_name extra || [[ -n "${artifact_name:-}" ]]; do
+refreshed_count=0
+verified_count=0
+while read -r expected_hash artifact_name extra || [[ -n "${artifact_name:-}" ]]; do
   [[ -z "${extra:-}" ]] || {
     echo "Unsupported checksum line for an artifact containing whitespace: $artifact_name $extra" >&2
+    exit 1
+  }
+  [[ "$expected_hash" =~ ^[[:xdigit:]]{64}$ ]] || {
+    echo "Invalid SHA-256 checksum for $artifact_name: $expected_hash" >&2
     exit 1
   }
   artifact_name="${artifact_name#\*}"
@@ -56,7 +62,22 @@ while read -r _ artifact_name extra || [[ -n "${artifact_name:-}" ]]; do
     exit 1
   }
 
-  printf '%s  %s\n' "$(sha256_file "$artifact_path")" "$artifact_name" >> "$updated_file"
+  actual_hash="$(sha256_file "$artifact_path")"
+  expected_hash_lc="$(printf '%s' "$expected_hash" | tr '[:upper:]' '[:lower:]')"
+  case "$artifact_name" in
+    *.deb|*.rpm)
+      printf '%s  %s\n' "$actual_hash" "$artifact_name" >> "$updated_file"
+      refreshed_count=$((refreshed_count + 1))
+      ;;
+    *)
+      [[ "$actual_hash" == "$expected_hash_lc" ]] || {
+        echo "Unexpected checksum change for unsigned artifact: $artifact_name" >&2
+        exit 1
+      }
+      printf '%s  %s\n' "$expected_hash" "$artifact_name" >> "$updated_file"
+      verified_count=$((verified_count + 1))
+      ;;
+  esac
   artifact_count=$((artifact_count + 1))
 done < "$checksum_file"
 
@@ -86,4 +107,4 @@ chmod 0644 "$updated_file"
 mv "$updated_file" "$checksum_file"
 trap - EXIT
 
-echo "Refreshed SHA-256 checksums for $artifact_count release artifacts"
+echo "Refreshed $refreshed_count signed package checksums and verified $verified_count unchanged release artifacts"
