@@ -7,6 +7,7 @@ on:
 
 env:
   GO_VERSION: '1.26.5'
+  RELEASE_TAG: ${{ github.ref_name }}
 
 permissions:
   contents: write  # Needed for creating GitHub releases
@@ -17,6 +18,15 @@ jobs:
     name: Create Release
     runs-on: [self-hosted, rocky8]
     steps:
+      - name: Validate tag format
+        shell: bash
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$ ]]; then
+            printf 'Tag %q does not match expected format (v1.2.3, v1.2.3-beta, or v1.2.3-rc.2)\n' \
+              "$RELEASE_TAG" >&2
+            exit 1
+          fi
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -39,13 +49,6 @@ jobs:
         run: |
           rm -rf ./dist || true
 
-      - name: Validate tag format
-        run: |
-          if [[ ! "${{ github.ref_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$ ]]; then
-            echo "Tag ${{ github.ref_name }} does not match expected format (v1.2.3, v1.2.3-beta, or v1.2.3-rc.2)"
-            exit 1
-          fi
-
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5
         with:
@@ -53,7 +56,7 @@ jobs:
           version: v2.4.1
           args: release --clean --config .goreleaser.yaml
         env:
-          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+          GORELEASER_CURRENT_TAG: ${{ env.RELEASE_TAG }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify nvsec is available
@@ -150,11 +153,11 @@ jobs:
       - name: Get version and commit info
         id: version
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          VERSION="${RELEASE_TAG#v}"
           COMMIT_SHORT=$(git rev-parse --short=7 HEAD)
           BUILD_TIMESTAMP=$(git show -s --format=%cI HEAD)
           BRANCH="release"
-          SOURCE="https://github.com/${{ github.repository }}/archive/refs/tags/${{ github.ref_name }}.tar.gz"
+          SOURCE="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${RELEASE_TAG}.tar.gz"
           
           # Check if version contains hyphen (pre-release)
           if [[ "$VERSION" == *"-"* ]]; then
