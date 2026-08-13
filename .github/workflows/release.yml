@@ -56,19 +56,12 @@ jobs:
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up uv for nvsec
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          version: "0.11.31"
-
-      - name: Install nvsec
+      - name: Verify nvsec is available
         run: |
-          uv python install 3.13
-          uv venv --python 3.13 --seed "$RUNNER_TEMP/nvsec-venv"
-          "$RUNNER_TEMP/nvsec-venv/bin/pip" install "nvsec==2.9.2" \
-            --index-url "https://gitlab-master.nvidia.com/api/v4/projects/25923/packages/pypi/simple" \
-            --extra-index-url "https://urm.nvidia.com/artifactory/api/pypi/sw-cftt-pypi-local/simple"
-          echo "$RUNNER_TEMP/nvsec-venv/bin" >> "$GITHUB_PATH"
+          command -v nvsec >/dev/null 2>&1 || {
+            echo "nvsec must be installed on the self-hosted release runner" >&2
+            exit 1
+          }
 
       - name: Sign and verify DEB and RPM packages
         run: |
