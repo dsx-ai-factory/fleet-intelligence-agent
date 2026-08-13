@@ -191,8 +191,10 @@ release:
     
     For issues and questions, please visit: https://github.com/NVIDIA/fleet-intelligence-agent/issues
   prerelease: auto  # Auto-detect pre-release based on version (e.g., v1.0.0-beta)
-  mode: replace  # Replace existing release if it exists
-  replace_existing_artifacts: true  # Handle reruns where GitHub assets with same name already exist
+  mode: keep-existing
+  # A release version is immutable. Never delete and replace an asset with the
+  # same name if this workflow is accidentally rerun for an existing tag.
+  replace_existing_artifacts: false
   skip_upload: false
 
 # Changelog configuration
