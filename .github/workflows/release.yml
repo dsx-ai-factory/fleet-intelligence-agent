@@ -337,3 +337,9 @@ jobs:
           else
             echo "GitHub release created" >> $GITHUB_STEP_SUMMARY
           fi
+  publish-docs:
+    name: Publish Fern docs
+    needs: release
+    uses: ./.github/workflows/publish-fern-docs.yml
+    secrets:
+      DOCS_FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}

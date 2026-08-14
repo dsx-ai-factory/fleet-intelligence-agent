@@ -37,6 +37,10 @@ name: Publish Fern Docs
 on:
   release:
     types: [published]
+  workflow_call:
+    secrets:
+      DOCS_FERN_TOKEN:
+        required: true
   workflow_dispatch: {}
 
 permissions:
