@@ -83,12 +83,14 @@ func (s *backendSink) Export(ctx context.Context, snap *inventory.Snapshot) erro
 	}
 	req := mapper.ToNodeUpsertRequest(snap)
 	nodeGroup, ok, err := s.state.GetNodeGroup(ctx)
+	nodeGroupRead := err == nil
 	if err != nil {
 		log.Logger.Warnw("inventory export continuing without node_group metadata", "error", err)
 	} else if ok {
 		req.NodeGroup = nodeGroup
 	}
 	computeZone, ok, err := s.state.GetComputeZone(ctx)
+	computeZoneRead := err == nil
 	if err != nil {
 		log.Logger.Warnw("inventory export continuing without compute zone metadata", "error", err)
 	} else if ok {
@@ -111,11 +113,15 @@ func (s *backendSink) Export(ctx context.Context, snap *inventory.Snapshot) erro
 		return fmt.Errorf("inventory backend returned a nil node upsert response")
 	}
 	var stateErrs []error
-	if err := s.state.SetNodeGroup(ctx, resp.NodeGroup); err != nil {
-		stateErrs = append(stateErrs, fmt.Errorf("persist backend-resolved node group: %w", err))
+	if !nodeGroupRead || resp.NodeGroup != nodeGroup {
+		if err := s.state.SetNodeGroup(ctx, resp.NodeGroup); err != nil {
+			stateErrs = append(stateErrs, fmt.Errorf("persist backend-resolved node group: %w", err))
+		}
 	}
-	if err := s.state.SetComputeZone(ctx, resp.ComputeZone); err != nil {
-		stateErrs = append(stateErrs, fmt.Errorf("persist backend-resolved compute zone: %w", err))
+	if !computeZoneRead || resp.ComputeZone != computeZone {
+		if err := s.state.SetComputeZone(ctx, resp.ComputeZone); err != nil {
+			stateErrs = append(stateErrs, fmt.Errorf("persist backend-resolved compute zone: %w", err))
+		}
 	}
 	if err := errors.Join(stateErrs...); err != nil {
 		return err
