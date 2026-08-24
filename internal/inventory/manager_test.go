@@ -69,7 +69,7 @@ func (f *fakeSink) Export(_ context.Context, snap *Snapshot) error {
 	return nil
 }
 
-func TestManagerCollectOnceExportsOnlyWhenInventoryChanges(t *testing.T) {
+func TestManagerCollectOnceExportsEverySnapshot(t *testing.T) {
 	src := &fakeSource{
 		snapshots: []*Snapshot{
 			{
@@ -109,15 +109,15 @@ func TestManagerCollectOnceExportsOnlyWhenInventoryChanges(t *testing.T) {
 	snap2, err := mgr.CollectOnce(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, snap1.InventoryHash, snap2.InventoryHash)
-	require.Len(t, sink.exported, 1)
+	require.Len(t, sink.exported, 2)
 
 	snap3, err := mgr.CollectOnce(context.Background())
 	require.NoError(t, err)
 	require.NotEqual(t, snap1.InventoryHash, snap3.InventoryHash)
-	require.Len(t, sink.exported, 2)
+	require.Len(t, sink.exported, 3)
 }
 
-func TestManagerCollectOnceConcurrentExportSingleHash(t *testing.T) {
+func TestManagerCollectOnceConcurrentExportsEverySnapshot(t *testing.T) {
 	src := &fakeSource{
 		snapshots: []*Snapshot{{
 			CollectedAt: time.Unix(100, 0).UTC(),
@@ -149,7 +149,7 @@ func TestManagerCollectOnceConcurrentExportSingleHash(t *testing.T) {
 	for err := range errs {
 		require.NoError(t, err)
 	}
-	require.Len(t, sink.exported, 1)
+	require.Len(t, sink.exported, 8)
 }
 
 func TestManagerCollectOnceReturnsNotReadyForRetryScheduling(t *testing.T) {

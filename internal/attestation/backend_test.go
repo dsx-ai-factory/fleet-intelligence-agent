@@ -74,6 +74,10 @@ func (s *stubState) GetComputeZone(context.Context) (string, bool, error) {
 	return "", false, nil
 }
 func (s *stubState) SetComputeZone(context.Context, string) error { return nil }
+func (s *stubState) GetNodePlacement(context.Context) (string, bool, string, bool, error) {
+	return "", false, "", false, nil
+}
+func (s *stubState) SetNodePlacement(context.Context, string, string) error { return nil }
 func (s *stubState) GetEnrollmentTime(context.Context) (time.Time, bool, error) {
 	return time.Time{}, false, nil
 }

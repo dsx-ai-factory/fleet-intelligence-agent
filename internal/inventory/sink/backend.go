@@ -18,7 +18,6 @@ package sink
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
@@ -82,19 +81,17 @@ func (s *backendSink) Export(ctx context.Context, snap *inventory.Snapshot) erro
 		return fmt.Errorf("create backend client: %w", err)
 	}
 	req := mapper.ToNodeUpsertRequest(snap)
-	nodeGroup, ok, err := s.state.GetNodeGroup(ctx)
-	nodeGroupRead := err == nil
+	nodeGroup, nodeGroupOK, computeZone, computeZoneOK, err := s.state.GetNodePlacement(ctx)
+	placementRead := err == nil
 	if err != nil {
-		log.Logger.Warnw("inventory export continuing without node_group metadata", "error", err)
-	} else if ok {
-		req.NodeGroup = nodeGroup
-	}
-	computeZone, ok, err := s.state.GetComputeZone(ctx)
-	computeZoneRead := err == nil
-	if err != nil {
-		log.Logger.Warnw("inventory export continuing without compute zone metadata", "error", err)
-	} else if ok {
-		req.ComputeZone = computeZone
+		log.Logger.Warnw("inventory export continuing without node placement metadata", "error", err)
+	} else {
+		if nodeGroupOK {
+			req.NodeGroup = nodeGroup
+		}
+		if computeZoneOK {
+			req.ComputeZone = computeZone
+		}
 	}
 	enrollmentTime, ok, err := s.state.GetEnrollmentTime(ctx)
 	if err != nil {
@@ -112,19 +109,10 @@ func (s *backendSink) Export(ctx context.Context, snap *inventory.Snapshot) erro
 	if resp == nil {
 		return fmt.Errorf("inventory backend returned a nil node upsert response")
 	}
-	var stateErrs []error
-	if !nodeGroupRead || resp.NodeGroup != nodeGroup {
-		if err := s.state.SetNodeGroup(ctx, resp.NodeGroup); err != nil {
-			stateErrs = append(stateErrs, fmt.Errorf("persist backend-resolved node group: %w", err))
+	if placementRead && (resp.NodeGroup != nodeGroup || resp.ComputeZone != computeZone) {
+		if err := s.state.SetNodePlacement(ctx, resp.NodeGroup, resp.ComputeZone); err != nil {
+			return fmt.Errorf("persist backend-resolved node placement: %w", err)
 		}
-	}
-	if !computeZoneRead || resp.ComputeZone != computeZone {
-		if err := s.state.SetComputeZone(ctx, resp.ComputeZone); err != nil {
-			stateErrs = append(stateErrs, fmt.Errorf("persist backend-resolved compute zone: %w", err))
-		}
-	}
-	if err := errors.Join(stateErrs...); err != nil {
-		return err
 	}
 	log.Logger.Infow("inventory exported to backend",
 		"node_uuid", nodeUUID,

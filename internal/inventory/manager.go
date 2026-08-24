@@ -41,8 +41,7 @@ type manager struct {
 	sink     Sink
 	config   InventoryConfig
 
-	lastSnapshot     *Snapshot
-	lastExportedHash string
+	lastSnapshot *Snapshot
 }
 
 // NewManager creates an inventory manager.
@@ -163,21 +162,11 @@ func (m *manager) CollectOnce(ctx context.Context) (*Snapshot, error) {
 		m.exportMu.Lock()
 		defer m.exportMu.Unlock()
 
-		m.mu.RLock()
-		alreadyExported := m.lastExportedHash == hash
-		m.mu.RUnlock()
-		if alreadyExported {
-			log.Logger.Infow("inventory unchanged, skipping export")
-		} else {
-			if err := m.sink.Export(ctx, snap); err != nil {
-				if errors.Is(err, ErrNotReady) {
-					return snap, err
-				}
-				return nil, err
+		if err := m.sink.Export(ctx, snap); err != nil {
+			if errors.Is(err, ErrNotReady) {
+				return snap, err
 			}
-			m.mu.Lock()
-			m.lastExportedHash = hash
-			m.mu.Unlock()
+			return nil, err
 		}
 	}
 

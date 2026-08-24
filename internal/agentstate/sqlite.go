@@ -207,6 +207,95 @@ func (s *sqliteState) SetComputeZone(ctx context.Context, value string) error {
 	return s.setMetadata(ctx, MetadataKeyComputeZone, value)
 }
 
+func (s *sqliteState) GetNodePlacement(ctx context.Context) (string, bool, string, bool, error) {
+	db, err := s.openReadOnly()
+	if err != nil {
+		return "", false, "", false, err
+	}
+	defer db.Close()
+
+	return ReadNodePlacementMetadata(ctx, db)
+}
+
+// ReadNodePlacementMetadata reads node group and compute zone in one SQLite
+// statement so callers observe both values from the same database snapshot.
+func ReadNodePlacementMetadata(ctx context.Context, db *sql.DB) (string, bool, string, bool, error) {
+	if db == nil {
+		return "", false, "", false, fmt.Errorf("read node placement metadata: database is required")
+	}
+
+	var nodeGroup, computeZone string
+	err := db.QueryRowContext(ctx, `
+SELECT
+  COALESCE(MAX(CASE WHEN key = ? THEN value END), ''),
+  COALESCE(MAX(CASE WHEN key = ? THEN value END), '')
+FROM gpud_metadata
+WHERE key IN (?, ?)`,
+		MetadataKeyNodeGroup,
+		MetadataKeyComputeZone,
+		MetadataKeyNodeGroup,
+		MetadataKeyComputeZone,
+	).Scan(&nodeGroup, &computeZone)
+	if err != nil {
+		if isMetadataAbsentErr(err) {
+			return "", false, "", false, nil
+		}
+		return "", false, "", false, fmt.Errorf("read node placement metadata: %w", err)
+	}
+	return nodeGroup, nodeGroup != "", computeZone, computeZone != "", nil
+}
+
+func (s *sqliteState) SetNodePlacement(ctx context.Context, nodeGroup, computeZone string) error {
+	db, err := s.openReadWrite()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	if stateFile, err := s.stateFileFn(); err == nil {
+		if err := config.SecureStateFilePermissions(stateFile); err != nil {
+			return fmt.Errorf("secure state file permissions: %w", err)
+		}
+	}
+	if err := pkgmetadata.CreateTableMetadata(ctx, db); err != nil {
+		return fmt.Errorf("create metadata table: %w", err)
+	}
+	return UpdateNodePlacementMetadata(ctx, db, &nodeGroup, &computeZone)
+}
+
+// UpdateNodePlacementMetadata atomically updates the supplied placement
+// fields and preserves either existing value whose argument is nil.
+func UpdateNodePlacementMetadata(ctx context.Context, db *sql.DB, nodeGroup, computeZone *string) error {
+	if db == nil {
+		return fmt.Errorf("update node placement metadata: database is required")
+	}
+	if nodeGroup == nil && computeZone == nil {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+INSERT INTO gpud_metadata (key, value) VALUES
+  (?, COALESCE(?, (SELECT value FROM gpud_metadata WHERE key = ?), '')),
+  (?, COALESCE(?, (SELECT value FROM gpud_metadata WHERE key = ?), ''))
+ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		MetadataKeyNodeGroup,
+		optionalStringValue(nodeGroup),
+		MetadataKeyNodeGroup,
+		MetadataKeyComputeZone,
+		optionalStringValue(computeZone),
+		MetadataKeyComputeZone,
+	); err != nil {
+		return fmt.Errorf("update node placement metadata: %w", err)
+	}
+	return nil
+}
+
+func optionalStringValue(value *string) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
 func (s *sqliteState) GetEnrollmentTime(ctx context.Context) (time.Time, bool, error) {
 	value, ok, err := s.getMetadata(ctx, MetadataKeyEnrolledAt)
 	if err != nil || !ok {

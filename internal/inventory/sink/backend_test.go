@@ -28,22 +28,23 @@ import (
 )
 
 type fakeState struct {
-	baseURL         string
-	jwt             string
-	nodeUUID        string
-	nodeGroup       string
-	computeZone     string
-	nodeGroupErr    error
-	computeErr      error
-	setNodeErr      error
-	setComputeErr   error
-	setNodeGroup    string
-	setComputeZone  string
-	setNodeCalls    int
-	setComputeCalls int
-	enrolled        time.Time
-	enrollmentErr   error
-	err             error
+	baseURL           string
+	jwt               string
+	nodeUUID          string
+	nodeGroup         string
+	computeZone       string
+	nodeGroupErr      error
+	computeErr        error
+	setNodeErr        error
+	setComputeErr     error
+	setNodeGroup      string
+	setComputeZone    string
+	setNodeCalls      int
+	setComputeCalls   int
+	setPlacementCalls int
+	enrolled          time.Time
+	enrollmentErr     error
+	err               error
 }
 
 func (f *fakeState) GetBackendBaseURL(context.Context) (string, bool, error) {
@@ -110,6 +111,26 @@ func (f *fakeState) SetComputeZone(_ context.Context, value string) error {
 	f.setComputeCalls++
 	f.setComputeZone = value
 	return f.setComputeErr
+}
+func (f *fakeState) GetNodePlacement(context.Context) (string, bool, string, bool, error) {
+	if f.nodeGroupErr != nil {
+		return "", false, "", false, f.nodeGroupErr
+	}
+	if f.computeErr != nil {
+		return "", false, "", false, f.computeErr
+	}
+	if f.err != nil {
+		return "", false, "", false, f.err
+	}
+	return f.nodeGroup, f.nodeGroup != "", f.computeZone, f.computeZone != "", nil
+}
+func (f *fakeState) SetNodePlacement(_ context.Context, nodeGroup, computeZone string) error {
+	f.setPlacementCalls++
+	f.setNodeCalls++
+	f.setComputeCalls++
+	f.setNodeGroup = nodeGroup
+	f.setComputeZone = computeZone
+	return errors.Join(f.setNodeErr, f.setComputeErr)
 }
 func (f *fakeState) GetEnrollmentTime(context.Context) (time.Time, bool, error) {
 	if f.enrollmentErr != nil {
@@ -224,49 +245,45 @@ func TestBackendSinkExportUsesState(t *testing.T) {
 	require.Equal(t, "resolved-zone", state.setComputeZone)
 	require.Equal(t, 1, state.setNodeCalls)
 	require.Equal(t, 1, state.setComputeCalls)
+	require.Equal(t, 1, state.setPlacementCalls)
 }
 
-func TestBackendSinkExportOnlyPersistsChangedResolvedMembership(t *testing.T) {
+func TestBackendSinkExportAtomicallyPersistsChangedResolvedMembership(t *testing.T) {
 	tests := []struct {
-		name            string
-		currentGroup    string
-		currentZone     string
-		resolvedGroup   string
-		resolvedZone    string
-		wantGroupWrites int
-		wantZoneWrites  int
+		name                string
+		currentGroup        string
+		currentZone         string
+		resolvedGroup       string
+		resolvedZone        string
+		wantPlacementWrites int
 	}{
 		{
-			name:            "absent metadata and empty response unchanged",
-			wantGroupWrites: 0,
-			wantZoneWrites:  0,
+			name:                "absent metadata and empty response unchanged",
+			wantPlacementWrites: 0,
 		},
 		{
-			name:            "both unchanged",
-			currentGroup:    "group-a",
-			currentZone:     "zone-a",
-			resolvedGroup:   "group-a",
-			resolvedZone:    "zone-a",
-			wantGroupWrites: 0,
-			wantZoneWrites:  0,
+			name:                "both unchanged",
+			currentGroup:        "group-a",
+			currentZone:         "zone-a",
+			resolvedGroup:       "group-a",
+			resolvedZone:        "zone-a",
+			wantPlacementWrites: 0,
 		},
 		{
-			name:            "only node group changed",
-			currentGroup:    "group-a",
-			currentZone:     "zone-a",
-			resolvedGroup:   "group-b",
-			resolvedZone:    "zone-a",
-			wantGroupWrites: 1,
-			wantZoneWrites:  0,
+			name:                "only node group changed",
+			currentGroup:        "group-a",
+			currentZone:         "zone-a",
+			resolvedGroup:       "group-b",
+			resolvedZone:        "zone-a",
+			wantPlacementWrites: 1,
 		},
 		{
-			name:            "only compute zone changed",
-			currentGroup:    "group-a",
-			currentZone:     "zone-a",
-			resolvedGroup:   "group-a",
-			resolvedZone:    "zone-b",
-			wantGroupWrites: 0,
-			wantZoneWrites:  1,
+			name:                "only compute zone changed",
+			currentGroup:        "group-a",
+			currentZone:         "zone-a",
+			resolvedGroup:       "group-a",
+			resolvedZone:        "zone-b",
+			wantPlacementWrites: 1,
 		},
 	}
 
@@ -293,8 +310,11 @@ func TestBackendSinkExportOnlyPersistsChangedResolvedMembership(t *testing.T) {
 
 			err := s.Export(context.Background(), &inventory.Snapshot{})
 			require.NoError(t, err)
-			require.Equal(t, tc.wantGroupWrites, state.setNodeCalls)
-			require.Equal(t, tc.wantZoneWrites, state.setComputeCalls)
+			require.Equal(t, tc.wantPlacementWrites, state.setPlacementCalls)
+			if tc.wantPlacementWrites > 0 {
+				require.Equal(t, tc.resolvedGroup, state.setNodeGroup)
+				require.Equal(t, tc.resolvedZone, state.setComputeZone)
+			}
 		})
 	}
 }
@@ -327,6 +347,7 @@ func TestBackendSinkExportClearsStateWhenResolvedMembershipIsEmpty(t *testing.T)
 	require.Empty(t, state.setComputeZone)
 	require.Equal(t, 1, state.setNodeCalls)
 	require.Equal(t, 1, state.setComputeCalls)
+	require.Equal(t, 1, state.setPlacementCalls)
 }
 
 func TestBackendSinkExportReturnsResolvedMembershipPersistenceErrors(t *testing.T) {
@@ -350,12 +371,14 @@ func TestBackendSinkExportReturnsResolvedMembershipPersistenceErrors(t *testing.
 	}
 
 	err := s.Export(context.Background(), &inventory.Snapshot{})
-	require.ErrorContains(t, err, "persist backend-resolved node group")
-	require.ErrorContains(t, err, "persist backend-resolved compute zone")
+	require.ErrorContains(t, err, "persist backend-resolved node placement")
+	require.ErrorContains(t, err, "node group write failed")
+	require.ErrorContains(t, err, "compute zone write failed")
 	require.Equal(t, "resolved-group", state.setNodeGroup)
 	require.Equal(t, "resolved-zone", state.setComputeZone)
 	require.Equal(t, 1, state.setNodeCalls)
 	require.Equal(t, 1, state.setComputeCalls)
+	require.Equal(t, 1, state.setPlacementCalls)
 }
 
 func TestBackendSinkExportEnrollmentTimeErrorIsNonFatal(t *testing.T) {
@@ -405,8 +428,9 @@ func TestBackendSinkExportOptionalMetadataErrorsAreNonFatal(t *testing.T) {
 	require.NotNil(t, client.req)
 	require.Empty(t, client.req.NodeGroup)
 	require.Empty(t, client.req.ComputeZone)
-	require.Equal(t, 1, state.setNodeCalls)
-	require.Equal(t, 1, state.setComputeCalls)
+	require.Zero(t, state.setNodeCalls)
+	require.Zero(t, state.setComputeCalls)
+	require.Zero(t, state.setPlacementCalls)
 }
 
 func TestBackendSinkValidationDoesNotBlockExport(t *testing.T) {

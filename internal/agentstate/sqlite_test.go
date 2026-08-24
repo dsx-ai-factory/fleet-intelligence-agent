@@ -120,6 +120,64 @@ func TestSQLiteStateMissingValue(t *testing.T) {
 	require.Empty(t, value)
 }
 
+func TestSQLiteStateNodePlacementRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	state := newTestSQLiteState(t)
+
+	err := state.SetNodePlacement(ctx, "group-a", "zone-a")
+	require.NoError(t, err)
+
+	nodeGroup, nodeGroupOK, computeZone, computeZoneOK, err := state.GetNodePlacement(ctx)
+	require.NoError(t, err)
+	require.True(t, nodeGroupOK)
+	require.Equal(t, "group-a", nodeGroup)
+	require.True(t, computeZoneOK)
+	require.Equal(t, "zone-a", computeZone)
+
+	err = state.SetNodePlacement(ctx, "", "zone-b")
+	require.NoError(t, err)
+	nodeGroup, nodeGroupOK, computeZone, computeZoneOK, err = state.GetNodePlacement(ctx)
+	require.NoError(t, err)
+	require.False(t, nodeGroupOK)
+	require.Empty(t, nodeGroup)
+	require.True(t, computeZoneOK)
+	require.Equal(t, "zone-b", computeZone)
+}
+
+func TestSQLiteStateNodePlacementUpdateRollsBackBothValues(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	state := newTestSQLiteState(t)
+	require.NoError(t, state.SetNodePlacement(ctx, "group-a", "zone-a"))
+
+	stateFile, err := state.stateFileFn()
+	require.NoError(t, err)
+	db, err := sqlite.Open(stateFile)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `
+CREATE TRIGGER reject_compute_zone_update
+BEFORE UPDATE ON gpud_metadata
+WHEN NEW.key = 'compute_zone' AND NEW.value = 'rejected-zone'
+BEGIN
+  SELECT RAISE(ABORT, 'reject compute zone update');
+END`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	err = state.SetNodePlacement(ctx, "group-b", "rejected-zone")
+	require.ErrorContains(t, err, "reject compute zone update")
+
+	nodeGroup, nodeGroupOK, computeZone, computeZoneOK, err := state.GetNodePlacement(ctx)
+	require.NoError(t, err)
+	require.True(t, nodeGroupOK)
+	require.Equal(t, "group-a", nodeGroup)
+	require.True(t, computeZoneOK)
+	require.Equal(t, "zone-a", computeZone)
+}
+
 func TestSQLiteStateGetOrCreateNodeUUID(t *testing.T) {
 	t.Parallel()
 

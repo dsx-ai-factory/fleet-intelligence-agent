@@ -195,19 +195,13 @@ func (e *healthExporter) populateOptionalResourceMetadata(ctx context.Context, d
 		return
 	}
 
-	nodeGroup, err := pkgmetadata.ReadMetadata(ctx, e.options.dbRO, agentstate.MetadataKeyNodeGroup)
+	nodeGroup, _, computeZone, _, err := agentstate.ReadNodePlacementMetadata(ctx, e.options.dbRO)
 	if err != nil {
-		log.Logger.Debugw("node_group metadata not available for telemetry resource", "error", err)
-	} else {
-		data.NodeGroup = nodeGroup
+		log.Logger.Debugw("node placement metadata not available for telemetry resource", "error", err)
+		return
 	}
-
-	computeZone, err := pkgmetadata.ReadMetadata(ctx, e.options.dbRO, agentstate.MetadataKeyComputeZone)
-	if err != nil {
-		log.Logger.Debugw("compute zone metadata not available for telemetry resource", "error", err)
-	} else {
-		data.ComputeZone = computeZone
-	}
+	data.NodeGroup = nodeGroup
+	data.ComputeZone = computeZone
 }
 
 // exportToFile writes health data to files
