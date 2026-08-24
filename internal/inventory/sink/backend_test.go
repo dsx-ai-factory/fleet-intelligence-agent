@@ -28,16 +28,20 @@ import (
 )
 
 type fakeState struct {
-	baseURL       string
-	jwt           string
-	nodeUUID      string
-	nodeGroup     string
-	computeZone   string
-	nodeGroupErr  error
-	computeErr    error
-	enrolled      time.Time
-	enrollmentErr error
-	err           error
+	baseURL        string
+	jwt            string
+	nodeUUID       string
+	nodeGroup      string
+	computeZone    string
+	nodeGroupErr   error
+	computeErr     error
+	setNodeErr     error
+	setComputeErr  error
+	setNodeGroup   string
+	setComputeZone string
+	enrolled       time.Time
+	enrollmentErr  error
+	err            error
 }
 
 func (f *fakeState) GetBackendBaseURL(context.Context) (string, bool, error) {
@@ -86,7 +90,10 @@ func (f *fakeState) GetNodeGroup(context.Context) (string, bool, error) {
 	}
 	return f.nodeGroup, f.nodeGroup != "", nil
 }
-func (f *fakeState) SetNodeGroup(context.Context, string) error { return nil }
+func (f *fakeState) SetNodeGroup(_ context.Context, value string) error {
+	f.setNodeGroup = value
+	return f.setNodeErr
+}
 func (f *fakeState) GetComputeZone(context.Context) (string, bool, error) {
 	if f.computeErr != nil {
 		return "", false, f.computeErr
@@ -96,7 +103,10 @@ func (f *fakeState) GetComputeZone(context.Context) (string, bool, error) {
 	}
 	return f.computeZone, f.computeZone != "", nil
 }
-func (f *fakeState) SetComputeZone(context.Context, string) error { return nil }
+func (f *fakeState) SetComputeZone(_ context.Context, value string) error {
+	f.setComputeZone = value
+	return f.setComputeErr
+}
 func (f *fakeState) GetEnrollmentTime(context.Context) (time.Time, bool, error) {
 	if f.enrollmentErr != nil {
 		return time.Time{}, false, f.enrollmentErr
@@ -112,6 +122,8 @@ type fakeClient struct {
 	nodeUUID string
 	req      *backendclient.NodeUpsertRequest
 	jwt      string
+	resp     *backendclient.NodeUpsertResponse
+	err      error
 }
 
 func (f *fakeClient) Enroll(context.Context, string) (string, error) { return "", nil }
@@ -121,11 +133,14 @@ func (f *fakeClient) GetNonce(context.Context, string, string) (*backendclient.N
 func (f *fakeClient) SubmitAttestation(context.Context, string, *backendclient.AttestationRequest, string) error {
 	return nil
 }
-func (f *fakeClient) UpsertNode(_ context.Context, nodeUUID string, req *backendclient.NodeUpsertRequest, jwt string) error {
+func (f *fakeClient) UpsertNode(_ context.Context, nodeUUID string, req *backendclient.NodeUpsertRequest, jwt string) (*backendclient.NodeUpsertResponse, error) {
 	f.nodeUUID = nodeUUID
 	f.req = req
 	f.jwt = jwt
-	return nil
+	if f.resp == nil && f.err == nil {
+		f.resp = &backendclient.NodeUpsertResponse{NodeUUID: nodeUUID}
+	}
+	return f.resp, f.err
 }
 
 func TestBackendSinkExportNotReady(t *testing.T) {
@@ -168,16 +183,21 @@ func TestBackendSinkExportErrors(t *testing.T) {
 
 func TestBackendSinkExportUsesState(t *testing.T) {
 	enrollmentTime := time.Date(2026, 5, 6, 15, 0, 0, 0, time.UTC)
-	client := &fakeClient{}
+	client := &fakeClient{resp: &backendclient.NodeUpsertResponse{
+		NodeUUID:    "node-1",
+		NodeGroup:   "resolved-group",
+		ComputeZone: "resolved-zone",
+	}}
+	state := &fakeState{
+		baseURL:     "https://example.com",
+		jwt:         "jwt-token",
+		nodeUUID:    "node-1",
+		nodeGroup:   "group-a",
+		computeZone: "zone-a",
+		enrolled:    enrollmentTime,
+	}
 	s := &backendSink{
-		state: &fakeState{
-			baseURL:     "https://example.com",
-			jwt:         "jwt-token",
-			nodeUUID:    "node-1",
-			nodeGroup:   "group-a",
-			computeZone: "zone-a",
-			enrolled:    enrollmentTime,
-		},
+		state: state,
 		clientFactory: func(string) (backendclient.Client, error) {
 			return client, nil
 		},
@@ -196,16 +216,21 @@ func TestBackendSinkExportUsesState(t *testing.T) {
 	require.Equal(t, "zone-a", client.req.ComputeZone)
 	require.NotNil(t, client.req.EnrolledAt)
 	require.Equal(t, enrollmentTime, *client.req.EnrolledAt)
+	require.Equal(t, "resolved-group", state.setNodeGroup)
+	require.Equal(t, "resolved-zone", state.setComputeZone)
 }
 
-func TestBackendSinkExportWithoutOptionalMetadataUsesEmptyStrings(t *testing.T) {
+func TestBackendSinkExportClearsStateWhenResolvedMembershipIsEmpty(t *testing.T) {
 	client := &fakeClient{}
+	state := &fakeState{
+		baseURL:     "https://example.com",
+		jwt:         "jwt-token",
+		nodeUUID:    "node-1",
+		nodeGroup:   "stale-group",
+		computeZone: "stale-zone",
+	}
 	s := &backendSink{
-		state: &fakeState{
-			baseURL:  "https://example.com",
-			jwt:      "jwt-token",
-			nodeUUID: "node-1",
-		},
+		state: state,
 		clientFactory: func(string) (backendclient.Client, error) {
 			return client, nil
 		},
@@ -217,8 +242,37 @@ func TestBackendSinkExportWithoutOptionalMetadataUsesEmptyStrings(t *testing.T) 
 	})
 	require.NoError(t, err)
 	require.NotNil(t, client.req)
-	require.Equal(t, "", client.req.NodeGroup)
-	require.Equal(t, "", client.req.ComputeZone)
+	require.Equal(t, "stale-group", client.req.NodeGroup)
+	require.Equal(t, "stale-zone", client.req.ComputeZone)
+	require.Empty(t, state.setNodeGroup)
+	require.Empty(t, state.setComputeZone)
+}
+
+func TestBackendSinkExportReturnsResolvedMembershipPersistenceErrors(t *testing.T) {
+	state := &fakeState{
+		baseURL:       "https://example.com",
+		jwt:           "jwt-token",
+		nodeUUID:      "node-1",
+		setNodeErr:    errors.New("node group write failed"),
+		setComputeErr: errors.New("compute zone write failed"),
+	}
+	client := &fakeClient{resp: &backendclient.NodeUpsertResponse{
+		NodeUUID:    "node-1",
+		NodeGroup:   "resolved-group",
+		ComputeZone: "resolved-zone",
+	}}
+	s := &backendSink{
+		state: state,
+		clientFactory: func(string) (backendclient.Client, error) {
+			return client, nil
+		},
+	}
+
+	err := s.Export(context.Background(), &inventory.Snapshot{})
+	require.ErrorContains(t, err, "persist backend-resolved node group")
+	require.ErrorContains(t, err, "persist backend-resolved compute zone")
+	require.Equal(t, "resolved-group", state.setNodeGroup)
+	require.Equal(t, "resolved-zone", state.setComputeZone)
 }
 
 func TestBackendSinkExportEnrollmentTimeErrorIsNonFatal(t *testing.T) {

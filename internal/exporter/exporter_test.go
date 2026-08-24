@@ -1293,8 +1293,8 @@ func (f *fakeJWTRefreshClient) Enroll(_ context.Context, sakToken string) (strin
 	return f.token, nil
 }
 
-func (f *fakeJWTRefreshClient) UpsertNode(context.Context, string, *backendclient.NodeUpsertRequest, string) error {
-	return nil
+func (f *fakeJWTRefreshClient) UpsertNode(context.Context, string, *backendclient.NodeUpsertRequest, string) (*backendclient.NodeUpsertResponse, error) {
+	return nil, nil
 }
 
 func (f *fakeJWTRefreshClient) GetNonce(context.Context, string, string) (*backendclient.NonceResponse, error) {

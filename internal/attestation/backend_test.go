@@ -87,8 +87,8 @@ type recordingClient struct {
 }
 
 func (c *recordingClient) Enroll(context.Context, string) (string, error) { return "", nil }
-func (c *recordingClient) UpsertNode(context.Context, string, *backendclient.NodeUpsertRequest, string) error {
-	return nil
+func (c *recordingClient) UpsertNode(context.Context, string, *backendclient.NodeUpsertRequest, string) (*backendclient.NodeUpsertResponse, error) {
+	return nil, nil
 }
 func (c *recordingClient) GetNonce(context.Context, string, string) (*backendclient.NonceResponse, error) {
 	return c.nonceResp, nil

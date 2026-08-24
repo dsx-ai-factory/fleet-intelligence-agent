@@ -18,6 +18,7 @@ package sink
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
@@ -102,9 +103,26 @@ func (s *backendSink) Export(ctx context.Context, snap *inventory.Snapshot) erro
 	}
 	outbound.LogIssues("inventory-backend-sink", "NodeUpsertRequest", outbound.ValidateNodeUpsertRequest(req), "node_uuid", nodeUUID)
 
-	if err := client.UpsertNode(ctx, nodeUUID, req, jwt); err != nil {
+	resp, err := client.UpsertNode(ctx, nodeUUID, req, jwt)
+	if err != nil {
 		return err
 	}
-	log.Logger.Infow("inventory exported to backend", "node_uuid", nodeUUID)
+	if resp == nil {
+		return fmt.Errorf("inventory backend returned a nil node upsert response")
+	}
+	var stateErrs []error
+	if err := s.state.SetNodeGroup(ctx, resp.NodeGroup); err != nil {
+		stateErrs = append(stateErrs, fmt.Errorf("persist backend-resolved node group: %w", err))
+	}
+	if err := s.state.SetComputeZone(ctx, resp.ComputeZone); err != nil {
+		stateErrs = append(stateErrs, fmt.Errorf("persist backend-resolved compute zone: %w", err))
+	}
+	if err := errors.Join(stateErrs...); err != nil {
+		return err
+	}
+	log.Logger.Infow("inventory exported to backend",
+		"node_uuid", nodeUUID,
+		"node_group", resp.NodeGroup,
+		"compute_zone", resp.ComputeZone)
 	return nil
 }
