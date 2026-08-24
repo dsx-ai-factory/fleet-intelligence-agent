@@ -59,7 +59,7 @@ nfpms:
     package_name: fleetint
     file_name_template: "fleetint_{{ .Version }}_{{ if eq .Arch \"amd64\" }}amd64{{ else if eq .Arch \"arm64\" }}arm64{{ else }}{{ .Arch }}{{ end }}"
     vendor: NVIDIA Corporation
-    homepage: https://github.com/NVIDIA/fleet-intelligence-agent
+    homepage: https://github.com/dsx-ai-factory/fleet-intelligence-agent
     maintainer: NVIDIA Fleet Intelligence Team
     description: |
       NVIDIA Fleet Intelligence Agent - Host agent for GPU telemetry collection and attestation.
@@ -100,7 +100,7 @@ nfpms:
     package_name: fleetint
     file_name_template: "fleetint-{{ .Version }}-1.{{ if eq .Arch \"amd64\" }}x86_64{{ else if eq .Arch \"arm64\" }}aarch64{{ else }}{{ .Arch }}{{ end }}"
     vendor: NVIDIA Corporation
-    homepage: https://github.com/NVIDIA/fleet-intelligence-agent
+    homepage: https://github.com/dsx-ai-factory/fleet-intelligence-agent
     maintainer: NVIDIA Fleet Intelligence Team
     description: |
       NVIDIA Fleet Intelligence Agent - Host agent for GPU telemetry collection and attestation.
@@ -149,7 +149,7 @@ snapshot:
 # GitHub release configuration
 release:
   github:
-    owner: NVIDIA
+    owner: dsx-ai-factory
     name: fleet-intelligence-agent
   # Keep unsigned GoReleaser output private until the release workflow replaces
   # DEB/RPM assets with verified 3S-signed versions, refreshes checksums, and
@@ -189,7 +189,7 @@ release:
     
     ### Support
     
-    For issues and questions, please visit: https://github.com/NVIDIA/fleet-intelligence-agent/issues
+    For issues and questions, please visit: https://github.com/dsx-ai-factory/fleet-intelligence-agent/issues
   prerelease: auto  # Auto-detect pre-release based on version (e.g., v1.0.0-beta)
   mode: keep-existing
   # A release version is immutable. Never delete and replace an asset with the

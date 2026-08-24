@@ -48,7 +48,7 @@ printf '%s' "$ENROLL_TOKEN" | kubectl create secret generic "$ENROLL_TOKEN_SECRE
 Install:
 
 ```bash
-helm install fleet-intelligence-agent oci://ghcr.io/nvidia/charts/fleet-intelligence-agent \
+helm install fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --set enroll.enabled=true \
@@ -59,7 +59,7 @@ helm install fleet-intelligence-agent oci://ghcr.io/nvidia/charts/fleet-intellig
 Install (no enrollment):
 
 ```bash
-helm install fleet-intelligence-agent oci://ghcr.io/nvidia/charts/fleet-intelligence-agent \
+helm install fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
   --version "$CHART_VERSION" \
   --namespace "$NS"
 ```
@@ -67,7 +67,7 @@ helm install fleet-intelligence-agent oci://ghcr.io/nvidia/charts/fleet-intellig
 Upgrade:
 
 ```bash
-helm upgrade fleet-intelligence-agent oci://ghcr.io/nvidia/charts/fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --set enroll.enabled=true \
@@ -78,7 +78,7 @@ helm upgrade fleet-intelligence-agent oci://ghcr.io/nvidia/charts/fleet-intellig
 Optional: include node metadata during automatic enrollment:
 
 ```bash
-helm upgrade fleet-intelligence-agent oci://ghcr.io/nvidia/charts/fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --set enroll.enabled=true \
@@ -95,7 +95,7 @@ Notes:
 Upgrade (no enrollment):
 
 ```bash
-helm upgrade fleet-intelligence-agent oci://ghcr.io/nvidia/charts/fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
   --version "$CHART_VERSION" \
   --namespace "$NS"
 ```
@@ -103,7 +103,7 @@ helm upgrade fleet-intelligence-agent oci://ghcr.io/nvidia/charts/fleet-intellig
 Upgrade and explicitly remove persisted enrollment metadata:
 
 ```bash
-helm upgrade fleet-intelligence-agent oci://ghcr.io/nvidia/charts/fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --set enroll.enabled=false \
@@ -198,7 +198,7 @@ kubectl get pods -n "$NS" "$POD_NAME" -o jsonpath='{.spec.containers[0].env[?(@.
 If DCGM is at a different location, update the URL:
 
 ```bash
-helm upgrade fleet-intelligence-agent oci://ghcr.io/nvidia/charts/fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --reuse-values \
@@ -223,7 +223,7 @@ The examples below use a generic label to illustrate the override syntax — rep
 Using `--set` (quote the tolerations for zsh, and escape dots in the label key):
 
 ```bash
-helm upgrade --install fleet-intelligence-agent oci://ghcr.io/nvidia/charts/fleet-intelligence-agent \
+helm upgrade --install fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --set-string nodeSelector.my-org\\.com/gpu-node=true \

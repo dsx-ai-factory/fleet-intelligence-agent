@@ -54,7 +54,7 @@ navbar-links:
     text: Fleet Intelligence Docs
     url: https://docs.nvidia.com/fleet-intel
   - type: github
-    value: https://github.com/NVIDIA/fleet-intelligence-agent
+    value: https://github.com/dsx-ai-factory/fleet-intelligence-agent
 
 experimental:
   mdx-components:

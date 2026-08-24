@@ -12,4 +12,4 @@ Check status:
   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "fleet-intelligence-agent.name" . }}
   kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "fleet-intelligence-agent.name" . }} --tail=50
 
-Docs: https://github.com/NVIDIA/fleet-intelligence-agent
+Docs: https://github.com/dsx-ai-factory/fleet-intelligence-agent

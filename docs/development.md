@@ -5,7 +5,7 @@
 ### Clone Repository
 
 ```bash
-git clone https://github.com/NVIDIA/fleet-intelligence-agent.git
+git clone https://github.com/dsx-ai-factory/fleet-intelligence-agent.git
 cd fleet-intelligence-agent
 ```
 
@@ -191,4 +191,4 @@ make package-snapshot  # Build packages (no git tag required)
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/NVIDIA/fleet-intelligence-agent/blob/main/CONTRIBUTING.md) for detailed contribution guidelines.
+See [CONTRIBUTING.md](https://github.com/dsx-ai-factory/fleet-intelligence-agent/blob/main/CONTRIBUTING.md) for detailed contribution guidelines.
