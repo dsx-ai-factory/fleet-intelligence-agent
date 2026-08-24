@@ -14,7 +14,7 @@ Please start all enhancement, bugfix, or change requests by opening a GitHub iss
 First clone the source code from GitHub
 
 ```bash
-git clone https://github.com/NVIDIA/fleet-intelligence-agent.git
+git clone https://github.com/dsx-ai-factory/fleet-intelligence-agent.git
 ```
 
 Build Fleet Intelligence Agent from source

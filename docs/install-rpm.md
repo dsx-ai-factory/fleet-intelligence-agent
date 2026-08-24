@@ -72,7 +72,7 @@ After adding the CUDA repository, package dependencies (`datacenter-gpu-manager-
 ## Install package
 
 Download the package from the
-[latest stable release](https://github.com/NVIDIA/fleet-intelligence-agent/releases/latest),
+[latest stable release](https://github.com/dsx-ai-factory/fleet-intelligence-agent/releases/latest),
 then install it:
 
 ```bash

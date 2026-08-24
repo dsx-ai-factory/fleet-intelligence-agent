@@ -14,7 +14,7 @@
 # limitations under the License.
 
 image:
-  repository: ghcr.io/nvidia/fleet-intelligence-agent
+  repository: ghcr.io/dsx-ai-factory/fleet-intelligence-agent
   tag: ""
   pullPolicy: IfNotPresent
 
@@ -112,7 +112,7 @@ otelGateway:
   enabled: false
 
   image:
-    repository: ghcr.io/nvidia/fleetint-otelcol
+    repository: ghcr.io/dsx-ai-factory/fleetint-otelcol
     tag: ""
     pullPolicy: IfNotPresent
 
