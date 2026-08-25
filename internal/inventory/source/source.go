@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/inventory"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
 )
 
 // MachineInfoCollector is the local machine inventory collector dependency.

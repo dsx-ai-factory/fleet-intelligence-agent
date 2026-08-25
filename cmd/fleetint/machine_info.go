@@ -28,9 +28,9 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 	"github.com/urfave/cli"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/cmdutil"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/cmdutil"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
 )
 
 func machineInfoCommand(cliContext *cli.Context) error {

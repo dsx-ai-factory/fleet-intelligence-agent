@@ -29,8 +29,8 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/urfave/cli"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/cmdutil"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/cmdutil"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
 )
 
 func compactCommand(cliContext *cli.Context) error {

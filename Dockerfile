@@ -27,10 +27,10 @@ ARG REVISION=""
 RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH:-amd64} \
   go build -trimpath \
     -ldflags "-s -w \
-      -X github.com/NVIDIA/fleet-intelligence-agent/internal/version.BuildTimestamp=${BUILD_TIMESTAMP} \
-      -X github.com/NVIDIA/fleet-intelligence-agent/internal/version.Version=${VERSION} \
-      -X github.com/NVIDIA/fleet-intelligence-agent/internal/version.Revision=${REVISION} \
-      -X github.com/NVIDIA/fleet-intelligence-agent/internal/version.Package=github.com/NVIDIA/fleet-intelligence-agent" \
+      -X github.com/dsx-ai-factory/fleet-intelligence-agent/internal/version.BuildTimestamp=${BUILD_TIMESTAMP} \
+      -X github.com/dsx-ai-factory/fleet-intelligence-agent/internal/version.Version=${VERSION} \
+      -X github.com/dsx-ai-factory/fleet-intelligence-agent/internal/version.Revision=${REVISION} \
+      -X github.com/dsx-ai-factory/fleet-intelligence-agent/internal/version.Package=github.com/dsx-ai-factory/fleet-intelligence-agent" \
     -o /out/fleetint ./cmd/fleetint
 
 FROM nvidia/dcgm:${DCGM_VERSION} AS runtime

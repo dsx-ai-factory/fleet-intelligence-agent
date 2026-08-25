@@ -39,12 +39,12 @@ import (
 	pkgmetadata "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metadata"
 	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/agentstate"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/backendclient"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/exporter/collector"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/exporter/writer"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/collector"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/writer"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
 )
 
 // Mock implementations

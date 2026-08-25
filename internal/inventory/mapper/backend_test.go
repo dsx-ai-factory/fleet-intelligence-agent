@@ -22,7 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/inventory"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory"
 )
 
 func TestToNodeUpsertRequestNil(t *testing.T) {

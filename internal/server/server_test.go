@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
 )
 
 // TestGetHealthCheckInterval tests the getHealthCheckInterval function.

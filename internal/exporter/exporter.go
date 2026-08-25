@@ -31,12 +31,12 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	pkgmetadata "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metadata"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/agentstate"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/backendclient"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/endpoint"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/exporter/collector"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/exporter/converter"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/exporter/writer"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/endpoint"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/collector"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/converter"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/writer"
 )
 
 // Ensure healthExporter implements the Exporter interface

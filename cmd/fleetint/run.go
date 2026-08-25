@@ -38,9 +38,9 @@ import (
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/server"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/version"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/server"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/version"
 )
 
 // restrictedOfflinePaths lists directories into which the agent must never write output.

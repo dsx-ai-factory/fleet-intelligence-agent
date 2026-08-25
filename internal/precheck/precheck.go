@@ -30,7 +30,7 @@ import (
 	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 	nvidiapci "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/pci"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/dcgmversion"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/dcgmversion"
 )
 
 var supportedArchitectures = []string{"Hopper", "Blackwell", "Rubin", "Ampere", "Ada Lovelace"}

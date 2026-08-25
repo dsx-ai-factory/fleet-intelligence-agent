@@ -15,7 +15,7 @@ dist:
   output_path: ./bin
 
 extensions:
-  - gomod: github.com/NVIDIA/fleet-intelligence-agent/otelcol/auth/sakauth v0.0.0
+  - gomod: github.com/dsx-ai-factory/fleet-intelligence-agent/otelcol/auth/sakauth v0.0.0
     path: ./auth/sakauth
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.156.0
 

@@ -25,7 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/backendclient"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
 )
 
 func TestValidateNonce(t *testing.T) {

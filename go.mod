@@ -1,4 +1,4 @@
-module github.com/NVIDIA/fleet-intelligence-agent
+module github.com/dsx-ai-factory/fleet-intelligence-agent
 
 go 1.26.6
 

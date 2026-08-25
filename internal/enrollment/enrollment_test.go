@@ -25,10 +25,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/agentstate"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/backendclient"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/nodeidentity"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/nodeidentity"
 )
 
 type fakeBackendClient struct {

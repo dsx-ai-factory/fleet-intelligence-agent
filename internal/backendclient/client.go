@@ -27,7 +27,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/endpoint"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/endpoint"
 )
 
 const (

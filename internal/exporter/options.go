@@ -26,7 +26,7 @@ import (
 	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
 	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
 )
 
 // ExporterOption defines a function that configures the health exporter

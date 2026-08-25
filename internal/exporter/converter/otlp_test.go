@@ -30,8 +30,8 @@ import (
 	metricsv1 "go.opentelemetry.io/proto/otlp/metrics/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/exporter/collector"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/collector"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
 )
 
 func TestNewOTLPConverter(t *testing.T) {

@@ -24,7 +24,7 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 	"github.com/stretchr/testify/require"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/agentstate"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
 )
 
 func TestRemoveEnrollmentMetadata(t *testing.T) {

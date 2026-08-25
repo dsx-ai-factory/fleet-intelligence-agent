@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/backendclient"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
 )
 
 // NonceBackendClient is the backend client view required by the nonce provider.

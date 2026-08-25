@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/agentstate"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/backendclient"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
 )
 
 var newBackendClient = backendclient.New

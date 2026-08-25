@@ -34,9 +34,9 @@ import (
 	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/cmdutil"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/registry"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/cmdutil"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/registry"
 )
 
 // Op holds the configuration for a scan operation.

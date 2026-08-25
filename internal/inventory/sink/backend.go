@@ -22,11 +22,11 @@ import (
 
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/agentstate"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/backendclient"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/inventory"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/inventory/mapper"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/validation/outbound"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory/mapper"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/validation/outbound"
 )
 
 type backendSink struct {

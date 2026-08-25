@@ -26,8 +26,8 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 	"github.com/urfave/cli"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/agentstate"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
 )
 
 func unenrollCommand(c *cli.Context) error {

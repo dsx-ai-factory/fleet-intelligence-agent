@@ -27,7 +27,7 @@ import (
 	infinibandtypes "github.com/NVIDIA/fleet-intelligence-sdk/components/accelerator/nvidia/infiniband/types"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/scan"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/scan"
 )
 
 func scanCreateCommand() func(*cli.Context) error {

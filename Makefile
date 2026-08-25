@@ -18,7 +18,7 @@ ROOTDIR=$(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 BUILD_TIMESTAMP ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 VERSION ?= $(shell git describe --match 'v[0-9]*' --dirty='.m' --always)
 REVISION ?= $(shell git rev-parse HEAD)$(shell if ! git diff --no-ext-diff --quiet --exit-code; then echo .m; fi)
-PACKAGE=github.com/NVIDIA/fleet-intelligence-agent
+PACKAGE=github.com/dsx-ai-factory/fleet-intelligence-agent
 
 # Nested Go module holding the OTel gateway SAK auth extension. It has its own
 # go.mod, so root-module `./...` targets do not descend into it and it must be

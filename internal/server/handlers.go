@@ -27,7 +27,7 @@ import (
 	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
 	"github.com/gin-gonic/gin"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
 )
 
 type globalHandler struct {

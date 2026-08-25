@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/precheck"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/precheck"
 )
 
 func TestAppIncludesPrecheckCommand(t *testing.T) {

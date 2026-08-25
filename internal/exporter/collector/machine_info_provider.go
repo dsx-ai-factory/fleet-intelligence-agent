@@ -23,7 +23,7 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
 )
 
 const (

@@ -29,7 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/version"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/version"
 )
 
 // TestGetMachineInfo tests the GetMachineInfo function

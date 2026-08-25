@@ -31,8 +31,8 @@ import (
 	"github.com/olekukonko/tablewriter"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/dcgmversion"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/version"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/dcgmversion"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/version"
 )
 
 var getDCGMVersion = dcgmversion.DetectHostengineVersion
