@@ -40,6 +40,13 @@ type NodeUpsertRequest struct {
 	ComputeZone             string        `json:"computeZone"`
 }
 
+// NodeUpsertResponse is the backend-resolved node membership after inventory upsert.
+type NodeUpsertResponse struct {
+	NodeUUID    string `json:"nodeUUID"`
+	ComputeZone string `json:"computeZone"`
+	NodeGroup   string `json:"nodeGroup"`
+}
+
 type NodeResources struct {
 	CPUInfo    CPUInfo    `json:"cpuInfo"`
 	MemoryInfo MemoryInfo `json:"memoryInfo"`

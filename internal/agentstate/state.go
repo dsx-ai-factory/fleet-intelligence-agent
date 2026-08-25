@@ -54,4 +54,7 @@ type State interface {
 
 	GetComputeZone(ctx context.Context) (value string, ok bool, err error)
 	SetComputeZone(ctx context.Context, value string) error
+
+	GetNodePlacement(ctx context.Context) (nodeGroup string, nodeGroupOK bool, computeZone string, computeZoneOK bool, err error)
+	SetNodePlacement(ctx context.Context, nodeGroup, computeZone string) error
 }

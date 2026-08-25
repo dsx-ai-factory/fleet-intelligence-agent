@@ -46,8 +46,8 @@ func (f *fakeBackendClient) Enroll(_ context.Context, sakToken string) (string, 
 	return f.enrollJWT, f.enrollErr
 }
 
-func (f *fakeBackendClient) UpsertNode(context.Context, string, *backendclient.NodeUpsertRequest, string) error {
-	return nil
+func (f *fakeBackendClient) UpsertNode(context.Context, string, *backendclient.NodeUpsertRequest, string) (*backendclient.NodeUpsertResponse, error) {
+	return nil, nil
 }
 
 func (f *fakeBackendClient) GetNonce(context.Context, string, string) (*backendclient.NonceResponse, error) {

@@ -28,16 +28,23 @@ import (
 )
 
 type fakeState struct {
-	baseURL       string
-	jwt           string
-	nodeUUID      string
-	nodeGroup     string
-	computeZone   string
-	nodeGroupErr  error
-	computeErr    error
-	enrolled      time.Time
-	enrollmentErr error
-	err           error
+	baseURL           string
+	jwt               string
+	nodeUUID          string
+	nodeGroup         string
+	computeZone       string
+	nodeGroupErr      error
+	computeErr        error
+	setNodeErr        error
+	setComputeErr     error
+	setNodeGroup      string
+	setComputeZone    string
+	setNodeCalls      int
+	setComputeCalls   int
+	setPlacementCalls int
+	enrolled          time.Time
+	enrollmentErr     error
+	err               error
 }
 
 func (f *fakeState) GetBackendBaseURL(context.Context) (string, bool, error) {
@@ -86,7 +93,11 @@ func (f *fakeState) GetNodeGroup(context.Context) (string, bool, error) {
 	}
 	return f.nodeGroup, f.nodeGroup != "", nil
 }
-func (f *fakeState) SetNodeGroup(context.Context, string) error { return nil }
+func (f *fakeState) SetNodeGroup(_ context.Context, value string) error {
+	f.setNodeCalls++
+	f.setNodeGroup = value
+	return f.setNodeErr
+}
 func (f *fakeState) GetComputeZone(context.Context) (string, bool, error) {
 	if f.computeErr != nil {
 		return "", false, f.computeErr
@@ -96,7 +107,31 @@ func (f *fakeState) GetComputeZone(context.Context) (string, bool, error) {
 	}
 	return f.computeZone, f.computeZone != "", nil
 }
-func (f *fakeState) SetComputeZone(context.Context, string) error { return nil }
+func (f *fakeState) SetComputeZone(_ context.Context, value string) error {
+	f.setComputeCalls++
+	f.setComputeZone = value
+	return f.setComputeErr
+}
+func (f *fakeState) GetNodePlacement(context.Context) (string, bool, string, bool, error) {
+	if f.nodeGroupErr != nil {
+		return "", false, "", false, f.nodeGroupErr
+	}
+	if f.computeErr != nil {
+		return "", false, "", false, f.computeErr
+	}
+	if f.err != nil {
+		return "", false, "", false, f.err
+	}
+	return f.nodeGroup, f.nodeGroup != "", f.computeZone, f.computeZone != "", nil
+}
+func (f *fakeState) SetNodePlacement(_ context.Context, nodeGroup, computeZone string) error {
+	f.setPlacementCalls++
+	f.setNodeCalls++
+	f.setComputeCalls++
+	f.setNodeGroup = nodeGroup
+	f.setComputeZone = computeZone
+	return errors.Join(f.setNodeErr, f.setComputeErr)
+}
 func (f *fakeState) GetEnrollmentTime(context.Context) (time.Time, bool, error) {
 	if f.enrollmentErr != nil {
 		return time.Time{}, false, f.enrollmentErr
@@ -112,6 +147,8 @@ type fakeClient struct {
 	nodeUUID string
 	req      *backendclient.NodeUpsertRequest
 	jwt      string
+	resp     *backendclient.NodeUpsertResponse
+	err      error
 }
 
 func (f *fakeClient) Enroll(context.Context, string) (string, error) { return "", nil }
@@ -121,11 +158,14 @@ func (f *fakeClient) GetNonce(context.Context, string, string) (*backendclient.N
 func (f *fakeClient) SubmitAttestation(context.Context, string, *backendclient.AttestationRequest, string) error {
 	return nil
 }
-func (f *fakeClient) UpsertNode(_ context.Context, nodeUUID string, req *backendclient.NodeUpsertRequest, jwt string) error {
+func (f *fakeClient) UpsertNode(_ context.Context, nodeUUID string, req *backendclient.NodeUpsertRequest, jwt string) (*backendclient.NodeUpsertResponse, error) {
 	f.nodeUUID = nodeUUID
 	f.req = req
 	f.jwt = jwt
-	return nil
+	if f.resp == nil && f.err == nil {
+		f.resp = &backendclient.NodeUpsertResponse{NodeUUID: nodeUUID}
+	}
+	return f.resp, f.err
 }
 
 func TestBackendSinkExportNotReady(t *testing.T) {
@@ -168,16 +208,21 @@ func TestBackendSinkExportErrors(t *testing.T) {
 
 func TestBackendSinkExportUsesState(t *testing.T) {
 	enrollmentTime := time.Date(2026, 5, 6, 15, 0, 0, 0, time.UTC)
-	client := &fakeClient{}
+	client := &fakeClient{resp: &backendclient.NodeUpsertResponse{
+		NodeUUID:    "node-1",
+		NodeGroup:   "resolved-group",
+		ComputeZone: "resolved-zone",
+	}}
+	state := &fakeState{
+		baseURL:     "https://example.com",
+		jwt:         "jwt-token",
+		nodeUUID:    "node-1",
+		nodeGroup:   "group-a",
+		computeZone: "zone-a",
+		enrolled:    enrollmentTime,
+	}
 	s := &backendSink{
-		state: &fakeState{
-			baseURL:     "https://example.com",
-			jwt:         "jwt-token",
-			nodeUUID:    "node-1",
-			nodeGroup:   "group-a",
-			computeZone: "zone-a",
-			enrolled:    enrollmentTime,
-		},
+		state: state,
 		clientFactory: func(string) (backendclient.Client, error) {
 			return client, nil
 		},
@@ -196,16 +241,95 @@ func TestBackendSinkExportUsesState(t *testing.T) {
 	require.Equal(t, "zone-a", client.req.ComputeZone)
 	require.NotNil(t, client.req.EnrolledAt)
 	require.Equal(t, enrollmentTime, *client.req.EnrolledAt)
+	require.Equal(t, "resolved-group", state.setNodeGroup)
+	require.Equal(t, "resolved-zone", state.setComputeZone)
+	require.Equal(t, 1, state.setNodeCalls)
+	require.Equal(t, 1, state.setComputeCalls)
+	require.Equal(t, 1, state.setPlacementCalls)
 }
 
-func TestBackendSinkExportWithoutOptionalMetadataUsesEmptyStrings(t *testing.T) {
-	client := &fakeClient{}
-	s := &backendSink{
-		state: &fakeState{
-			baseURL:  "https://example.com",
-			jwt:      "jwt-token",
-			nodeUUID: "node-1",
+func TestBackendSinkExportAtomicallyPersistsChangedResolvedMembership(t *testing.T) {
+	tests := []struct {
+		name                string
+		currentGroup        string
+		currentZone         string
+		resolvedGroup       string
+		resolvedZone        string
+		wantPlacementWrites int
+	}{
+		{
+			name:                "absent metadata and empty response unchanged",
+			wantPlacementWrites: 0,
 		},
+		{
+			name:                "both unchanged",
+			currentGroup:        "group-a",
+			currentZone:         "zone-a",
+			resolvedGroup:       "group-a",
+			resolvedZone:        "zone-a",
+			wantPlacementWrites: 0,
+		},
+		{
+			name:                "only node group changed",
+			currentGroup:        "group-a",
+			currentZone:         "zone-a",
+			resolvedGroup:       "group-b",
+			resolvedZone:        "zone-a",
+			wantPlacementWrites: 1,
+		},
+		{
+			name:                "only compute zone changed",
+			currentGroup:        "group-a",
+			currentZone:         "zone-a",
+			resolvedGroup:       "group-a",
+			resolvedZone:        "zone-b",
+			wantPlacementWrites: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			state := &fakeState{
+				baseURL:     "https://example.com",
+				jwt:         "jwt-token",
+				nodeUUID:    "node-1",
+				nodeGroup:   tc.currentGroup,
+				computeZone: tc.currentZone,
+			}
+			client := &fakeClient{resp: &backendclient.NodeUpsertResponse{
+				NodeUUID:    "node-1",
+				NodeGroup:   tc.resolvedGroup,
+				ComputeZone: tc.resolvedZone,
+			}}
+			s := &backendSink{
+				state: state,
+				clientFactory: func(string) (backendclient.Client, error) {
+					return client, nil
+				},
+			}
+
+			err := s.Export(context.Background(), &inventory.Snapshot{})
+			require.NoError(t, err)
+			require.Equal(t, tc.wantPlacementWrites, state.setPlacementCalls)
+			if tc.wantPlacementWrites > 0 {
+				require.Equal(t, tc.resolvedGroup, state.setNodeGroup)
+				require.Equal(t, tc.resolvedZone, state.setComputeZone)
+			}
+		})
+	}
+}
+
+func TestBackendSinkExportClearsStateWhenResolvedMembershipIsEmpty(t *testing.T) {
+	client := &fakeClient{}
+	state := &fakeState{
+		baseURL:     "https://example.com",
+		jwt:         "jwt-token",
+		nodeUUID:    "node-1",
+		nodeGroup:   "stale-group",
+		computeZone: "stale-zone",
+	}
+	s := &backendSink{
+		state: state,
 		clientFactory: func(string) (backendclient.Client, error) {
 			return client, nil
 		},
@@ -217,8 +341,44 @@ func TestBackendSinkExportWithoutOptionalMetadataUsesEmptyStrings(t *testing.T) 
 	})
 	require.NoError(t, err)
 	require.NotNil(t, client.req)
-	require.Equal(t, "", client.req.NodeGroup)
-	require.Equal(t, "", client.req.ComputeZone)
+	require.Equal(t, "stale-group", client.req.NodeGroup)
+	require.Equal(t, "stale-zone", client.req.ComputeZone)
+	require.Empty(t, state.setNodeGroup)
+	require.Empty(t, state.setComputeZone)
+	require.Equal(t, 1, state.setNodeCalls)
+	require.Equal(t, 1, state.setComputeCalls)
+	require.Equal(t, 1, state.setPlacementCalls)
+}
+
+func TestBackendSinkExportReturnsResolvedMembershipPersistenceErrors(t *testing.T) {
+	state := &fakeState{
+		baseURL:       "https://example.com",
+		jwt:           "jwt-token",
+		nodeUUID:      "node-1",
+		setNodeErr:    errors.New("node group write failed"),
+		setComputeErr: errors.New("compute zone write failed"),
+	}
+	client := &fakeClient{resp: &backendclient.NodeUpsertResponse{
+		NodeUUID:    "node-1",
+		NodeGroup:   "resolved-group",
+		ComputeZone: "resolved-zone",
+	}}
+	s := &backendSink{
+		state: state,
+		clientFactory: func(string) (backendclient.Client, error) {
+			return client, nil
+		},
+	}
+
+	err := s.Export(context.Background(), &inventory.Snapshot{})
+	require.ErrorContains(t, err, "persist backend-resolved node placement")
+	require.ErrorContains(t, err, "node group write failed")
+	require.ErrorContains(t, err, "compute zone write failed")
+	require.Equal(t, "resolved-group", state.setNodeGroup)
+	require.Equal(t, "resolved-zone", state.setComputeZone)
+	require.Equal(t, 1, state.setNodeCalls)
+	require.Equal(t, 1, state.setComputeCalls)
+	require.Equal(t, 1, state.setPlacementCalls)
 }
 
 func TestBackendSinkExportEnrollmentTimeErrorIsNonFatal(t *testing.T) {
@@ -246,14 +406,15 @@ func TestBackendSinkExportEnrollmentTimeErrorIsNonFatal(t *testing.T) {
 
 func TestBackendSinkExportOptionalMetadataErrorsAreNonFatal(t *testing.T) {
 	client := &fakeClient{}
+	state := &fakeState{
+		baseURL:      "https://example.com",
+		jwt:          "jwt-token",
+		nodeUUID:     "node-1",
+		nodeGroupErr: errors.New("failed to read nodegroup"),
+		computeErr:   errors.New("failed to read compute zone"),
+	}
 	s := &backendSink{
-		state: &fakeState{
-			baseURL:      "https://example.com",
-			jwt:          "jwt-token",
-			nodeUUID:     "node-1",
-			nodeGroupErr: errors.New("failed to read nodegroup"),
-			computeErr:   errors.New("failed to read compute zone"),
-		},
+		state: state,
 		clientFactory: func(string) (backendclient.Client, error) {
 			return client, nil
 		},
@@ -267,6 +428,9 @@ func TestBackendSinkExportOptionalMetadataErrorsAreNonFatal(t *testing.T) {
 	require.NotNil(t, client.req)
 	require.Empty(t, client.req.NodeGroup)
 	require.Empty(t, client.req.ComputeZone)
+	require.Zero(t, state.setNodeCalls)
+	require.Zero(t, state.setComputeCalls)
+	require.Zero(t, state.setPlacementCalls)
 }
 
 func TestBackendSinkValidationDoesNotBlockExport(t *testing.T) {

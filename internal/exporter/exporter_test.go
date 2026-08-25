@@ -39,6 +39,7 @@ import (
 	pkgmetadata "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metadata"
 	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
 
+	"github.com/NVIDIA/fleet-intelligence-agent/internal/agentstate"
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/backendclient"
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/exporter/collector"
@@ -1293,8 +1294,8 @@ func (f *fakeJWTRefreshClient) Enroll(_ context.Context, sakToken string) (strin
 	return f.token, nil
 }
 
-func (f *fakeJWTRefreshClient) UpsertNode(context.Context, string, *backendclient.NodeUpsertRequest, string) error {
-	return nil
+func (f *fakeJWTRefreshClient) UpsertNode(context.Context, string, *backendclient.NodeUpsertRequest, string) (*backendclient.NodeUpsertResponse, error) {
+	return nil, nil
 }
 
 func (f *fakeJWTRefreshClient) GetNonce(context.Context, string, string) (*backendclient.NonceResponse, error) {
@@ -1416,6 +1417,27 @@ func setupTestDB(t *testing.T) *sql.DB {
 	require.NoError(t, err)
 
 	return db
+}
+
+func TestPopulateOptionalResourceMetadataReadsNodePlacementTogether(t *testing.T) {
+	db := setupTestDB(t)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	nodeGroup := "group-a"
+	computeZone := "zone-a"
+	require.NoError(t, agentstate.UpdateNodePlacementMetadata(
+		context.Background(),
+		db,
+		&nodeGroup,
+		&computeZone,
+	))
+
+	exporter := &healthExporter{options: &exporterOptions{dbRO: db}}
+	data := &collector.HealthData{}
+	exporter.populateOptionalResourceMetadata(context.Background(), data)
+
+	require.Equal(t, nodeGroup, data.NodeGroup)
+	require.Equal(t, computeZone, data.ComputeZone)
 }
 
 // TestExportWithCollectorError tests export behavior when collector fails

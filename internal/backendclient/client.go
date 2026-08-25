@@ -41,7 +41,7 @@ var errNilBaseURL = errors.New("backend base URL is required")
 // Client is the backend workflow client used by enrollment, inventory, and attestation paths.
 type Client interface {
 	Enroll(ctx context.Context, sakToken string) (jwt string, err error)
-	UpsertNode(ctx context.Context, nodeUUID string, req *NodeUpsertRequest, jwt string) error
+	UpsertNode(ctx context.Context, nodeUUID string, req *NodeUpsertRequest, jwt string) (*NodeUpsertResponse, error)
 	GetNonce(ctx context.Context, nodeUUID string, jwt string) (*NonceResponse, error)
 	SubmitAttestation(ctx context.Context, nodeUUID string, req *AttestationRequest, jwt string) error
 }
@@ -94,17 +94,41 @@ func (c *client) Enroll(ctx context.Context, sakToken string) (string, error) {
 	return resp.JWTAssertion, nil
 }
 
-func (c *client) UpsertNode(ctx context.Context, nodeUUID string, req *NodeUpsertRequest, jwt string) error {
+func (c *client) UpsertNode(ctx context.Context, nodeUUID string, req *NodeUpsertRequest, jwt string) (*NodeUpsertResponse, error) {
 	if nodeUUID == "" {
-		return fmt.Errorf("nodeUUID cannot be empty")
+		return nil, fmt.Errorf("nodeUUID cannot be empty")
 	}
 	if jwt == "" {
-		return fmt.Errorf("jwt cannot be empty")
+		return nil, fmt.Errorf("jwt cannot be empty")
 	}
 	if req == nil {
-		return fmt.Errorf("node upsert request cannot be nil")
+		return nil, fmt.Errorf("node upsert request cannot be nil")
 	}
-	return c.doJSON(ctx, http.MethodPut, []string{"v1", "agent", "nodes", nodeUUID}, jwt, req, nil)
+	var wireResp struct {
+		NodeUUID    string  `json:"nodeUUID"`
+		ComputeZone *string `json:"computeZone"`
+		NodeGroup   *string `json:"nodeGroup"`
+	}
+	if err := c.doJSON(ctx, http.MethodPut, []string{"v1", "agent", "nodes", nodeUUID}, jwt, req, &wireResp); err != nil {
+		return nil, err
+	}
+	if wireResp.NodeUUID == "" {
+		return nil, fmt.Errorf("node upsert response missing nodeUUID field")
+	}
+	if wireResp.NodeUUID != nodeUUID {
+		return nil, fmt.Errorf("node upsert response nodeUUID %q does not match requested nodeUUID %q", wireResp.NodeUUID, nodeUUID)
+	}
+	if wireResp.NodeGroup == nil {
+		return nil, fmt.Errorf("node upsert response missing nodeGroup field")
+	}
+	if wireResp.ComputeZone == nil {
+		return nil, fmt.Errorf("node upsert response missing computeZone field")
+	}
+	return &NodeUpsertResponse{
+		NodeUUID:    wireResp.NodeUUID,
+		NodeGroup:   *wireResp.NodeGroup,
+		ComputeZone: *wireResp.ComputeZone,
+	}, nil
 }
 
 func (c *client) GetNonce(ctx context.Context, nodeUUID string, jwt string) (*NonceResponse, error) {

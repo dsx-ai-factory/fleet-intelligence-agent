@@ -179,15 +179,8 @@ func storeConfigInMetadata(ctx context.Context, baseURL, jwtToken, sakToken stri
 	if err := pkgmetadata.SetMetadata(ctx, dbRW, agentstate.MetadataKeyEnrolledAt, enrolledAt.Format(time.RFC3339Nano)); err != nil {
 		return fmt.Errorf("failed to set enrollment time: %w", err)
 	}
-	if metadata.NodeGroup != nil {
-		if err := pkgmetadata.SetMetadata(ctx, dbRW, agentstate.MetadataKeyNodeGroup, *metadata.NodeGroup); err != nil {
-			return fmt.Errorf("failed to set node_group: %w", err)
-		}
-	}
-	if metadata.ComputeZone != nil {
-		if err := pkgmetadata.SetMetadata(ctx, dbRW, agentstate.MetadataKeyComputeZone, *metadata.ComputeZone); err != nil {
-			return fmt.Errorf("failed to set compute zone: %w", err)
-		}
+	if err := agentstate.UpdateNodePlacementMetadata(ctx, dbRW, metadata.NodeGroup, metadata.ComputeZone); err != nil {
+		return fmt.Errorf("failed to update node placement: %w", err)
 	}
 	return nil
 }
