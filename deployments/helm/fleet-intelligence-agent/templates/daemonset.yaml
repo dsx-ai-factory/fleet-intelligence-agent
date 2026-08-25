@@ -104,6 +104,12 @@ spec:
             - name: sys
               mountPath: /sys
               readOnly: true
+            - name: os-release
+              mountPath: /etc/os-release
+              readOnly: true
+            - name: machine-id
+              mountPath: /etc/machine-id
+              readOnly: true
             - name: state
               mountPath: /var/lib/fleetint
       {{- else if .Values.enroll.unenroll }}
