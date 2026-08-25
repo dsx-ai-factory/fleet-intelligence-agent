@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-module github.com/NVIDIA/fleet-intelligence-agent/otelcol/auth/sakauth
+module github.com/dsx-ai-factory/fleet-intelligence-agent/otelcol/auth/sakauth
 
 go 1.25.0
 

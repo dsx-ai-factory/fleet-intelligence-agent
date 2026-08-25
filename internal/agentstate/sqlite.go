@@ -27,8 +27,8 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 	sqlite3 "github.com/mattn/go-sqlite3"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/endpoint"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/endpoint"
 )
 
 type sqliteState struct {

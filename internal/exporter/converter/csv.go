@@ -28,7 +28,7 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/exporter/collector"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/collector"
 )
 
 // CSVFiles represents the collection of CSV files that can be generated

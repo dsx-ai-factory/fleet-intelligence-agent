@@ -26,9 +26,9 @@ import (
 
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/agentstate"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/backendclient"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/validation/outbound"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/validation/outbound"
 )
 
 // JWTProvider retrieves the current backend JWT.

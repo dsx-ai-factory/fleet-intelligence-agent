@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
 )
 
 // GPUIdentity contains stable, non-workload identity for one physical GPU.

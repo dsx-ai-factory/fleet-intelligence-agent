@@ -28,16 +28,16 @@ import (
 	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/agentstate"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/backendclient"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/endpoint"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/inventory"
-	inventorysink "github.com/NVIDIA/fleet-intelligence-agent/internal/inventory/sink"
-	inventorysource "github.com/NVIDIA/fleet-intelligence-agent/internal/inventory/source"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/nodeidentity"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/registry"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/endpoint"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory"
+	inventorysink "github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory/sink"
+	inventorysource "github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory/source"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/nodeidentity"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/registry"
 )
 
 var (

@@ -21,7 +21,7 @@ import (
 	pkgmetadata "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metadata"
 	"github.com/stretchr/testify/require"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
 )
 
 func TestConfigureHealthExporterFromEnvCollectorEndpoint(t *testing.T) {

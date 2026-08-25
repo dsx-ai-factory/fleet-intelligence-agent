@@ -31,8 +31,8 @@ import (
 	resourcev1 "go.opentelemetry.io/proto/otlp/resource/v1"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/exporter/collector"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/exporter/converter"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/collector"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/converter"
 )
 
 func TestNewHTTPWriter(t *testing.T) {

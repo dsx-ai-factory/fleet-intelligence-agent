@@ -29,8 +29,8 @@ import (
 	metricsv1 "go.opentelemetry.io/proto/otlp/metrics/v1"
 	resourcev1 "go.opentelemetry.io/proto/otlp/resource/v1"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/exporter/collector"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/exporter/converter"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/collector"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/converter"
 )
 
 // mockOTLPConverter implements converter.OTLPConverter for testing

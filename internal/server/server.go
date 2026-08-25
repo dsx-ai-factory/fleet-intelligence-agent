@@ -52,16 +52,16 @@ import (
 	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/agentstate"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/attestation"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/exporter"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/inventory"
-	inventorysink "github.com/NVIDIA/fleet-intelligence-agent/internal/inventory/sink"
-	inventorysource "github.com/NVIDIA/fleet-intelligence-agent/internal/inventory/source"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/nodeidentity"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/registry"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/attestation"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory"
+	inventorysink "github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory/sink"
+	inventorysource "github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory/source"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/nodeidentity"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/registry"
 )
 
 // Server is a simplified health metrics exporter server

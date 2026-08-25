@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/cmdutil"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/cmdutil"
 )
 
 func main() {

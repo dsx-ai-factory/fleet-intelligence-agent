@@ -19,7 +19,7 @@ import "runtime"
 
 var (
 	// Package is filled at linking time
-	Package = "github.com/NVIDIA/fleet-intelligence-agent"
+	Package = "github.com/dsx-ai-factory/fleet-intelligence-agent"
 
 	// Version holds the complete version number. Filled in at linking time.
 	Version = "0.0.1+unknown"

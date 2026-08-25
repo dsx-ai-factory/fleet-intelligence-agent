@@ -22,8 +22,8 @@ import (
 
 	"github.com/urfave/cli"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/cmdutil"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/precheck"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/cmdutil"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/precheck"
 )
 
 var runPrecheck = precheck.Run

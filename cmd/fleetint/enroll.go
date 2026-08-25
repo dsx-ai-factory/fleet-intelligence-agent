@@ -26,8 +26,8 @@ import (
 
 	"github.com/urfave/cli"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/enrollment"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/enrollment"
 )
 
 var (

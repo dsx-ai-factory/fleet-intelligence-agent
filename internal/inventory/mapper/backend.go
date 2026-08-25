@@ -20,8 +20,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/backendclient"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/inventory"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory"
 )
 
 // ToNodeUpsertRequest maps an inventory snapshot to the backend node-upsert contract.
