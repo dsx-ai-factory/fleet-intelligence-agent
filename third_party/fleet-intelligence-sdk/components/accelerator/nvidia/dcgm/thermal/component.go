@@ -87,14 +87,6 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 		} else {
 			log.Logger.Infow("registered DCGM thermal health watch")
 		}
-
-		// Register temperature fields with DCGM instance for centralized watching
-		if err := c.dcgmInstance.AddFieldsToWatch(temperatureFields); err != nil {
-			log.Logger.Warnw("failed to register temperature fields", "error", err)
-		} else {
-			log.Logger.Infow("registered temperature fields for centralized watching",
-				"numFields", len(temperatureFields))
-		}
 	}
 
 	if gpudInstance.EventStore != nil {

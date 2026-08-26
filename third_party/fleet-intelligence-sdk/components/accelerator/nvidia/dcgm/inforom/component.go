@@ -84,11 +84,6 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 		} else {
 			log.Logger.Infow("registered DCGM inforom health watch")
 		}
-		if err := c.dcgmInstance.AddFieldsToWatch(inforomFields); err != nil {
-			log.Logger.Warnw("failed to register inforom fields", "error", err)
-		} else {
-			log.Logger.Infow("registered inforom fields for centralized watching", "numFields", len(inforomFields))
-		}
 	}
 
 	if gpudInstance.EventStore != nil {

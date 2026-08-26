@@ -62,6 +62,7 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/nodeidentity"
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/registry"
+	"github.com/NVIDIA/fleet-intelligence-agent/internal/sharedcollect"
 )
 
 // Server is a simplified health metrics exporter server
@@ -72,6 +73,7 @@ type Server struct {
 
 	componentsRegistry components.Registry
 	gpudInstance       *components.GPUdInstance
+	sharedCollector    *sharedcollect.Collector
 
 	config *config.Config
 
@@ -304,6 +306,18 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 	// Determine health check interval
 	healthCheckInterval := getHealthCheckInterval(config)
 
+	// The prototype keeps source policy in FI: DCGM supplies migrated metrics,
+	// while NVML supplies GPU inventory. One collector is reused by the metrics
+	// and inventory loops so native initialization and the DCGM watch are not
+	// rebuilt on every pass.
+	s.sharedCollector, err = sharedcollect.New(sharedcollect.Options{
+		DCGMGroupNamePrefix: "fleet-intelligence-agent",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize shared collection: %w", err)
+	}
+	log.Logger.Infow("shared collection prototype enabled")
+
 	// Create shared DCGM caches
 	dcgmHealthCache := nvidiadcgm.NewHealthCache(ctx, dcgmInstance, healthCheckInterval)
 	log.Logger.Infow("DCGM health check cache configured", "healthCheckInterval", healthCheckInterval)
@@ -377,7 +391,8 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 	// Purge metrics every 5 minutes (reasonable interval to balance overhead and timely cleanup)
 	metricsPurgeInterval := 5 * time.Minute
 	log.Logger.Infow("initializing metrics syncer", "scrapeInterval", healthCheckInterval, "purgeInterval", metricsPurgeInterval, "retention", config.RetentionPeriod.Duration)
-	syncer := pkgmetricssyncer.NewSyncer(ctx, promScraper, metricsSQLiteStore, healthCheckInterval, metricsPurgeInterval, config.RetentionPeriod.Duration)
+	metricsAdapter := sharedcollect.NewMetricsAdapter(promScraper, s.sharedCollector.CollectMetrics)
+	syncer := pkgmetricssyncer.NewSyncer(ctx, metricsAdapter, metricsSQLiteStore, healthCheckInterval, metricsPurgeInterval, config.RetentionPeriod.Duration)
 	syncer.Start()
 
 	promRecorder := pkgmetricsrecorder.NewPrometheusRecorder(ctx, 15*time.Minute, dbRO)
@@ -464,6 +479,7 @@ func (s *Server) startInventoryLoop(
 			AttestationIntervalSeconds:  attestationIntervalSeconds,
 		},
 	)
+	source = sharedcollect.NewInventoryAdapter(source, s.sharedCollector.CollectGPUInventory)
 	sink := inventorysink.NewBackendSink(agentstate.NewSQLite())
 	manager := inventory.NewManager(source, sink, inventory.InventoryConfig{
 		Interval:      interval,
@@ -558,6 +574,12 @@ func (s *Server) Stop() {
 		if s.healthExporter != nil {
 			if err := s.healthExporter.Stop(); err != nil {
 				log.Logger.Errorw("failed to stop health exporter", "error", err)
+			}
+		}
+
+		if s.sharedCollector != nil {
+			if err := s.sharedCollector.Close(); err != nil {
+				log.Logger.Warnw("failed to close shared collection", "error", err)
 			}
 		}
 

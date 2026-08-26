@@ -1,10 +1,18 @@
 module github.com/NVIDIA/fleet-intelligence-agent
 
-go 1.26.6
+// Temporary for the shared collection prototype. The shared module currently
+// declares Go 1.27rc2; production adoption should lower that requirement or
+// coordinate the FI toolchain upgrade separately.
+go 1.27rc2
+
+// Prototype dependency: replace with a pinned shared-library revision before
+// this integration branch is shared outside the sibling-repository checkout.
+replace github.com/dsx-ai-factory/health-validation/collect => ../health-validation/collect
 
 require (
 	github.com/NVIDIA/fleet-intelligence-sdk v0.0.0-00010101000000-000000000000
 	github.com/NVIDIA/go-dcgm v0.0.0-20260214140307-ad5d86fe3d32
+	github.com/dsx-ai-factory/health-validation/collect v0.0.0-00010101000000-000000000000
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gin-contrib/gzip v1.2.5
 	github.com/gin-gonic/gin v1.11.0
@@ -110,7 +118,7 @@ require (
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
 	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/grpc v1.82.1 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect

@@ -72,16 +72,6 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 		dcgmFieldValueCache: gpudInstance.DCGMFieldValueCache,
 	}
 
-	// Register clock fields with DCGM instance for centralized watching
-	if c.dcgmInstance != nil {
-		if err := c.dcgmInstance.AddFieldsToWatch(clockFields); err != nil {
-			log.Logger.Warnw("failed to register clock fields", "error", err)
-		} else {
-			log.Logger.Infow("registered clock fields for centralized watching",
-				"numFields", len(clockFields))
-		}
-	}
-
 	return c, nil
 }
 

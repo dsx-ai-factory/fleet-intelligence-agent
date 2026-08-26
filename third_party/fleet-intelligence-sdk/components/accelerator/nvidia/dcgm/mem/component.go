@@ -85,14 +85,6 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 		} else {
 			log.Logger.Infow("registered DCGM memory health watch")
 		}
-
-		// Register memory fields with DCGM instance for centralized watching
-		if err := c.dcgmInstance.AddFieldsToWatch(memFields); err != nil {
-			log.Logger.Warnw("failed to register memory fields", "error", err)
-		} else {
-			log.Logger.Infow("registered memory fields for centralized watching",
-				"numFields", len(memFields))
-		}
 	}
 
 	if gpudInstance.EventStore != nil {

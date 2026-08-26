@@ -85,14 +85,6 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 		} else {
 			log.Logger.Infow("registered DCGM NVLink health watch")
 		}
-
-		// Register NVLink fields with DCGM instance for centralized watching
-		if err := c.dcgmInstance.AddFieldsToWatch(nvlinkFields); err != nil {
-			log.Logger.Warnw("failed to register NVLink fields", "error", err)
-		} else {
-			log.Logger.Infow("registered NVLink fields for centralized watching",
-				"numFields", len(nvlinkFields))
-		}
 	}
 
 	if gpudInstance.EventStore != nil {

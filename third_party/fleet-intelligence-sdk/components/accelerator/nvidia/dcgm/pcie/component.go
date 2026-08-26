@@ -85,14 +85,6 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 		} else {
 			log.Logger.Infow("registered DCGM PCIe health watch")
 		}
-
-		// Register PCIe fields with DCGM instance for centralized watching
-		if err := c.dcgmInstance.AddFieldsToWatch(pcieFields); err != nil {
-			log.Logger.Warnw("failed to register PCIe fields", "error", err)
-		} else {
-			log.Logger.Infow("registered PCIe fields for centralized watching",
-				"numFields", len(pcieFields))
-		}
 	}
 
 	if gpudInstance.EventStore != nil {
