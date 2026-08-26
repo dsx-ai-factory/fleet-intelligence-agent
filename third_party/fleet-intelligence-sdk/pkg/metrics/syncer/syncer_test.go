@@ -23,6 +23,23 @@ type mockScraper struct {
 	mu      sync.Mutex
 }
 
+type blockingScraper struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+	metrics pkgmetrics.Metrics
+}
+
+func (s *blockingScraper) Scrape(ctx context.Context) (pkgmetrics.Metrics, error) {
+	s.once.Do(func() { close(s.started) })
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.release:
+		return s.metrics, nil
+	}
+}
+
 func newMockScraper(metrics pkgmetrics.Metrics, err error) *mockScraper {
 	return &mockScraper{
 		metrics: metrics,
@@ -144,6 +161,18 @@ func (m *mockStore) getPurgeCount() int {
 	return m.purgeCount
 }
 
+func (m *mockStore) hasMetric(name string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, metric := range m.records {
+		if metric.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func TestNewSyncer(t *testing.T) {
 	t.Parallel()
 
@@ -157,9 +186,10 @@ func TestNewSyncer(t *testing.T) {
 	purgeInterval := 50 * time.Millisecond
 	retainDuration := 1 * time.Hour
 
-	s := NewSyncer(ctx, scraper, store, syncInterval, purgeInterval, retainDuration)
+	s := NewSyncer(ctx, []pkgmetrics.Scraper{scraper}, store, syncInterval, purgeInterval, retainDuration)
 
 	require.NotNil(t, s, "syncer should not be nil")
+	require.Equal(t, []pkgmetrics.Scraper{scraper}, s.scrapers)
 	require.Equal(t, syncInterval, s.scrapeInterval)
 	require.Equal(t, purgeInterval, s.purgeInterval)
 	require.Equal(t, retainDuration, s.retainDuration)
@@ -194,9 +224,9 @@ func TestSync(t *testing.T) {
 		store := newMockStore(nil, nil, nil)
 
 		ctx := context.Background()
-		s := NewSyncer(ctx, scraper, store, time.Second, time.Second, time.Hour)
+		s := NewSyncer(ctx, []pkgmetrics.Scraper{scraper}, store, time.Second, time.Second, time.Hour)
 
-		err := s.sync()
+		err := s.sync(scraper)
 		require.NoError(t, err)
 		require.Equal(t, 1, scraper.getScrapeCount())
 		require.Equal(t, len(testMetrics), store.getRecordCount())
@@ -209,9 +239,9 @@ func TestSync(t *testing.T) {
 		store := newMockStore(nil, nil, nil)
 
 		ctx := context.Background()
-		s := NewSyncer(ctx, scraper, store, time.Second, time.Second, time.Hour)
+		s := NewSyncer(ctx, []pkgmetrics.Scraper{scraper}, store, time.Second, time.Second, time.Hour)
 
-		err := s.sync()
+		err := s.sync(scraper)
 		require.Error(t, err)
 		require.Equal(t, expectedErr, err)
 		require.Equal(t, 1, scraper.getScrapeCount())
@@ -225,14 +255,52 @@ func TestSync(t *testing.T) {
 		store := newMockStore(expectedErr, nil, nil)
 
 		ctx := context.Background()
-		s := NewSyncer(ctx, scraper, store, time.Second, time.Second, time.Hour)
+		s := NewSyncer(ctx, []pkgmetrics.Scraper{scraper}, store, time.Second, time.Second, time.Hour)
 
-		err := s.sync()
+		err := s.sync(scraper)
 		require.Error(t, err)
 		require.Equal(t, expectedErr, err)
 		require.Equal(t, 1, scraper.getScrapeCount())
 		require.Equal(t, 0, store.getRecordCount())
 	})
+}
+
+func TestScrapersSyncIndependently(t *testing.T) {
+	t.Parallel()
+
+	slow := &blockingScraper{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		metrics: pkgmetrics.Metrics{{Name: "slow"}},
+	}
+	fast := newMockScraper(pkgmetrics.Metrics{{Name: "fast"}}, nil)
+	store := newMockStore(nil, nil, nil)
+	s := NewSyncer(
+		context.Background(),
+		[]pkgmetrics.Scraper{slow, fast},
+		store,
+		10*time.Millisecond,
+		time.Hour,
+		time.Hour,
+	)
+	s.Start()
+	defer s.Stop()
+
+	select {
+	case <-slow.started:
+	case <-time.After(time.Second):
+		t.Fatal("slow scraper did not start")
+	}
+
+	require.Eventually(t, func() bool {
+		return store.hasMetric("fast")
+	}, time.Second, 10*time.Millisecond)
+	require.False(t, store.hasMetric("slow"))
+
+	close(slow.release)
+	require.Eventually(t, func() bool {
+		return store.hasMetric("slow")
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestSyncerWithErrors(t *testing.T) {
@@ -241,7 +309,7 @@ func TestSyncerWithErrors(t *testing.T) {
 		store := newMockStore(nil, nil, nil)
 
 		ctx := context.Background()
-		s := NewSyncer(ctx, scraper, store, 50*time.Millisecond, 200*time.Millisecond, time.Hour)
+		s := NewSyncer(ctx, []pkgmetrics.Scraper{scraper}, store, 50*time.Millisecond, 200*time.Millisecond, time.Hour)
 
 		// Start the syncer
 		s.Start()
@@ -261,7 +329,7 @@ func TestSyncerWithErrors(t *testing.T) {
 		store := newMockStore(nil, errors.New("purge error"), nil)
 
 		ctx := context.Background()
-		s := NewSyncer(ctx, scraper, store, 200*time.Millisecond, 50*time.Millisecond, time.Hour)
+		s := NewSyncer(ctx, []pkgmetrics.Scraper{scraper}, store, 200*time.Millisecond, 50*time.Millisecond, time.Hour)
 
 		// Start the syncer
 		s.Start()

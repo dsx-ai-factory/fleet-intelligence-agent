@@ -15,19 +15,22 @@ import (
 type Syncer struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
-	scraper        pkgmetrics.Scraper
+	scrapers       []pkgmetrics.Scraper
 	store          pkgmetrics.Store
 	scrapeInterval time.Duration
 	purgeInterval  time.Duration
 	retainDuration time.Duration
 }
 
-func NewSyncer(ctx context.Context, scraper pkgmetrics.Scraper, store pkgmetrics.Store, scrapeInterval time.Duration, purgeInterval time.Duration, retainDuration time.Duration) *Syncer {
+// NewSyncer creates one independent scrape loop per scraper. Each loop writes
+// its results immediately, so a slow scraper does not delay other metrics.
+// The syncer owns one purge loop for the shared store.
+func NewSyncer(ctx context.Context, scrapers []pkgmetrics.Scraper, store pkgmetrics.Store, scrapeInterval time.Duration, purgeInterval time.Duration, retainDuration time.Duration) *Syncer {
 	cctx, cancel := context.WithCancel(ctx)
 	s := &Syncer{
 		ctx:            cctx,
 		cancel:         cancel,
-		scraper:        scraper,
+		scrapers:       scrapers,
 		store:          store,
 		scrapeInterval: scrapeInterval,
 		purgeInterval:  purgeInterval,
@@ -37,23 +40,13 @@ func NewSyncer(ctx context.Context, scraper pkgmetrics.Scraper, store pkgmetrics
 }
 
 func (s *Syncer) Start() {
-	go func() {
-		ticker := time.NewTicker(s.scrapeInterval)
-		defer ticker.Stop()
-
-		log.Logger.Infow("start scrap and sync metrics")
-		for {
-			select {
-			case <-s.ctx.Done():
-				return
-			case <-ticker.C:
-			}
-
-			if err := s.sync(); err != nil {
-				log.Logger.Errorw("failed to sync metrics", "error", err)
-			}
+	for _, scraper := range s.scrapers {
+		if scraper == nil {
+			continue
 		}
-	}()
+		go s.runScraper(scraper)
+	}
+
 	go func() {
 		ticker := time.NewTicker(s.purgeInterval)
 		defer ticker.Stop()
@@ -76,8 +69,26 @@ func (s *Syncer) Start() {
 	}()
 }
 
-func (s *Syncer) sync() error {
-	ms, err := s.scraper.Scrape(s.ctx)
+func (s *Syncer) runScraper(scraper pkgmetrics.Scraper) {
+	ticker := time.NewTicker(s.scrapeInterval)
+	defer ticker.Stop()
+
+	log.Logger.Infow("start scraping and syncing metrics")
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		if err := s.sync(scraper); err != nil {
+			log.Logger.Errorw("failed to sync metrics", "error", err)
+		}
+	}
+}
+
+func (s *Syncer) sync(scraper pkgmetrics.Scraper) error {
+	ms, err := scraper.Scrape(s.ctx)
 	if err != nil {
 		return err
 	}

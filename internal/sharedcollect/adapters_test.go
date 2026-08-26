@@ -30,7 +30,7 @@ func (function inventorySourceFunc) Collect(ctx context.Context) (*inventory.Sna
 	return function(ctx)
 }
 
-func TestMetricsAdapterReplacesMigratedMetrics(t *testing.T) {
+func TestMetricsScrapersSeparateLegacyAndSharedMetrics(t *testing.T) {
 	timestamp := time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC)
 	entity := &observation.Entity{Type: "gpu", Id: "GPU-test"}
 	batch := &observation.ObservationBatch{
@@ -53,35 +53,46 @@ func TestMetricsAdapterReplacesMigratedMetrics(t *testing.T) {
 		{Component: "another-component", Name: "dcgm_fi_dev_power_usage", Value: 10},
 		{Component: "system-cpu", Name: "cpu_usage", Value: 20},
 	}
-	adapter := NewMetricsAdapter(scraperFunc(func(context.Context) (pkgmetrics.Metrics, error) {
+	legacyScraper := NewLegacyMetricsScraper(scraperFunc(func(context.Context) (pkgmetrics.Metrics, error) {
 		return legacy, nil
-	}), func(context.Context) (*observation.ObservationBatch, error) {
+	}))
+	sharedScraper := NewSharedMetricsScraper(func(context.Context) (*observation.ObservationBatch, error) {
 		return batch, nil
 	})
 
-	metrics, err := adapter.Scrape(context.Background())
+	legacyMetrics, err := legacyScraper.Scrape(context.Background())
 	require.NoError(t, err)
-	require.Len(t, metrics, 3)
-	require.Equal(t, "another-component", metrics[0].Component)
-	require.Equal(t, "system-cpu", metrics[1].Component)
-	require.Equal(t, componentPower, metrics[2].Component)
-	require.Equal(t, 125.5, metrics[2].Value)
-	require.Equal(t, map[string]string{"gpu": "0", "uuid": "GPU-test"}, metrics[2].Labels)
+	require.Equal(t, pkgmetrics.Metrics{
+		{Component: "another-component", Name: "dcgm_fi_dev_power_usage", Value: 10},
+		{Component: "system-cpu", Name: "cpu_usage", Value: 20},
+	}, legacyMetrics)
+
+	sharedMetrics, err := sharedScraper.Scrape(context.Background())
+	require.NoError(t, err)
+	require.Len(t, sharedMetrics, 1)
+	require.Equal(t, componentPower, sharedMetrics[0].Component)
+	require.Equal(t, 125.5, sharedMetrics[0].Value)
+	require.Equal(t, map[string]string{"gpu": "0", "uuid": "GPU-test"}, sharedMetrics[0].Labels)
 }
 
-func TestMetricsAdapterDoesNotRestoreLegacyValueWhenSharedCollectionFails(t *testing.T) {
-	adapter := NewMetricsAdapter(scraperFunc(func(context.Context) (pkgmetrics.Metrics, error) {
+func TestMetricsScrapersRemainIndependentWhenSharedCollectionFails(t *testing.T) {
+	legacyScraper := NewLegacyMetricsScraper(scraperFunc(func(context.Context) (pkgmetrics.Metrics, error) {
 		return pkgmetrics.Metrics{
 			{Component: componentPower, Name: "dcgm_fi_dev_power_usage", Value: 999},
 			{Component: "system-cpu", Name: "cpu_usage", Value: 20},
 		}, nil
-	}), func(context.Context) (*observation.ObservationBatch, error) {
+	}))
+	sharedScraper := NewSharedMetricsScraper(func(context.Context) (*observation.ObservationBatch, error) {
 		return nil, errors.New("DCGM unavailable")
 	})
 
-	metrics, err := adapter.Scrape(context.Background())
+	legacyMetrics, err := legacyScraper.Scrape(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, pkgmetrics.Metrics{{Component: "system-cpu", Name: "cpu_usage", Value: 20}}, metrics)
+	require.Equal(t, pkgmetrics.Metrics{{Component: "system-cpu", Name: "cpu_usage", Value: 20}}, legacyMetrics)
+
+	sharedMetrics, err := sharedScraper.Scrape(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, sharedMetrics)
 }
 
 func TestInventoryAdapterReplacesOnlyGPUInventory(t *testing.T) {
