@@ -45,6 +45,7 @@ func TestGetMachineInfo(t *testing.T) {
 
 	tests := []struct {
 		name     string
+		opts     []MachineInfoOption
 		wantErr  bool
 		validate func(*testing.T, *MachineInfo)
 	}{
@@ -60,13 +61,21 @@ func TestGetMachineInfo(t *testing.T) {
 				assert.NotEmpty(t, info.Hostname)
 			},
 		},
+		{
+			name: "gpu_info_disabled",
+			opts: []MachineInfoOption{WithoutGPUInfo()},
+			validate: func(t *testing.T, info *MachineInfo) {
+				assert.NotNil(t, info)
+				assert.Nil(t, info.GPUInfo)
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Use the no-op NVML instance for testing
 			nvmlInstance := nvidianvml.NewNoOp()
-			info, err := GetMachineInfo(nvmlInstance)
+			info, err := GetMachineInfo(nvmlInstance, tt.opts...)
 			if tt.wantErr {
 				assert.Error(t, err)
 				assert.Nil(t, info)

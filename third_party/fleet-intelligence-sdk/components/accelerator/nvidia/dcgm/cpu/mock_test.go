@@ -46,18 +46,6 @@ func (m *mockDCGMInstance) HealthCheck(system dcgm.HealthSystem) (dcgm.HealthRes
 	return result, nil, nil
 }
 
-func (m *mockDCGMInstance) AddFieldsToWatch(fields []dcgm.Short) error {
-	return nil
-}
-
-func (m *mockDCGMInstance) GetWatchedFields() []dcgm.Short {
-	return nil
-}
-
-func (m *mockDCGMInstance) RemoveFieldsFromWatch(fields []dcgm.Short) error {
-	return nil
-}
-
 func (m *mockDCGMInstance) GetLatestValuesForFields(deviceID uint, fields []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
 	return nil, nil
 }

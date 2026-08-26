@@ -18,12 +18,9 @@ package clock
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
-	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
-	"github.com/prometheus/client_golang/prometheus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
@@ -46,9 +43,7 @@ type component struct {
 
 	healthCheckInterval time.Duration
 
-	dcgmInstance        nvidiadcgm.Instance
-	dcgmHealthCache     *nvidiadcgm.HealthCache
-	dcgmFieldValueCache *nvidiadcgm.FieldValueCache
+	dcgmInstance nvidiadcgm.Instance
 
 	lastMu          sync.RWMutex
 	lastCheckResult *checkResult
@@ -68,8 +63,6 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 
 		healthCheckInterval: healthCheckInterval,
 		dcgmInstance:        gpudInstance.DCGMInstance,
-		dcgmHealthCache:     gpudInstance.DCGMHealthCache,
-		dcgmFieldValueCache: gpudInstance.DCGMFieldValueCache,
 	}
 
 	return c, nil
@@ -134,8 +127,6 @@ func (c *component) Events(ctx context.Context, since time.Time) (apiv1.Events, 
 func (c *component) Close() error {
 	log.Logger.Debugw("closing component")
 
-	// Field watching is managed by centralized FieldValueCache, no cleanup needed here
-
 	c.cancel()
 	return nil
 }
@@ -163,47 +154,10 @@ func (c *component) Check() components.CheckResult {
 		return cr
 	}
 
-	// Query and export DCGM clock field values for all devices
-	deviceValues, err := c.dcgmFieldValueCache.GetResult(clockFields)
-	if err != nil {
-		if nvidiadcgm.IsUnhealthyAPIError(err) {
-			cr.health = apiv1.HealthStateTypeUnhealthy
-			cr.reason = nvidiadcgm.AppendDCGMErrorType("failed to get DCGM clock fields", err)
-		} else {
-			// Unknown error - treat as degraded
-			cr.health = apiv1.HealthStateTypeDegraded
-			cr.reason = fmt.Sprintf("failed to get DCGM clock fields: %v", err)
-		}
-		cr.err = err
-		return cr
-	} else {
-		for _, deviceData := range deviceValues {
-			for _, fieldValue := range deviceData.Values {
-				// Use valid value
-				switch fieldValue.FieldID {
-				case dcgm.DCGM_FI_DEV_SM_CLOCK:
-					metricDCGMFIDevSMClock.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_MEM_CLOCK:
-					metricDCGMFIDevMemClock.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_CLOCKS_EVENT_REASONS:
-					metricDCGMFIDevClocksEventReasons.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				}
-			}
-		}
-	}
-
-	// Clock metrics are informational only - always return healthy
+	// Clock telemetry is collected by the shared collection library. This
+	// component remains for compatibility with the existing health surface.
 	cr.health = apiv1.HealthStateTypeHealthy
-	cr.reason = "clock metrics collected successfully"
+	cr.reason = "clock telemetry is collected by the shared library"
 
 	return cr
 }

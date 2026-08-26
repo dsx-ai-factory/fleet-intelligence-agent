@@ -41,14 +41,14 @@ type metricDefinition struct {
 var metricDefinitions = []metricDefinition{
 	{observation.SignalPowerDraw, componentPower, "dcgm_fi_dev_power_usage", pkgmetrics.MetricTypeGauge},
 	{observation.SignalPowerLimitEnforced, componentPower, "dcgm_fi_dev_enforced_power_limit", pkgmetrics.MetricTypeGauge},
-	{observation.SignalPowerViolationDuration, componentPower, "dcgm_fi_dev_power_violation", pkgmetrics.MetricTypeCounter},
-	{observation.SignalReliabilityViolation, componentPower, "dcgm_fi_dev_reliability_violation", pkgmetrics.MetricTypeCounter},
-	{observation.SignalBoardLimitViolation, componentPower, "dcgm_fi_dev_board_limit_violation", pkgmetrics.MetricTypeCounter},
+	{observation.SignalPowerViolationDuration, componentPower, "dcgm_fi_dev_power_violation", pkgmetrics.MetricTypeGauge},
+	{observation.SignalReliabilityViolation, componentPower, "dcgm_fi_dev_reliability_violation", pkgmetrics.MetricTypeGauge},
+	{observation.SignalBoardLimitViolation, componentPower, "dcgm_fi_dev_board_limit_violation", pkgmetrics.MetricTypeGauge},
 
 	{observation.SignalGPUTemperatureCelsius, componentThermal, "dcgm_fi_dev_gpu_temp", pkgmetrics.MetricTypeGauge},
 	{observation.SignalGPUTemperatureHBMCelsius, componentThermal, "dcgm_fi_dev_memory_temp", pkgmetrics.MetricTypeGauge},
 	{observation.SignalGPUTemperatureThresholdSlowdownCelsius, componentThermal, "dcgm_fi_dev_slowdown_temp", pkgmetrics.MetricTypeGauge},
-	{observation.SignalThermalViolationDuration, componentThermal, "dcgm_fi_dev_thermal_violation", pkgmetrics.MetricTypeCounter},
+	{observation.SignalThermalViolationDuration, componentThermal, "dcgm_fi_dev_thermal_violation", pkgmetrics.MetricTypeGauge},
 	{observation.SignalGPUTemperatureSlowdownMarginCelsius, componentThermal, "dcgm_fi_dev_gpu_temp_limit", pkgmetrics.MetricTypeGauge},
 
 	{observation.SignalSMClock, componentClock, "dcgm_fi_dev_sm_clock", pkgmetrics.MetricTypeGauge},
@@ -62,53 +62,50 @@ var metricDefinitions = []metricDefinition{
 	{observation.SignalFramebufferUsed, componentMemory, "dcgm_fi_dev_fb_used", pkgmetrics.MetricTypeGauge},
 	{observation.SignalFramebufferTotal, componentMemory, "dcgm_fi_dev_fb_total", pkgmetrics.MetricTypeGauge},
 	{observation.SignalFramebufferUsedRatio, componentMemory, "dcgm_fi_dev_fb_used_percent", pkgmetrics.MetricTypeGauge},
-	{observation.SignalUncorrectableRemappedRows, componentMemory, "dcgm_fi_dev_uncorrectable_remapped_rows", pkgmetrics.MetricTypeCounter},
-	{observation.SignalCorrectableRemappedRows, componentMemory, "dcgm_fi_dev_correctable_remapped_rows", pkgmetrics.MetricTypeCounter},
+	{observation.SignalUncorrectableRemappedRows, componentMemory, "dcgm_fi_dev_uncorrectable_remapped_rows", pkgmetrics.MetricTypeGauge},
+	{observation.SignalCorrectableRemappedRows, componentMemory, "dcgm_fi_dev_correctable_remapped_rows", pkgmetrics.MetricTypeGauge},
 	{observation.SignalRowRemapFailure, componentMemory, "dcgm_fi_dev_row_remap_failure", pkgmetrics.MetricTypeGauge},
 	{observation.SignalRowRemapPending, componentMemory, "dcgm_fi_dev_row_remap_pending", pkgmetrics.MetricTypeGauge},
-	{observation.SignalECCSingleBitVolatileTotal, componentMemory, "dcgm_fi_dev_ecc_sbe_vol_total", pkgmetrics.MetricTypeCounter},
-	{observation.SignalECCDoubleBitVolatileTotal, componentMemory, "dcgm_fi_dev_ecc_dbe_vol_total", pkgmetrics.MetricTypeCounter},
-	{observation.SignalECCSingleBitAggregateTotal, componentMemory, "dcgm_fi_dev_ecc_sbe_agg_total", pkgmetrics.MetricTypeCounter},
-	{observation.SignalECCDoubleBitAggregateTotal, componentMemory, "dcgm_fi_dev_ecc_dbe_agg_total", pkgmetrics.MetricTypeCounter},
-	{observation.SignalECCSingleBitVolatileDevice, componentMemory, "dcgm_fi_dev_ecc_sbe_vol_dev", pkgmetrics.MetricTypeCounter},
-	{observation.SignalECCDoubleBitVolatileDevice, componentMemory, "dcgm_fi_dev_ecc_dbe_vol_dev", pkgmetrics.MetricTypeCounter},
-	{observation.SignalECCSingleBitAggregateDevice, componentMemory, "dcgm_fi_dev_ecc_sbe_agg_dev", pkgmetrics.MetricTypeCounter},
-	{observation.SignalECCDoubleBitAggregateDevice, componentMemory, "dcgm_fi_dev_ecc_dbe_agg_dev", pkgmetrics.MetricTypeCounter},
+	{observation.SignalECCSingleBitVolatileTotal, componentMemory, "dcgm_fi_dev_ecc_sbe_vol_total", pkgmetrics.MetricTypeGauge},
+	{observation.SignalECCDoubleBitVolatileTotal, componentMemory, "dcgm_fi_dev_ecc_dbe_vol_total", pkgmetrics.MetricTypeGauge},
+	{observation.SignalECCSingleBitAggregateTotal, componentMemory, "dcgm_fi_dev_ecc_sbe_agg_total", pkgmetrics.MetricTypeGauge},
+	{observation.SignalECCDoubleBitAggregateTotal, componentMemory, "dcgm_fi_dev_ecc_dbe_agg_total", pkgmetrics.MetricTypeGauge},
+	{observation.SignalECCSingleBitVolatileDevice, componentMemory, "dcgm_fi_dev_ecc_sbe_vol_dev", pkgmetrics.MetricTypeGauge},
+	{observation.SignalECCDoubleBitVolatileDevice, componentMemory, "dcgm_fi_dev_ecc_dbe_vol_dev", pkgmetrics.MetricTypeGauge},
+	{observation.SignalECCSingleBitAggregateDevice, componentMemory, "dcgm_fi_dev_ecc_sbe_agg_dev", pkgmetrics.MetricTypeGauge},
+	{observation.SignalECCDoubleBitAggregateDevice, componentMemory, "dcgm_fi_dev_ecc_dbe_agg_dev", pkgmetrics.MetricTypeGauge},
 	{observation.SignalRemapRowsAvailableHigh, componentMemory, "dcgm_fi_dev_banks_remap_rows_avail_high", pkgmetrics.MetricTypeGauge},
 	{observation.SignalRemapRowsAvailableLow, componentMemory, "dcgm_fi_dev_banks_remap_rows_avail_low", pkgmetrics.MetricTypeGauge},
 	{observation.SignalRemapRowsAvailableMax, componentMemory, "dcgm_fi_dev_banks_remap_rows_avail_max", pkgmetrics.MetricTypeGauge},
 	{observation.SignalRemapRowsAvailableNone, componentMemory, "dcgm_fi_dev_banks_remap_rows_avail_none", pkgmetrics.MetricTypeGauge},
 	{observation.SignalRemapRowsAvailablePartial, componentMemory, "dcgm_fi_dev_banks_remap_rows_avail_partial", pkgmetrics.MetricTypeGauge},
 
-	{observation.SignalPCIeReplayCount, componentPCIe, "dcgm_fi_dev_pcie_replay_counter", pkgmetrics.MetricTypeCounter},
+	{observation.SignalPCIeReplayCount, componentPCIe, "dcgm_fi_dev_pcie_replay_counter", pkgmetrics.MetricTypeGauge},
 
 	{observation.SignalNVLinkBandwidthTotal, componentNVLink, "dcgm_fi_dev_nvlink_bandwidth_total", pkgmetrics.MetricTypeGauge},
-	{observation.SignalNVLinkDLCrcErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_error_dl_crc", pkgmetrics.MetricTypeCounter},
-	{observation.SignalNVLinkDLRecoveryErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_error_dl_recovery", pkgmetrics.MetricTypeCounter},
-	{observation.SignalNVLinkDLReplayErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_error_dl_replay", pkgmetrics.MetricTypeCounter},
-	{observation.SignalNVLinkRecoverySuccessfulCount, componentNVLink, "dcgm_fi_dev_nvlink_count_link_recovery_successful_events", pkgmetrics.MetricTypeCounter},
-	{observation.SignalNVLinkRecoveryFailedCount, componentNVLink, "dcgm_fi_dev_nvlink_count_link_recovery_failed_events", pkgmetrics.MetricTypeCounter},
+	{observation.SignalNVLinkDLCrcErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_error_dl_crc", pkgmetrics.MetricTypeGauge},
+	{observation.SignalNVLinkDLRecoveryErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_error_dl_recovery", pkgmetrics.MetricTypeGauge},
+	{observation.SignalNVLinkDLReplayErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_error_dl_replay", pkgmetrics.MetricTypeGauge},
+	{observation.SignalNVLinkRecoverySuccessfulCount, componentNVLink, "dcgm_fi_dev_nvlink_count_link_recovery_successful_events", pkgmetrics.MetricTypeGauge},
+	{observation.SignalNVLinkRecoveryFailedCount, componentNVLink, "dcgm_fi_dev_nvlink_count_link_recovery_failed_events", pkgmetrics.MetricTypeGauge},
 	{observation.SignalFabricManagerStatus, componentNVLink, "dcgm_fi_dev_fabric_manager_status", pkgmetrics.MetricTypeGauge},
-	{observation.SignalC2CLinkReplayErrorCount, componentNVLink, "dcgm_fi_dev_c2c_link_error_replay", pkgmetrics.MetricTypeCounter},
-	{observation.SignalNVLinkRXGeneralErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_count_rx_general_errors", pkgmetrics.MetricTypeCounter},
-	{observation.SignalNVLinkRXErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_count_rx_errors", pkgmetrics.MetricTypeCounter},
-	{observation.SignalNVLinkRXMalformedPacketErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_count_rx_malformed_packet_errors", pkgmetrics.MetricTypeCounter},
-	{observation.SignalNVLinkRXRemoteErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_count_rx_remote_errors", pkgmetrics.MetricTypeCounter},
-	{observation.SignalNVLinkRXSymbolErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_count_rx_symbol_errors", pkgmetrics.MetricTypeCounter},
-	{observation.SignalNVLinkRXBufferOverrunErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_count_rx_buffer_overrun_errors", pkgmetrics.MetricTypeCounter},
-	{observation.SignalNVLinkLocalIntegrityErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_count_local_link_integrity_errors", pkgmetrics.MetricTypeCounter},
-	{observation.SignalNVLinkEffectiveErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_count_effective_errors", pkgmetrics.MetricTypeCounter},
+	{observation.SignalC2CLinkReplayErrorCount, componentNVLink, "dcgm_fi_dev_c2c_link_error_replay", pkgmetrics.MetricTypeGauge},
+	{observation.SignalNVLinkRXGeneralErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_count_rx_general_errors", pkgmetrics.MetricTypeGauge},
+	{observation.SignalNVLinkRXErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_count_rx_errors", pkgmetrics.MetricTypeGauge},
+	{observation.SignalNVLinkRXMalformedPacketErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_count_rx_malformed_packet_errors", pkgmetrics.MetricTypeGauge},
+	{observation.SignalNVLinkRXRemoteErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_count_rx_remote_errors", pkgmetrics.MetricTypeGauge},
+	{observation.SignalNVLinkRXSymbolErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_count_rx_symbol_errors", pkgmetrics.MetricTypeGauge},
+	{observation.SignalNVLinkRXBufferOverrunErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_count_rx_buffer_overrun_errors", pkgmetrics.MetricTypeGauge},
+	{observation.SignalNVLinkLocalIntegrityErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_count_local_link_integrity_errors", pkgmetrics.MetricTypeGauge},
+	{observation.SignalNVLinkEffectiveErrorCount, componentNVLink, "dcgm_fi_dev_nvlink_count_effective_errors", pkgmetrics.MetricTypeGauge},
 	{observation.SignalNVLinkEffectiveBER, componentNVLink, "dcgm_fi_dev_nvlink_count_effective_ber_float", pkgmetrics.MetricTypeGauge},
 	{observation.SignalNVLinkSymbolBER, componentNVLink, "dcgm_fi_dev_nvlink_count_symbol_ber_float", pkgmetrics.MetricTypeGauge},
-	{observation.SignalNVLinkTXDiscardCount, componentNVLink, "dcgm_fi_dev_nvlink_count_tx_discards", pkgmetrics.MetricTypeCounter},
+	{observation.SignalNVLinkTXDiscardCount, componentNVLink, "dcgm_fi_dev_nvlink_count_tx_discards", pkgmetrics.MetricTypeGauge},
 
 	{observation.SignalInforomConfigurationValid, componentInforom, "dcgm_fi_dev_inforom_config_valid", pkgmetrics.MetricTypeGauge},
 }
 
-var (
-	metricDefinitionBySignal = indexMetricDefinitionsBySignal(metricDefinitions)
-	metricDefinitionByName   = indexMetricDefinitionsByName(metricDefinitions)
-)
+var metricDefinitionBySignal = indexMetricDefinitionsBySignal(metricDefinitions)
 
 // MetricsFromObservations converts successful DCGM observations into FI's
 // current database metric model. Collection errors are returned separately and
@@ -183,14 +180,6 @@ func indexMetricDefinitionsBySignal(definitions []metricDefinition) map[observat
 	indexed := make(map[observation.SignalID]metricDefinition, len(definitions))
 	for _, definition := range definitions {
 		indexed[definition.signalID] = definition
-	}
-	return indexed
-}
-
-func indexMetricDefinitionsByName(definitions []metricDefinition) map[string]metricDefinition {
-	indexed := make(map[string]metricDefinition, len(definitions))
-	for _, definition := range definitions {
-		indexed[definition.name] = definition
 	}
 	return indexed
 }

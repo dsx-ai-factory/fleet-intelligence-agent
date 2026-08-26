@@ -322,16 +322,12 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 	dcgmHealthCache := nvidiadcgm.NewHealthCache(ctx, dcgmInstance, healthCheckInterval)
 	log.Logger.Infow("DCGM health check cache configured", "healthCheckInterval", healthCheckInterval)
 
-	dcgmFieldValueCache := nvidiadcgm.NewFieldValueCache(ctx, dcgmInstance, healthCheckInterval)
-	log.Logger.Infow("DCGM field value cache created", "healthCheckInterval", healthCheckInterval)
-
 	s.gpudInstance = &components.GPUdInstance{
 		RootCtx:              ctx,
 		MachineID:            machineID,
 		NVMLInstance:         nvmlInstance,
 		DCGMInstance:         dcgmInstance,
 		DCGMHealthCache:      dcgmHealthCache,
-		DCGMFieldValueCache:  dcgmFieldValueCache,
 		DCGMGroupNames:       dcgmGroupNames,
 		NVIDIAToolOverwrites: config.NvidiaToolOverwrites,
 		DBRW:                 dbRW,
@@ -358,20 +354,6 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 		}
 	}
 
-	// Set up DCGM field watching after all components have registered their fields
-	if dcgmFieldValueCache != nil {
-		if err := dcgmFieldValueCache.SetupFieldWatchingWithName(dcgmGroupNames.GPUFieldGroup); err != nil {
-			log.Logger.Errorw("failed to set up DCGM field watching, DCGM metrics collection unavailable", "error", err)
-		}
-	}
-
-	// Start DCGM field value cache polling
-	if dcgmFieldValueCache != nil {
-		if err := dcgmFieldValueCache.Start(); err != nil {
-			log.Logger.Errorw("failed to start DCGM field value cache, DCGM metrics polling disabled", "error", err)
-		}
-	}
-
 	// Start components for health monitoring (must be started after DCGM initialization)
 	for _, c := range s.componentsRegistry.All() {
 		if err = c.Start(); err != nil {
@@ -392,7 +374,7 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 	metricsPurgeInterval := 5 * time.Minute
 	log.Logger.Infow("initializing metrics syncer", "scrapeInterval", healthCheckInterval, "purgeInterval", metricsPurgeInterval, "retention", config.RetentionPeriod.Duration)
 	metricsScrapers := []pkgmetrics.Scraper{
-		sharedcollect.NewLegacyMetricsScraper(promScraper),
+		promScraper,
 		sharedcollect.NewSharedMetricsScraper(s.sharedCollector.CollectMetrics),
 	}
 	syncer := pkgmetricssyncer.NewSyncer(ctx, metricsScrapers, metricsSQLiteStore, healthCheckInterval, metricsPurgeInterval, config.RetentionPeriod.Duration)
@@ -410,7 +392,7 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 		}
 	}
 
-	s.startInventoryLoop(loopCtx, config, nvmlInstance, dcgmGPUIndexes)
+	s.startInventoryLoop(loopCtx, config, nvmlInstance)
 	s.startAttestationLoop(loopCtx, config)
 
 	// Create and start health exporter with all dependencies if enabled
@@ -447,7 +429,6 @@ func (s *Server) startInventoryLoop(
 	ctx context.Context,
 	cfg *config.Config,
 	nvmlInstance nvidianvml.Instance,
-	dcgmGPUIndexes map[string]string,
 ) {
 	interval := getInventorySyncInterval(cfg)
 	if interval <= 0 {
@@ -468,7 +449,7 @@ func (s *Server) startInventoryLoop(
 
 	source := inventorysource.NewMachineInfoSourceWithAgentConfig(
 		inventoryMachineInfoCollectorFunc(func(context.Context) (*machineinfo.MachineInfo, error) {
-			return machineinfo.GetMachineInfo(nvmlInstance, machineinfo.WithDCGMGPUIndexes(dcgmGPUIndexes))
+			return machineinfo.GetMachineInfo(nvmlInstance, machineinfo.WithoutGPUInfo())
 		}),
 		&inventory.AgentConfig{
 			TotalComponents:             int64(len(allComponents)),
@@ -590,12 +571,6 @@ func (s *Server) Stop() {
 		if s.gpudInstance != nil && s.gpudInstance.DCGMHealthCache != nil {
 			s.gpudInstance.DCGMHealthCache.Stop()
 			log.Logger.Debugw("stopped DCGM health cache")
-		}
-
-		// Stop DCGM field value cache polling to prevent goroutine leak
-		if s.gpudInstance != nil && s.gpudInstance.DCGMFieldValueCache != nil {
-			s.gpudInstance.DCGMFieldValueCache.Stop()
-			log.Logger.Debugw("stopped DCGM field value cache")
 		}
 
 		if s.componentsRegistry != nil {

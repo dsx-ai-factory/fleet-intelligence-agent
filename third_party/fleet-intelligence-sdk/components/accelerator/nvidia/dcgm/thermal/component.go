@@ -24,7 +24,6 @@ import (
 	"time"
 
 	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
-	"github.com/prometheus/client_golang/prometheus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
@@ -51,9 +50,8 @@ type component struct {
 
 	healthCheckInterval time.Duration
 
-	dcgmInstance        nvidiadcgm.Instance
-	dcgmHealthCache     *nvidiadcgm.HealthCache
-	dcgmFieldValueCache *nvidiadcgm.FieldValueCache
+	dcgmInstance    nvidiadcgm.Instance
+	dcgmHealthCache *nvidiadcgm.HealthCache
 
 	eventBucket eventstore.Bucket
 
@@ -76,7 +74,6 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 		healthCheckInterval: healthCheckInterval,
 		dcgmInstance:        gpudInstance.DCGMInstance,
 		dcgmHealthCache:     gpudInstance.DCGMHealthCache,
-		dcgmFieldValueCache: gpudInstance.DCGMFieldValueCache,
 	}
 
 	// Only initialize if DCGM is available
@@ -171,8 +168,6 @@ func (c *component) Events(ctx context.Context, since time.Time) (apiv1.Events, 
 func (c *component) Close() error {
 	log.Logger.Debugw("closing component")
 
-	// Field watching is managed by centralized FieldValueCache, no cleanup needed here
-
 	c.cancel()
 	if c.eventBucket != nil {
 		c.eventBucket.Close()
@@ -235,48 +230,6 @@ func (c *component) Check() components.CheckResult {
 		}
 		cr.err = err
 		return cr
-	}
-
-	// Query and export DCGM temperature field values for all devices
-	deviceValues, err := c.dcgmFieldValueCache.GetResult(temperatureFields)
-	if err != nil {
-		if nvidiadcgm.IsUnhealthyAPIError(err) {
-			cr.health = apiv1.HealthStateTypeUnhealthy
-			cr.reason = nvidiadcgm.AppendDCGMErrorType("failed to get DCGM thermal fields", err)
-		} else {
-			// Unknown error - treat as degraded
-			cr.health = apiv1.HealthStateTypeDegraded
-			cr.reason = fmt.Sprintf("failed to get DCGM thermal fields: %v", err)
-		}
-		cr.err = err
-		return cr
-	} else {
-		for _, deviceData := range deviceValues {
-			for _, fieldValue := range deviceData.Values {
-				// Use valid value
-				switch fieldValue.FieldID {
-				case dcgm.DCGM_FI_DEV_GPU_TEMP:
-					metricDCGMFIDevGPUTemp.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_MEMORY_TEMP:
-					metricDCGMFIDevMemoryTemp.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_SLOWDOWN_TEMP:
-					metricDCGMFIDevSlowdownTemp.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_THERMAL_VIOLATION:
-					metricDCGMFIDevThermalViolation.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_GPU_TEMP_LIMIT:
-					metricDCGMFIDevGPUTempLimit.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).Set(float64(fieldValue.Int64()))
-				}
-			}
-		}
 	}
 
 	// Map DCGM health result to GPUd health state

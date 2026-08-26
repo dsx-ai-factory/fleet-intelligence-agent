@@ -85,12 +85,19 @@ type machineInfoOpts struct {
 	// dcgmGPUIndexes overrides NVML-sourced GPUIndex values with DCGM device IDs.
 	// Key: GPU UUID, Value: DCGM device ID as string (e.g. "0", "1").
 	dcgmGPUIndexes map[string]string
+	withoutGPUInfo bool
 }
 
 // WithDCGMGPUIndexes supplies a UUID→DCGM-device-ID mapping so that
 // MachineInfo.GPUIndex matches the "gpu" label emitted by DCGM metrics.
 func WithDCGMGPUIndexes(m map[string]string) MachineInfoOption {
 	return func(o *machineInfoOpts) { o.dcgmGPUIndexes = m }
+}
+
+// WithoutGPUInfo skips legacy GPU inventory collection. This is used when the
+// shared collection library owns the GPU section of the inventory snapshot.
+func WithoutGPUInfo() MachineInfoOption {
+	return func(o *machineInfoOpts) { o.withoutGPUInfo = true }
 }
 
 // GetMachineInfo retrieves machine info and customizes it for Fleet Intelligence.
@@ -101,8 +108,13 @@ func GetMachineInfo(nvmlInstance nvidianvml.Instance, opts ...MachineInfoOption)
 		fn(&o)
 	}
 
-	// Get the original machine info from gpud
-	gpudInfo, err := pkgmachineinfo.GetMachineInfo(nvmlInstance)
+	getMachineInfo := pkgmachineinfo.GetMachineInfo
+	if o.withoutGPUInfo {
+		getMachineInfo = pkgmachineinfo.GetMachineInfoWithoutGPUInfo
+	}
+
+	// Get the original machine info from gpud.
+	gpudInfo, err := getMachineInfo(nvmlInstance)
 	if err != nil {
 		return nil, err
 	}

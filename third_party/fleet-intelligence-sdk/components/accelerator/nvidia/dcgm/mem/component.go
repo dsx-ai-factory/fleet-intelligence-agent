@@ -24,7 +24,6 @@ import (
 	"time"
 
 	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
-	"github.com/prometheus/client_golang/prometheus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
@@ -52,7 +51,6 @@ type component struct {
 	healthCheckInterval time.Duration
 	dcgmInstance        nvidiadcgm.Instance
 	dcgmHealthCache     *nvidiadcgm.HealthCache
-	dcgmFieldValueCache *nvidiadcgm.FieldValueCache
 
 	eventBucket eventstore.Bucket
 
@@ -74,7 +72,6 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 		healthCheckInterval: healthCheckInterval,
 		dcgmInstance:        gpudInstance.DCGMInstance,
 		dcgmHealthCache:     gpudInstance.DCGMHealthCache,
-		dcgmFieldValueCache: gpudInstance.DCGMFieldValueCache,
 	}
 
 	// Only initialize if DCGM is available
@@ -163,8 +160,6 @@ func (c *component) Events(ctx context.Context, since time.Time) (apiv1.Events, 
 func (c *component) Close() error {
 	log.Logger.Debugw("closing component")
 
-	// Field watching is managed by centralized FieldValueCache, no cleanup needed here
-
 	c.cancel()
 	if c.eventBucket != nil {
 		c.eventBucket.Close()
@@ -225,119 +220,6 @@ func (c *component) Check() components.CheckResult {
 		}
 		cr.err = err
 		return cr
-	}
-
-	// Query and export DCGM memory field values for all devices
-	deviceValues, err := c.dcgmFieldValueCache.GetResult(memFields)
-	if err != nil {
-		if nvidiadcgm.IsUnhealthyAPIError(err) {
-			cr.health = apiv1.HealthStateTypeUnhealthy
-			cr.reason = nvidiadcgm.AppendDCGMErrorType("failed to get DCGM memory fields", err)
-		} else {
-			// Unknown error - treat as degraded
-			cr.health = apiv1.HealthStateTypeDegraded
-			cr.reason = fmt.Sprintf("failed to get DCGM memory fields: %v", err)
-		}
-		cr.err = err
-		return cr
-	} else {
-		for _, deviceData := range deviceValues {
-			for _, fieldValue := range deviceData.Values {
-				// Use valid value
-				switch fieldValue.FieldID {
-				case dcgm.DCGM_FI_DEV_FB_FREE:
-					metricDCGMFIDevFBFree.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_FB_USED:
-					metricDCGMFIDevFBUsed.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_FB_TOTAL:
-					metricDCGMFIDevFBTotal.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_FB_USED_PERCENT:
-					metricDCGMFIDevFBUsedPercent.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Float64()))
-				case dcgm.DCGM_FI_DEV_UNCORRECTABLE_REMAPPED_ROWS:
-					metricDCGMFIDevUncorrectableRemappedRows.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_CORRECTABLE_REMAPPED_ROWS:
-					metricDCGMFIDevCorrectableRemappedRows.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_ROW_REMAP_FAILURE:
-					metricDCGMFIDevRowRemapFailure.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_ROW_REMAP_PENDING:
-					metricDCGMFIDevRowRemapPending.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_ECC_SBE_VOL_TOTAL:
-					metricDCGMFIDevECCSBEVolTotal.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_ECC_DBE_VOL_TOTAL:
-					metricDCGMFIDevECCDBEVolTotal.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_ECC_SBE_AGG_TOTAL:
-					metricDCGMFIDevECCSBEAggTotal.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_ECC_DBE_AGG_TOTAL:
-					metricDCGMFIDevECCDBAggTotal.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_ECC_SBE_VOL_DEV:
-					metricDCGMFIDevECCSBEVolDev.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_ECC_DBE_VOL_DEV:
-					metricDCGMFIDevECCDBEVolDev.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_ECC_SBE_AGG_DEV:
-					metricDCGMFIDevECCSBEAggDev.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_ECC_DBE_AGG_DEV:
-					metricDCGMFIDevECCDBEAggDev.With(prometheus.Labels{
-						"uuid": deviceData.UUID,
-						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_BANKS_REMAP_ROWS_AVAIL_HIGH:
-					metricDCGMFIDevBanksRemapRowsAvailHigh.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_BANKS_REMAP_ROWS_AVAIL_LOW:
-					metricDCGMFIDevBanksRemapRowsAvailLow.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_BANKS_REMAP_ROWS_AVAIL_MAX:
-					metricDCGMFIDevBanksRemapRowsAvailMax.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_BANKS_REMAP_ROWS_AVAIL_NONE:
-					metricDCGMFIDevBanksRemapRowsAvailNone.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).Set(float64(fieldValue.Int64()))
-				case dcgm.DCGM_FI_DEV_BANKS_REMAP_ROWS_AVAIL_PARTIAL:
-					metricDCGMFIDevBanksRemapRowsAvailPartial.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).Set(float64(fieldValue.Int64()))
-				}
-			}
-		}
 	}
 
 	// Map DCGM health result to GPUd health state

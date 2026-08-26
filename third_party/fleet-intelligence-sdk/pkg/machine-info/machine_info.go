@@ -45,6 +45,17 @@ const diskPartitionsTimeout = 10 * time.Second
 var listPCIGPUs = nvidiapci.ListPCIGPUs
 
 func GetMachineInfo(nvmlInstance nvidianvml.Instance) (*apiv1.MachineInfo, error) {
+	return getMachineInfo(nvmlInstance, true)
+}
+
+// GetMachineInfoWithoutGPUInfo skips the legacy per-device NVML inventory
+// read. Callers can use it when another collector owns GPU inventory.
+func GetMachineInfoWithoutGPUInfo(nvmlInstance nvidianvml.Instance) (*apiv1.MachineInfo, error) {
+	return getMachineInfo(nvmlInstance, false)
+}
+
+func getMachineInfo(nvmlInstance nvidianvml.Instance, includeGPUInfo bool) (*apiv1.MachineInfo, error) {
+
 	hostname, _ := os.Hostname()
 	info := &apiv1.MachineInfo{
 		GPUdVersion: version.Version,
@@ -67,9 +78,11 @@ func GetMachineInfo(nvmlInstance nvidianvml.Instance) (*apiv1.MachineInfo, error
 	}
 
 	var err error
-	info.GPUInfo, err = GetMachineGPUInfo(nvmlInstance)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get machine gpu info: %w", err)
+	if includeGPUInfo {
+		info.GPUInfo, err = GetMachineGPUInfo(nvmlInstance)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get machine gpu info: %w", err)
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)

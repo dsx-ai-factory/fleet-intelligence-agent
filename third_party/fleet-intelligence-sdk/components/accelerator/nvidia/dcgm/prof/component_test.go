@@ -39,13 +39,11 @@ func TestNew(t *testing.T) {
 
 	// Create health cache for testing
 	dcgmHealthCache := nvidiadcgm.NewHealthCache(ctx, dcgmInst, time.Minute)
-	dcgmFieldValueCache := nvidiadcgm.NewFieldValueCache(ctx, dcgmInst, time.Minute)
 
 	gpudInst := &components.GPUdInstance{
 		RootCtx:             ctx,
 		DCGMInstance:        dcgmInst,
 		DCGMHealthCache:     dcgmHealthCache,
-		DCGMFieldValueCache: dcgmFieldValueCache,
 		HealthCheckInterval: time.Minute,
 	}
 
@@ -80,13 +78,11 @@ func TestCheck(t *testing.T) {
 
 	// Create health cache for testing
 	dcgmHealthCache := nvidiadcgm.NewHealthCache(ctx, dcgmInst, time.Minute)
-	dcgmFieldValueCache := nvidiadcgm.NewFieldValueCache(ctx, dcgmInst, time.Minute)
 
 	gpudInst := &components.GPUdInstance{
 		RootCtx:             ctx,
 		DCGMInstance:        dcgmInst,
 		DCGMHealthCache:     dcgmHealthCache,
-		DCGMFieldValueCache: dcgmFieldValueCache,
 		HealthCheckInterval: time.Minute,
 	}
 

@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -18,19 +17,13 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/inventory"
 )
 
-type scraperFunc func(context.Context) (pkgmetrics.Metrics, error)
-
-func (function scraperFunc) Scrape(ctx context.Context) (pkgmetrics.Metrics, error) {
-	return function(ctx)
-}
-
 type inventorySourceFunc func(context.Context) (*inventory.Snapshot, error)
 
 func (function inventorySourceFunc) Collect(ctx context.Context) (*inventory.Snapshot, error) {
 	return function(ctx)
 }
 
-func TestMetricsScrapersSeparateLegacyAndSharedMetrics(t *testing.T) {
+func TestSharedMetricsScraperProjectsObservations(t *testing.T) {
 	timestamp := time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC)
 	entity := &observation.Entity{Type: "gpu", Id: "GPU-test"}
 	batch := &observation.ObservationBatch{
@@ -48,24 +41,9 @@ func TestMetricsScrapersSeparateLegacyAndSharedMetrics(t *testing.T) {
 			),
 		},
 	}
-	legacy := pkgmetrics.Metrics{
-		{Component: componentPower, Name: "dcgm_fi_dev_power_usage", Value: 999},
-		{Component: "another-component", Name: "dcgm_fi_dev_power_usage", Value: 10},
-		{Component: "system-cpu", Name: "cpu_usage", Value: 20},
-	}
-	legacyScraper := NewLegacyMetricsScraper(scraperFunc(func(context.Context) (pkgmetrics.Metrics, error) {
-		return legacy, nil
-	}))
 	sharedScraper := NewSharedMetricsScraper(func(context.Context) (*observation.ObservationBatch, error) {
 		return batch, nil
 	})
-
-	legacyMetrics, err := legacyScraper.Scrape(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, pkgmetrics.Metrics{
-		{Component: "another-component", Name: "dcgm_fi_dev_power_usage", Value: 10},
-		{Component: "system-cpu", Name: "cpu_usage", Value: 20},
-	}, legacyMetrics)
 
 	sharedMetrics, err := sharedScraper.Scrape(context.Background())
 	require.NoError(t, err)
@@ -75,20 +53,10 @@ func TestMetricsScrapersSeparateLegacyAndSharedMetrics(t *testing.T) {
 	require.Equal(t, map[string]string{"gpu": "0", "uuid": "GPU-test"}, sharedMetrics[0].Labels)
 }
 
-func TestMetricsScrapersRemainIndependentWhenSharedCollectionFails(t *testing.T) {
-	legacyScraper := NewLegacyMetricsScraper(scraperFunc(func(context.Context) (pkgmetrics.Metrics, error) {
-		return pkgmetrics.Metrics{
-			{Component: componentPower, Name: "dcgm_fi_dev_power_usage", Value: 999},
-			{Component: "system-cpu", Name: "cpu_usage", Value: 20},
-		}, nil
-	}))
+func TestSharedMetricsScraperReturnsNoMetricsWhenCollectionFails(t *testing.T) {
 	sharedScraper := NewSharedMetricsScraper(func(context.Context) (*observation.ObservationBatch, error) {
 		return nil, errors.New("DCGM unavailable")
 	})
-
-	legacyMetrics, err := legacyScraper.Scrape(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, pkgmetrics.Metrics{{Component: "system-cpu", Name: "cpu_usage", Value: 20}}, legacyMetrics)
 
 	sharedMetrics, err := sharedScraper.Scrape(context.Background())
 	require.NoError(t, err)

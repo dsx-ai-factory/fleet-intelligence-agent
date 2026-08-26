@@ -22,19 +22,8 @@ import (
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
 	"github.com/NVIDIA/fleet-intelligence-sdk/components"
-	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics/scraper"
 	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
-	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
 )
-
-func TestTemperatureFieldsDoNotIncludeConnectXDeviceTemperature(t *testing.T) {
-	for _, field := range temperatureFields {
-		if field == dcgm.DCGM_FI_DEV_CONNECTX_DEVICE_TEMPERATURE {
-			t.Fatalf("unexpected field %v found in temperatureFields", field)
-		}
-	}
-}
 
 func TestNew(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -47,13 +36,11 @@ func TestNew(t *testing.T) {
 	defer dcgmInst.Shutdown()
 
 	dcgmHealthCache := nvidiadcgm.NewHealthCache(ctx, dcgmInst, time.Minute)
-	dcgmFieldValueCache := nvidiadcgm.NewFieldValueCache(ctx, dcgmInst, time.Minute)
 
 	gpudInst := &components.GPUdInstance{
 		RootCtx:             ctx,
 		DCGMInstance:        dcgmInst,
 		DCGMHealthCache:     dcgmHealthCache,
-		DCGMFieldValueCache: dcgmFieldValueCache,
 		HealthCheckInterval: time.Minute,
 	}
 
@@ -82,29 +69,17 @@ func TestCheck(t *testing.T) {
 	}
 
 	dcgmHealthCache := nvidiadcgm.NewHealthCache(ctx, dcgmInst, time.Minute)
-	dcgmFieldValueCache := nvidiadcgm.NewFieldValueCache(ctx, dcgmInst, time.Minute)
 
 	gpudInst := &components.GPUdInstance{
 		RootCtx:             ctx,
 		DCGMInstance:        dcgmInst,
 		DCGMHealthCache:     dcgmHealthCache,
-		DCGMFieldValueCache: dcgmFieldValueCache,
 		HealthCheckInterval: time.Minute,
 	}
 
 	comp, err := New(gpudInst)
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
-	}
-
-	// Set up field watching after component registers its fields
-	if err := dcgmFieldValueCache.SetupFieldWatchingWithName("gpud-thermal-fields"); err != nil {
-		t.Fatalf("SetupFieldWatching() failed: %v", err)
-	}
-
-	// Poll once to populate the cache
-	if err := dcgmFieldValueCache.Poll(); err != nil {
-		t.Logf("Poll() warning: %v", err)
 	}
 
 	if err := dcgmHealthCache.Start(); err != nil {
@@ -133,48 +108,6 @@ func TestCheck(t *testing.T) {
 		t.Errorf("HealthStateType() = %v, want one of Healthy/Degraded/Unhealthy", healthType)
 	}
 
-	t.Logf("\n=== Verifying Prometheus Metrics Were Set ===")
-
-	promScraper, err := scraper.NewPrometheusScraper(pkgmetrics.DefaultGatherer())
-	if err != nil {
-		t.Fatalf("Failed to create Prometheus scraper: %v", err)
-	}
-
-	metrics, err := promScraper.Scrape(ctx)
-	if err != nil {
-		t.Fatalf("Failed to scrape metrics: %v", err)
-	}
-
-	thermalMetricsFound := map[string]int{
-		"dcgm_fi_dev_gpu_temp":          0,
-		"dcgm_fi_dev_memory_temp":       0,
-		"dcgm_fi_dev_thermal_violation": 0,
-		"dcgm_fi_dev_gpu_temp_limit":    0,
-	}
-
-	for _, metric := range metrics {
-		if metric.Component != Name {
-			continue
-		}
-
-		if metric.Name == "dcgm_fi_dev_connectx_device_temperature" {
-			t.Fatalf("unexpected metric %s was exported", metric.Name)
-		}
-
-		if _, exists := thermalMetricsFound[metric.Name]; exists {
-			uuid := metric.Labels["uuid"]
-			t.Logf("  [OK] %s (uuid=%s): %.0f degrees C", metric.Name, uuid, metric.Value)
-			thermalMetricsFound[metric.Name]++
-		}
-	}
-
-	for metricName, count := range thermalMetricsFound {
-		if count == 0 {
-			t.Logf("  [WARN] Metric %s was not found in Prometheus registry", metricName)
-		} else {
-			t.Logf("Found %d instance(s) of metric %s", count, metricName)
-		}
-	}
 }
 
 func TestEvents_NilBucket(t *testing.T) {

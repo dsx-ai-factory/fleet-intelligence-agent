@@ -57,7 +57,7 @@ func TestMetricsFromObservationsPreservesFIContract(t *testing.T) {
 		Value:            125.5,
 		Labels:           map[string]string{"uuid": "GPU-test", "gpu": "3"},
 	}, metrics[0])
-	require.Equal(t, pkgmetrics.MetricTypeCounter, metrics[1].Type)
+	require.Equal(t, pkgmetrics.MetricTypeGauge, metrics[1].Type)
 	require.Equal(t, "dcgm_fi_dev_power_violation", metrics[1].Name)
 }
 
@@ -66,6 +66,8 @@ func TestMetricDefinitionsAreUnique(t *testing.T) {
 	signals := make(map[observation.SignalID]struct{}, len(metricDefinitions))
 	names := make(map[string]struct{}, len(metricDefinitions))
 	for _, definition := range metricDefinitions {
+		require.Equalf(t, pkgmetrics.MetricTypeGauge, definition.metricType, "legacy metric %q must remain a gauge", definition.name)
+
 		_, duplicateSignal := signals[definition.signalID]
 		require.Falsef(t, duplicateSignal, "duplicate signal %q", definition.signalID)
 		signals[definition.signalID] = struct{}{}

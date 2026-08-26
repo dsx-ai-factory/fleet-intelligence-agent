@@ -37,15 +37,13 @@ func TestNew(t *testing.T) {
 	}
 	defer dcgmInst.Shutdown()
 
-	// Create health cache and field value cache for testing
+	// Create health cache for testing
 	dcgmHealthCache := nvidiadcgm.NewHealthCache(ctx, dcgmInst, time.Minute)
-	dcgmFieldValueCache := nvidiadcgm.NewFieldValueCache(ctx, dcgmInst, time.Minute)
 
 	gpudInst := &components.GPUdInstance{
 		RootCtx:             ctx,
 		DCGMInstance:        dcgmInst,
 		DCGMHealthCache:     dcgmHealthCache,
-		DCGMFieldValueCache: dcgmFieldValueCache,
 		HealthCheckInterval: time.Minute,
 	}
 
@@ -78,31 +76,19 @@ func TestCheck(t *testing.T) {
 		t.Skip("No GPU devices found, skipping test")
 	}
 
-	// Create health cache and field value cache for testing
+	// Create health cache for testing
 	dcgmHealthCache := nvidiadcgm.NewHealthCache(ctx, dcgmInst, time.Minute)
-	dcgmFieldValueCache := nvidiadcgm.NewFieldValueCache(ctx, dcgmInst, time.Minute)
 
 	gpudInst := &components.GPUdInstance{
 		RootCtx:             ctx,
 		DCGMInstance:        dcgmInst,
 		DCGMHealthCache:     dcgmHealthCache,
-		DCGMFieldValueCache: dcgmFieldValueCache,
 		HealthCheckInterval: time.Minute,
 	}
 
 	comp, err := New(gpudInst)
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
-	}
-
-	// Setup field watching for CPU fields after component creation
-	if err := dcgmFieldValueCache.SetupFieldWatchingWithName("gpud-cpu-fields"); err != nil {
-		t.Fatalf("failed to setup field watching: %v", err)
-	}
-
-	// Poll once to populate the cache
-	if err := dcgmFieldValueCache.Poll(); err != nil {
-		t.Logf("Poll() warning: %v", err)
 	}
 
 	// Perform check - this will query DCGM and update metrics

@@ -135,17 +135,9 @@ func Scan(ctx context.Context, opts ...Option) error {
 	// For scan mode, create a health cache
 	dcgmHealthCache := nvidiadcgm.NewHealthCache(ctx, dcgmInstance, time.Minute)
 
-	// Create field value cache for GPU device fields (placeholder)
-	// Field watching will be set up after components register their fields
-	// Note: CPU component manages its own field watching separately
-	dcgmFieldValueCache := nvidiadcgm.NewFieldValueCache(ctx, dcgmInstance, time.Minute)
-
 	defer func() {
 		if dcgmHealthCache != nil {
 			dcgmHealthCache.Stop()
-		}
-		if dcgmFieldValueCache != nil {
-			dcgmFieldValueCache.Stop()
 		}
 		if err := dcgmInstance.Shutdown(); err != nil {
 			log.Logger.Warnw("DCGM shutdown failed", "error", err)
@@ -157,11 +149,10 @@ func Scan(ctx context.Context, opts ...Option) error {
 
 		MachineID: mi.MachineID,
 
-		NVMLInstance:        nvmlInstance,
-		DCGMInstance:        dcgmInstance,
-		DCGMHealthCache:     dcgmHealthCache,
-		DCGMFieldValueCache: dcgmFieldValueCache,
-		DCGMGroupNames:      dcgmGroupNames,
+		NVMLInstance:    nvmlInstance,
+		DCGMInstance:    dcgmInstance,
+		DCGMHealthCache: dcgmHealthCache,
+		DCGMGroupNames:  dcgmGroupNames,
 		NVIDIAToolOverwrites: nvidiacommon.ToolOverwrites{
 			InfinibandClassRootDir: op.infinibandClassRootDir,
 		},
@@ -191,16 +182,6 @@ func Scan(ctx context.Context, opts ...Option) error {
 	// Perform one health check to populate the cache
 	if err := dcgmHealthCache.Poll(); err != nil {
 		log.Logger.Warnw("DCGM health check failed", "error", err)
-	}
-
-	// Set up DCGM field watching after all components have registered their fields
-	if err := dcgmFieldValueCache.SetupFieldWatchingWithName(dcgmGroupNames.GPUFieldGroup); err != nil {
-		log.Logger.Warnw("failed to set up DCGM field watching", "error", err)
-	}
-
-	// Perform one field value poll to populate the cache
-	if err := dcgmFieldValueCache.Poll(); err != nil {
-		log.Logger.Warnw("DCGM field value poll failed", "error", err)
 	}
 
 	// Run checks on all initialized components

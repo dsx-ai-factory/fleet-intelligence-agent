@@ -139,17 +139,7 @@ type Instance interface {
 	// HealthCheck performs a health check for the specified system.
 	HealthCheck(system dcgm.HealthSystem) (dcgm.HealthResult, []dcgm.Incident, error)
 
-	// AddFieldsToWatch registers fields to be watched.
-	AddFieldsToWatch(fields []dcgm.Short) error
-
-	// GetWatchedFields returns all fields that have been registered.
-	GetWatchedFields() []dcgm.Short
-
-	// RemoveFieldsFromWatch unregisters fields from tracking.
-	RemoveFieldsFromWatch(fields []dcgm.Short) error
-
 	// GetLatestValuesForFields returns the latest field values for the specified device.
-	// Note: This should primarily be used through FieldValueCache for better performance.
 	GetLatestValuesForFields(deviceID uint, fields []dcgm.Short) ([]dcgm.FieldValue_v1, error)
 
 	// GetGroupHandle returns the DCGM group handle for use by components.
@@ -357,10 +347,6 @@ type instance struct {
 	// Health watch tracking
 	watchedSystemsMu sync.Mutex
 	watchedSystems   dcgm.HealthSystem
-
-	// Field watch tracking
-	watchedFieldsMu sync.Mutex
-	watchedFields   []dcgm.Short
 }
 
 func (inst *instance) DCGMExists() bool {
@@ -448,74 +434,7 @@ func (inst *instance) HealthCheck(system dcgm.HealthSystem) (dcgm.HealthResult, 
 	return dcgm.DCGM_HEALTH_RESULT_PASS, nil, nil
 }
 
-// AddFieldsToWatch registers fields to be watched (tracking only).
-// Field watching is set up by FieldValueCache when it's created.
-func (inst *instance) AddFieldsToWatch(fields []dcgm.Short) error {
-	inst.watchedFieldsMu.Lock()
-	defer inst.watchedFieldsMu.Unlock()
-
-	// Add fields, avoiding duplicates
-	for _, field := range fields {
-		found := false
-		for _, existing := range inst.watchedFields {
-			if existing == field {
-				found = true
-				break
-			}
-		}
-		if !found {
-			inst.watchedFields = append(inst.watchedFields, field)
-		}
-	}
-
-	log.Logger.Debugw("registered fields with DCGM instance",
-		"numFieldsAdded", len(fields),
-		"totalFields", len(inst.watchedFields))
-
-	return nil
-}
-
-// GetWatchedFields returns a copy of all registered fields.
-// This is used by FieldValueCache to set up watching.
-func (inst *instance) GetWatchedFields() []dcgm.Short {
-	inst.watchedFieldsMu.Lock()
-	defer inst.watchedFieldsMu.Unlock()
-
-	// Return a defensive copy
-	fieldsCopy := make([]dcgm.Short, len(inst.watchedFields))
-	copy(fieldsCopy, inst.watchedFields)
-	return fieldsCopy
-}
-
-// RemoveFieldsFromWatch unregisters fields from watching.
-func (inst *instance) RemoveFieldsFromWatch(fields []dcgm.Short) error {
-	inst.watchedFieldsMu.Lock()
-	defer inst.watchedFieldsMu.Unlock()
-
-	// Build a set of fields to remove for O(1) lookup
-	toRemove := make(map[dcgm.Short]bool, len(fields))
-	for _, field := range fields {
-		toRemove[field] = true
-	}
-
-	// Build a new slice without the fields to remove
-	newWatched := inst.watchedFields[:0]
-	for _, field := range inst.watchedFields {
-		if !toRemove[field] {
-			newWatched = append(newWatched, field)
-		}
-	}
-	inst.watchedFields = newWatched
-
-	log.Logger.Debugw("unregistered fields from DCGM instance",
-		"numFieldsRemoved", len(fields),
-		"totalFields", len(inst.watchedFields))
-
-	return nil
-}
-
 // GetLatestValuesForFields queries DCGM for the latest field values.
-// Note: Prefer using FieldValueCache instead of calling this directly for better performance.
 func (inst *instance) GetLatestValuesForFields(deviceID uint, fields []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
 	return dcgm.GetLatestValuesForFields(deviceID, fields)
 }
@@ -544,7 +463,6 @@ type reconnectingInstance struct {
 
 	current        Instance
 	watchedSystems dcgm.HealthSystem
-	watchedFields  map[dcgm.Short]struct{}
 	groupEntities  map[uint]struct{}
 	callbacks      []func()
 	shuttingDown   bool
@@ -559,7 +477,6 @@ type reconnectingInstance struct {
 type reconnectStateSnapshot struct {
 	groupEntities  []uint
 	watchedSystems dcgm.HealthSystem
-	watchedFields  []dcgm.Short
 }
 
 func newReconnectingInstance(initial Instance, reconnectInterval time.Duration) Instance {
@@ -579,15 +496,10 @@ func newReconnectingInstanceWithGroupName(initial Instance, reconnectInterval ti
 
 	inst := &reconnectingInstance{
 		current:           initial,
-		watchedFields:     make(map[dcgm.Short]struct{}),
 		groupEntities:     make(map[uint]struct{}),
 		reconnectInterval: reconnectInterval,
 		groupName:         groupName,
 		stopCh:            make(chan struct{}),
-	}
-
-	for _, field := range initial.GetWatchedFields() {
-		inst.watchedFields[field] = struct{}{}
 	}
 
 	go inst.reconnectLoop()
@@ -664,7 +576,7 @@ func (inst *reconnectingInstance) reconnectNow() error {
 		return errReconnectAborted
 	}
 
-	// Hold stateMu through replay + current swap so newly-registered watches/fields/entities
+	// Hold stateMu through replay + current swap so newly-registered watches and entities
 	// cannot slip in between snapshot and swap and get lost on the newly connected instance.
 	inst.stateMu.Lock()
 	snapshot := inst.snapshotStateLocked()
@@ -698,22 +610,15 @@ func (inst *reconnectingInstance) snapshotStateLocked() reconnectStateSnapshot {
 
 	watchedSystems := inst.watchedSystems
 
-	watchedFields := make([]dcgm.Short, 0, len(inst.watchedFields))
-	for fieldID := range inst.watchedFields {
-		watchedFields = append(watchedFields, fieldID)
-	}
-
 	return reconnectStateSnapshot{
 		groupEntities:  groupEntities,
 		watchedSystems: watchedSystems,
-		watchedFields:  watchedFields,
 	}
 }
 
 func (inst *reconnectingInstance) replayState(connectedInst Instance, snapshot reconnectStateSnapshot) error {
 	groupEntities := snapshot.groupEntities
 	watchedSystems := snapshot.watchedSystems
-	watchedFields := snapshot.watchedFields
 
 	for _, entityID := range groupEntities {
 		if err := connectedInst.AddEntityToGroup(entityID); err != nil {
@@ -724,12 +629,6 @@ func (inst *reconnectingInstance) replayState(connectedInst Instance, snapshot r
 	if watchedSystems != 0 {
 		if err := connectedInst.AddHealthWatch(watchedSystems); err != nil {
 			return fmt.Errorf("failed to replay DCGM health watch state: %w", err)
-		}
-	}
-
-	if len(watchedFields) > 0 {
-		if err := connectedInst.AddFieldsToWatch(watchedFields); err != nil {
-			return fmt.Errorf("failed to replay DCGM watched fields state: %w", err)
 		}
 	}
 
@@ -818,50 +717,6 @@ func (inst *reconnectingInstance) HealthCheck(system dcgm.HealthSystem) (dcgm.He
 	return currentInst.HealthCheck(system)
 }
 
-func (inst *reconnectingInstance) AddFieldsToWatch(fields []dcgm.Short) error {
-	inst.stateMu.Lock()
-	for _, field := range fields {
-		inst.watchedFields[field] = struct{}{}
-	}
-	inst.stateMu.Unlock()
-
-	inst.currentMu.RLock()
-	currentInst := inst.current
-	defer inst.currentMu.RUnlock()
-	if currentInst != nil && currentInst.DCGMExists() {
-		return currentInst.AddFieldsToWatch(fields)
-	}
-	return nil
-}
-
-func (inst *reconnectingInstance) GetWatchedFields() []dcgm.Short {
-	inst.stateMu.RLock()
-	defer inst.stateMu.RUnlock()
-
-	fields := make([]dcgm.Short, 0, len(inst.watchedFields))
-	for fieldID := range inst.watchedFields {
-		fields = append(fields, fieldID)
-	}
-
-	return fields
-}
-
-func (inst *reconnectingInstance) RemoveFieldsFromWatch(fields []dcgm.Short) error {
-	inst.stateMu.Lock()
-	for _, field := range fields {
-		delete(inst.watchedFields, field)
-	}
-	inst.stateMu.Unlock()
-
-	inst.currentMu.RLock()
-	currentInst := inst.current
-	defer inst.currentMu.RUnlock()
-	if currentInst != nil && currentInst.DCGMExists() {
-		return currentInst.RemoveFieldsFromWatch(fields)
-	}
-	return nil
-}
-
 func (inst *reconnectingInstance) GetLatestValuesForFields(deviceID uint, fields []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
 	inst.currentMu.RLock()
 	currentInst := inst.current
@@ -936,15 +791,6 @@ func (inst *noOpInstance) RemoveHealthWatch(system dcgm.HealthSystem) error {
 }
 func (inst *noOpInstance) HealthCheck(system dcgm.HealthSystem) (dcgm.HealthResult, []dcgm.Incident, error) {
 	return dcgm.DCGM_HEALTH_RESULT_PASS, nil, nil
-}
-func (inst *noOpInstance) AddFieldsToWatch(fields []dcgm.Short) error {
-	return nil
-}
-func (inst *noOpInstance) GetWatchedFields() []dcgm.Short {
-	return nil
-}
-func (inst *noOpInstance) RemoveFieldsFromWatch(fields []dcgm.Short) error {
-	return nil
 }
 func (inst *noOpInstance) GetLatestValuesForFields(deviceID uint, fields []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
 	return nil, fmt.Errorf("DCGM is not available")

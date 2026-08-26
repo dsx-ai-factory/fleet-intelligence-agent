@@ -36,8 +36,7 @@ type GPUdInstance struct {
 	KernelModulesToCheck []string
 
 	DCGMInstance         nvidiadcgm.Instance
-	DCGMHealthCache      *nvidiadcgm.HealthCache     // Shared cache for DCGM health check results
-	DCGMFieldValueCache  *nvidiadcgm.FieldValueCache // Shared cache for DCGM field values (GPU devices only)
+	DCGMHealthCache      *nvidiadcgm.HealthCache // Shared cache for DCGM health check results
 	DCGMGroupNames       DCGMGroupNames
 	NVMLInstance         nvidianvml.Instance
 	NVIDIAToolOverwrites nvidiacommon.ToolOverwrites
@@ -60,7 +59,6 @@ type GPUdInstance struct {
 // DCGMGroupNames names the DCGM groups and field groups owned by one fleetint process.
 type DCGMGroupNames struct {
 	HealthMonitoringGroup string
-	GPUFieldGroup         string
 	CPUGroup              string
 	CPUFieldGroup         string
 	ProfilingFieldGroup   string
@@ -70,7 +68,6 @@ type DCGMGroupNames struct {
 func NewDCGMGroupNames(owner string) DCGMGroupNames {
 	return DCGMGroupNames{
 		HealthMonitoringGroup: fmt.Sprintf("fleetint-%s-health", owner),
-		GPUFieldGroup:         fmt.Sprintf("fleetint-%s-gpu-fields", owner),
 		CPUGroup:              fmt.Sprintf("fleetint-%s-cpu", owner),
 		CPUFieldGroup:         fmt.Sprintf("fleetint-%s-cpu-fields", owner),
 		ProfilingFieldGroup:   fmt.Sprintf("fleetint-%s-prof-fields", owner),
@@ -87,9 +84,6 @@ func (n DCGMGroupNames) WithDefaults() DCGMGroupNames {
 	defaults := DefaultDCGMGroupNames()
 	if n.HealthMonitoringGroup == "" {
 		n.HealthMonitoringGroup = defaults.HealthMonitoringGroup
-	}
-	if n.GPUFieldGroup == "" {
-		n.GPUFieldGroup = defaults.GPUFieldGroup
 	}
 	if n.CPUGroup == "" {
 		n.CPUGroup = defaults.CPUGroup

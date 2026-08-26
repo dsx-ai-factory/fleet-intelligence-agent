@@ -22,8 +22,6 @@ import (
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
 	"github.com/NVIDIA/fleet-intelligence-sdk/components"
-	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics/scraper"
 	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 )
 
@@ -39,13 +37,11 @@ func TestNew(t *testing.T) {
 
 	// Create health cache for testing
 	dcgmHealthCache := nvidiadcgm.NewHealthCache(ctx, dcgmInst, time.Minute)
-	dcgmFieldValueCache := nvidiadcgm.NewFieldValueCache(ctx, dcgmInst, time.Minute)
 
 	gpudInst := &components.GPUdInstance{
 		RootCtx:             ctx,
 		DCGMInstance:        dcgmInst,
 		DCGMHealthCache:     dcgmHealthCache,
-		DCGMFieldValueCache: dcgmFieldValueCache,
 		HealthCheckInterval: time.Minute,
 	}
 
@@ -75,29 +71,17 @@ func TestCheck(t *testing.T) {
 
 	// Create health cache for testing and trigger initial poll
 	dcgmHealthCache := nvidiadcgm.NewHealthCache(ctx, dcgmInst, time.Minute)
-	dcgmFieldValueCache := nvidiadcgm.NewFieldValueCache(ctx, dcgmInst, time.Minute)
 
 	gpudInst := &components.GPUdInstance{
 		RootCtx:             ctx,
 		DCGMInstance:        dcgmInst,
 		DCGMHealthCache:     dcgmHealthCache,
-		DCGMFieldValueCache: dcgmFieldValueCache,
 		HealthCheckInterval: time.Minute,
 	}
 
 	comp, err := New(gpudInst)
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
-	}
-
-	// Set up field watching after component registers its fields
-	if err := dcgmFieldValueCache.SetupFieldWatchingWithName("gpud-nvlink-fields"); err != nil {
-		t.Fatalf("SetupFieldWatching() failed: %v", err)
-	}
-
-	// Poll once to populate the cache
-	if err := dcgmFieldValueCache.Poll(); err != nil {
-		t.Logf("Poll() warning: %v", err)
 	}
 
 	// Start the health cache polling (component New() already registered health watches)
@@ -128,62 +112,6 @@ func TestCheck(t *testing.T) {
 		t.Errorf("HealthStateType() = %v, want one of Healthy/Degraded/Unhealthy", healthType)
 	}
 
-	// Now verify that metrics were actually set in Prometheus by the Check() call
-	t.Logf("\n=== Verifying Prometheus Metrics Were Set ===")
-
-	// Use pkg/metrics scraper to gather metrics
-	promScraper, err := scraper.NewPrometheusScraper(pkgmetrics.DefaultGatherer())
-	if err != nil {
-		t.Fatalf("Failed to create Prometheus scraper: %v", err)
-	}
-
-	metrics, err := promScraper.Scrape(ctx)
-	if err != nil {
-		t.Fatalf("Failed to scrape metrics: %v", err)
-	}
-
-	// Look for our NVLink metrics
-	nvlinkMetricsFound := map[string]int{
-		"dcgm_fi_dev_nvlink_bandwidth_total":                       0,
-		"dcgm_fi_dev_nvlink_error_dl_crc":                          0,
-		"dcgm_fi_dev_nvlink_error_dl_recovery":                     0,
-		"dcgm_fi_dev_nvlink_error_dl_replay":                       0,
-		"dcgm_fi_dev_nvlink_count_link_recovery_successful_events": 0,
-		"dcgm_fi_dev_nvlink_count_link_recovery_failed_events":     0,
-		"dcgm_fi_dev_fabric_manager_status":                        0,
-		"dcgm_fi_dev_c2c_link_error_replay":                        0,
-		"dcgm_fi_dev_nvlink_count_rx_general_errors":               0,
-		"dcgm_fi_dev_nvlink_count_rx_malformed_packet_errors":      0,
-		"dcgm_fi_dev_nvlink_count_rx_remote_errors":                0,
-		"dcgm_fi_dev_nvlink_count_rx_symbol_errors":                0,
-		"dcgm_fi_dev_nvlink_count_rx_buffer_overrun_errors":        0,
-		"dcgm_fi_dev_nvlink_count_local_link_integrity_errors":     0,
-		"dcgm_fi_dev_nvlink_count_effective_errors":                0,
-		"dcgm_fi_dev_nvlink_count_effective_ber_float":             0,
-		"dcgm_fi_dev_nvlink_count_symbol_ber_float":                0,
-		"dcgm_fi_dev_nvlink_count_tx_discards":                     0,
-	}
-
-	for _, metric := range metrics {
-		if metric.Component != Name {
-			continue
-		}
-
-		if _, exists := nvlinkMetricsFound[metric.Name]; exists {
-			uuid := metric.Labels["uuid"]
-			t.Logf("  [OK] %s (uuid=%s): %.0f", metric.Name, uuid, metric.Value)
-			nvlinkMetricsFound[metric.Name]++
-		}
-	}
-
-	// Verify we found metrics for all expected fields
-	for metricName, count := range nvlinkMetricsFound {
-		if count == 0 {
-			t.Logf("  [WARN] Metric %s was not found in Prometheus registry (possibly unsupported on this platform)", metricName)
-		} else {
-			t.Logf("Found %d instance(s) of metric %s", count, metricName)
-		}
-	}
 }
 
 func TestEvents_NilBucket(t *testing.T) {
