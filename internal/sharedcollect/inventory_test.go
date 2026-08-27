@@ -13,29 +13,26 @@ import (
 	"github.com/dsx-ai-factory/health-validation/collect/observation"
 )
 
-func TestGPUInventoryFromObservationsMergesSourcesByUUID(t *testing.T) {
+func TestGPUInventoryFromDCGMObservations(t *testing.T) {
 	timestamp := time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC)
 	entity := &observation.Entity{Type: "gpu", Id: "GPU-test"}
 	failedEntity := &observation.Entity{Type: "gpu", Id: "GPU-failed"}
 	observations := []*observation.Observation{
-		testIntObservation(observation.SignalGPUInventoryIndex, sourceNVML, entity, timestamp, 7),
 		testIntObservation(observation.SignalGPUInventoryIndex, sourceDCGM, entity, timestamp, 3),
-		testStringObservation(observation.SignalGPUInventoryModel, sourceNVML, entity, timestamp, "NVIDIA H100 80GB HBM3"),
-		testStringObservation(observation.SignalGPUInventoryManufacturer, sourceNVML, entity, timestamp, "NVIDIA"),
-		testStringObservation(observation.SignalGPUInventoryArchitecture, sourceNVML, entity, timestamp, "hopper"),
-		testStringObservation(observation.SignalGPUInventoryPCIBusID, sourceNVML, entity, timestamp, "00000000:53:00.0"),
-		testStringObservation(observation.SignalGPUInventorySerialNumber, sourceNVML, entity, timestamp, "serial"),
-		testIntObservation(observation.SignalGPUInventoryMinorNumber, sourceNVML, entity, timestamp, 0),
-		testIntObservation(observation.SignalGPUInventoryBoardID, sourceNVML, entity, timestamp, 21248),
-		testStringObservation(observation.SignalGPUInventoryVBIOSVersion, sourceNVML, entity, timestamp, "96.00.D0.00.02"),
-		testStringObservation(observation.SignalGPUInventoryChassisSerialNumber, sourceNVML, entity, timestamp, "chassis"),
-		testStringObservation(observation.SignalGPUFabricClusterUUID, sourceNVML, entity, timestamp, "cluster"),
-		testIntObservation(observation.SignalGPUFabricCliqueID, sourceNVML, entity, timestamp, 4),
-		testIntObservation(observation.SignalFramebufferTotal, sourceDCGM, entity, timestamp, 100),
-		testIntObservation(observation.SignalFramebufferTotal, sourceNVML, entity, timestamp, 80),
+		testStringObservation(observation.SignalGPUInventoryModel, sourceDCGM, entity, timestamp, "NVIDIA H100 80GB HBM3"),
+		testStringObservation(observation.SignalGPUInventoryManufacturer, sourceDCGM, entity, timestamp, "NVIDIA"),
+		testStringObservation(observation.SignalGPUInventoryArchitecture, sourceDCGM, entity, timestamp, "hopper"),
+		testStringObservation(observation.SignalGPUInventoryPCIBusID, sourceDCGM, entity, timestamp, "00000000:53:00.0"),
+		testStringObservation(observation.SignalGPUInventorySerialNumber, sourceDCGM, entity, timestamp, "serial"),
+		testIntObservation(observation.SignalGPUInventoryMinorNumber, sourceDCGM, entity, timestamp, 0),
+		testStringObservation(observation.SignalGPUInventoryVBIOSVersion, sourceDCGM, entity, timestamp, "96.00.D0.00.02"),
+		testStringObservation(observation.SignalGPUInventoryChassisSerialNumber, sourceDCGM, entity, timestamp, "chassis"),
+		testStringObservation(observation.SignalGPUFabricClusterUUID, sourceDCGM, entity, timestamp, "cluster"),
+		testIntObservation(observation.SignalGPUFabricCliqueID, sourceDCGM, entity, timestamp, 4),
+		testIntObservation(observation.SignalFramebufferTotal, sourceDCGM, entity, timestamp, 80),
 		observation.NewCollectionErrorObservation(
 			observation.SignalGPUInventorySerialNumber,
-			sourceNVML,
+			sourceDCGM,
 			failedEntity,
 			timestamppb.New(timestamp),
 			nil,
@@ -58,7 +55,7 @@ func TestGPUInventoryFromObservationsMergesSourcesByUUID(t *testing.T) {
 	require.Equal(t, "00000000:53:00.0", gpu.BusID)
 	require.Equal(t, "serial", gpu.SN)
 	require.Equal(t, "0", gpu.MinorID)
-	require.Equal(t, 21248, gpu.BoardID)
+	require.Zero(t, gpu.BoardID)
 	require.Equal(t, "96.00.D0.00.02", gpu.VBIOSVersion)
 	require.Equal(t, "chassis", gpu.ChassisSN)
 	require.Equal(t, "cluster", gpu.ClusterUUID)
@@ -71,7 +68,7 @@ func TestGPUInventoryFromObservationsReportsMalformedValues(t *testing.T) {
 	observations := []*observation.Observation{
 		{
 			SignalId:   observation.SignalGPUInventoryModel,
-			Source:     sourceNVML,
+			Source:     sourceDCGM,
 			ObservedAt: timestamppb.New(timestamp),
 			Outcome: &observation.Observation_Value{Value: &observation.Value{
 				Kind: &observation.Value_StringValue{StringValue: "H100"},
@@ -79,7 +76,7 @@ func TestGPUInventoryFromObservationsReportsMalformedValues(t *testing.T) {
 		},
 		{
 			SignalId:   observation.SignalGPUInventoryModel,
-			Source:     sourceNVML,
+			Source:     sourceDCGM,
 			Entity:     &observation.Entity{Type: "gpu", Id: "GPU-test"},
 			ObservedAt: timestamppb.New(timestamp),
 		},
@@ -93,7 +90,7 @@ func TestGPUInventoryFromObservationsReportsMalformedValues(t *testing.T) {
 	require.ErrorContains(t, projectionErrors[1], "value is required")
 }
 
-func TestNVMLInventorySignalsCoverFIInventory(t *testing.T) {
+func TestDCGMInventorySignalsCoverFIInventoryExceptBoardID(t *testing.T) {
 	require.ElementsMatch(t, []string{
 		observation.SignalGPUInventoryIndex,
 		observation.SignalGPUInventoryModel,
@@ -102,11 +99,10 @@ func TestNVMLInventorySignalsCoverFIInventory(t *testing.T) {
 		observation.SignalGPUInventoryPCIBusID,
 		observation.SignalGPUInventorySerialNumber,
 		observation.SignalGPUInventoryMinorNumber,
-		observation.SignalGPUInventoryBoardID,
 		observation.SignalGPUInventoryVBIOSVersion,
 		observation.SignalGPUInventoryChassisSerialNumber,
 		observation.SignalFramebufferTotal,
 		observation.SignalGPUFabricClusterUUID,
 		observation.SignalGPUFabricCliqueID,
-	}, nvmlInventorySignals())
+	}, dcgmInventorySignals())
 }

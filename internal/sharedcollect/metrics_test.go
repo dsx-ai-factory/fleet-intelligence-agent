@@ -19,9 +19,7 @@ func TestMetricsFromObservationsPreservesFIContract(t *testing.T) {
 	timestamp := time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC)
 	entity := &observation.Entity{Type: "gpu", Id: "GPU-test"}
 	observations := []*observation.Observation{
-		testIntObservation(observation.SignalGPUInventoryIndex, sourceNVML, entity, timestamp, 7),
 		testIntObservation(observation.SignalGPUInventoryIndex, sourceDCGM, entity, timestamp, 3),
-		testDoubleObservation(observation.SignalPowerDraw, sourceNVML, entity, timestamp, 999),
 		testDoubleObservation(observation.SignalPowerDraw, sourceDCGM, entity, timestamp, 125.5),
 		testIntObservation(observation.SignalPowerViolationDuration, sourceDCGM, entity, timestamp, 42),
 		observation.NewCollectionErrorObservation(

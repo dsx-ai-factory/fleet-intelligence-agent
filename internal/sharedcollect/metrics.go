@@ -15,7 +15,6 @@ import (
 
 const (
 	sourceDCGM = "dcgm"
-	sourceNVML = "nvml"
 )
 
 const (
@@ -186,19 +185,17 @@ func indexMetricDefinitionsBySignal(definitions []metricDefinition) map[observat
 
 func gpuIndexes(observations []*observation.Observation) map[string]string {
 	indexes := make(map[string]string)
-	for _, sourceID := range []string{sourceNVML, sourceDCGM} {
-		for _, current := range observations {
-			if current == nil || current.GetSource() != sourceID || current.GetSignalId() != observation.SignalGPUInventoryIndex || current.GetCollectionError() != nil {
-				continue
-			}
-			entity := current.GetEntity()
-			value := current.GetValue()
-			if entity == nil || entity.GetId() == "" || value == nil {
-				continue
-			}
-			if index, ok := value.GetKind().(*observation.Value_IntValue); ok {
-				indexes[entity.GetId()] = strconv.FormatInt(index.IntValue, 10)
-			}
+	for _, current := range observations {
+		if current == nil || current.GetSource() != sourceDCGM || current.GetSignalId() != observation.SignalGPUInventoryIndex || current.GetCollectionError() != nil {
+			continue
+		}
+		entity := current.GetEntity()
+		value := current.GetValue()
+		if entity == nil || entity.GetId() == "" || value == nil {
+			continue
+		}
+		if index, ok := value.GetKind().(*observation.Value_IntValue); ok {
+			indexes[entity.GetId()] = strconv.FormatInt(index.IntValue, 10)
 		}
 	}
 	return indexes

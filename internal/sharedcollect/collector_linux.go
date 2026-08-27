@@ -18,36 +18,27 @@ import (
 	shared "github.com/dsx-ai-factory/health-validation/collect"
 	"github.com/dsx-ai-factory/health-validation/collect/observation"
 	dcgmsensor "github.com/dsx-ai-factory/health-validation/collect/sensors/dcgm"
-	nvmlsensor "github.com/dsx-ai-factory/health-validation/collect/sensors/nvml"
 	dcgmsource "github.com/dsx-ai-factory/health-validation/collect/source/dcgm"
-	nvmlsource "github.com/dsx-ai-factory/health-validation/collect/source/nvml"
 )
 
 const defaultCollectionTimeout = 15 * time.Second
 
-// Collector owns the shared sources and sensors used by the prototype. It is
-// constructed once so repeated collection cycles reuse NVML initialization
-// and the DCGM field watch.
+// Collector owns the shared DCGM source and sensor used by the prototype. It
+// is constructed once so repeated collection cycles reuse the DCGM field
+// watch.
 type Collector struct {
-	nvml       nvmlsource.Instance
 	dcgm       *dcgmsource.Source
-	nvmlSensor *nvmlsensor.Sensor
 	dcgmSensor *dcgmsensor.Sensor
 	timeout    time.Duration
 }
 
-// New initializes the source clients and configures DCGM's complete field
-// watch before the first collection starts. Native DCGM initialization remains
-// lazy inside the shared source.
+// New constructs the DCGM source and configures its complete field watch before
+// the first collection starts. Native DCGM initialization remains lazy inside
+// the shared source.
 func New(options Options) (*Collector, error) {
 	if options.SourceTimeout <= 0 {
 		options.SourceTimeout = defaultCollectionTimeout
 	}
-	nvmlSource, err := nvmlsource.New()
-	if err != nil {
-		return nil, fmt.Errorf("initialize shared NVML source: %w", err)
-	}
-
 	dcgmSource := dcgmsource.NewSource(dcgmsource.Options{
 		Address:         options.DCGMAddress,
 		IsSocket:        options.DCGMIsSocket,
@@ -57,15 +48,12 @@ func New(options Options) (*Collector, error) {
 	if err != nil {
 		return nil, errors.Join(
 			fmt.Errorf("initialize shared DCGM sensor: %w", err),
-			nvmlSource.Shutdown(),
 			dcgmSource.Close(),
 		)
 	}
 
 	return &Collector{
-		nvml:       nvmlSource,
 		dcgm:       dcgmSource,
-		nvmlSensor: nvmlsensor.New(nvmlSource),
 		dcgmSensor: dcgmSensor,
 		timeout:    options.SourceTimeout,
 	}, nil
@@ -80,7 +68,11 @@ func (collector *Collector) CollectMetrics(ctx context.Context) (*observation.Ob
 		return nil, err
 	}
 
-	measured, err := collector.dcgmSensor.Measure(ctx, shared.WithCycle(currentCycle))
+	measured, err := collector.dcgmSensor.Measure(
+		ctx,
+		shared.WithCycle(currentCycle),
+		shared.WithSignalID(dcgmMetricSignals()...),
+	)
 	if measured != nil {
 		batch.Observations = append(batch.Observations, measured.GetObservations()...)
 	}
@@ -90,39 +82,26 @@ func (collector *Collector) CollectMetrics(ctx context.Context) (*observation.Ob
 	return batch, nil
 }
 
-// CollectGPUInventory combines NVML inventory with the DCGM GPU index used by
-// FI metric labels. Both sensors run in the same collection cycle.
+// CollectGPUInventory reads the inventory fields available through DCGM.
+// Board ID remains unavailable because DCGM does not expose it.
 func (collector *Collector) CollectGPUInventory(ctx context.Context) (*observation.ObservationBatch, error) {
 	currentCycle, batch, err := collector.newCycle(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	var measureErrors []error
-	dcgmBatch, err := collector.dcgmSensor.Measure(
+	measured, err := collector.dcgmSensor.Measure(
 		ctx,
 		shared.WithCycle(currentCycle),
-		shared.WithSignalID(observation.SignalGPUInventoryIndex),
+		shared.WithSignalID(dcgmInventorySignals()...),
 	)
-	if dcgmBatch != nil {
-		batch.Observations = append(batch.Observations, dcgmBatch.GetObservations()...)
+	if measured != nil {
+		batch.Observations = append(batch.Observations, measured.GetObservations()...)
 	}
 	if err != nil {
-		measureErrors = append(measureErrors, fmt.Errorf("measure DCGM inventory: %w", err))
+		return batch, fmt.Errorf("measure DCGM inventory: %w", err)
 	}
-
-	nvmlBatch, err := collector.nvmlSensor.Measure(
-		ctx,
-		shared.WithCycle(currentCycle),
-		shared.WithSignalID(nvmlInventorySignals()...),
-	)
-	if nvmlBatch != nil {
-		batch.Observations = append(batch.Observations, nvmlBatch.GetObservations()...)
-	}
-	if err != nil {
-		measureErrors = append(measureErrors, fmt.Errorf("measure NVML inventory: %w", err))
-	}
-	return batch, errors.Join(measureErrors...)
+	return batch, nil
 }
 
 func (collector *Collector) newCycle(ctx context.Context) (*shared.Cycle, *observation.ObservationBatch, error) {
@@ -141,16 +120,20 @@ func (collector *Collector) newCycle(ctx context.Context) (*shared.Cycle, *obser
 	return currentCycle, batch, nil
 }
 
-// Close releases both source clients. It attempts both cleanups even when the
-// first one reports an error.
+// Close releases the DCGM source.
 func (collector *Collector) Close() error {
 	if collector == nil {
 		return nil
 	}
-	return errors.Join(collector.dcgm.Close(), collector.nvml.Shutdown())
+	return collector.dcgm.Close()
 }
 
 func dcgmSignals() []string {
+	signals := dcgmMetricSignals()
+	return append(signals, dcgmInventorySignals()...)
+}
+
+func dcgmMetricSignals() []string {
 	signals := make([]string, 0, len(metricDefinitions)+1)
 	signals = append(signals, observation.SignalGPUInventoryIndex)
 	for _, definition := range metricDefinitions {

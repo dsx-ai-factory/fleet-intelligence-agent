@@ -16,9 +16,8 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/inventory"
 )
 
-// GPUInventoryFromObservations reconstructs FI's existing GPU inventory
-// model. Values are merged by UUID: DCGM owns the metric-compatible GPU index,
-// while NVML is preferred for the remaining inventory fields.
+// GPUInventoryFromObservations reconstructs FI's existing GPU inventory model
+// from canonical observations, grouped by GPU UUID.
 func GPUInventoryFromObservations(observations []*observation.Observation) (inventory.GPUInfo, []*observation.Observation, []error) {
 	selected := make(map[string]map[observation.SignalID]*observation.Observation)
 	collectionErrors := make([]*observation.Observation, 0)
@@ -52,11 +51,9 @@ func GPUInventoryFromObservations(observations []*observation.Observation) (inve
 			bySignal = make(map[observation.SignalID]*observation.Observation)
 			selected[entity.GetId()] = bySignal
 		}
-		existing := bySignal[current.GetSignalId()]
-		if existing != nil && inventorySourcePriority(current.GetSignalId(), existing.GetSource()) >= inventorySourcePriority(current.GetSignalId(), current.GetSource()) {
-			continue
+		if _, exists := bySignal[current.GetSignalId()]; !exists {
+			bySignal[current.GetSignalId()] = current
 		}
-		bySignal[current.GetSignalId()] = current
 	}
 
 	uuids := make([]string, 0, len(selected))
@@ -228,23 +225,14 @@ func isInventorySignal(signalID observation.SignalID) bool {
 	return false
 }
 
-func inventorySourcePriority(signalID, sourceID string) int {
-	if signalID == observation.SignalGPUInventoryIndex {
-		switch sourceID {
-		case sourceDCGM:
-			return 2
-		case sourceNVML:
-			return 1
+func dcgmInventorySignals() []string {
+	signals := make([]string, 0, len(observation.GPUInventorySignalIDs))
+	for _, signalID := range observation.GPUInventorySignalIDs {
+		if signalID != observation.SignalGPUInventoryBoardID {
+			signals = append(signals, signalID)
 		}
 	}
-	switch sourceID {
-	case sourceNVML:
-		return 2
-	case sourceDCGM:
-		return 1
-	default:
-		return 0
-	}
+	return append(signals, observation.SignalFramebufferTotal)
 }
 
 func integerValue(value *observation.Value) (int64, error) {
@@ -267,9 +255,4 @@ func stringValue(value *observation.Value) (string, error) {
 		return "", fmt.Errorf("string value is required")
 	}
 	return current.StringValue, nil
-}
-
-func nvmlInventorySignals() []string {
-	signals := append([]string(nil), observation.GPUInventorySignalIDs...)
-	return append(signals, observation.SignalFramebufferTotal)
 }

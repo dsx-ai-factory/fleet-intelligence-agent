@@ -70,7 +70,7 @@ func TestInventoryAdapterReplacesOnlyGPUInventory(t *testing.T) {
 		CollectionId: "test-cycle",
 		Observations: []*observation.Observation{
 			testIntObservation(observation.SignalGPUInventoryIndex, sourceDCGM, entity, timestamp, 3),
-			testStringObservation(observation.SignalGPUInventoryModel, sourceNVML, entity, timestamp, "NVIDIA H100"),
+			testStringObservation(observation.SignalGPUInventoryModel, sourceDCGM, entity, timestamp, "NVIDIA H100"),
 		},
 	}
 	baseSnapshot := &inventory.Snapshot{
@@ -101,8 +101,8 @@ func TestInventoryAdapterRejectsUnverifiedEmptyInventory(t *testing.T) {
 		Observations: []*observation.Observation{
 			observation.NewCollectionErrorObservation(
 				observation.SignalGPUInventoryModel,
-				sourceNVML,
-				&observation.Entity{Type: "gpu", Id: "nvml-index-0"},
+				sourceDCGM,
+				&observation.Entity{Type: "gpu", Id: "dcgm-index-0"},
 				timestamppb.New(timestamp),
 				nil,
 				&observation.CollectionError{Category: observation.CollectionErrorCategoryUnavailable},
