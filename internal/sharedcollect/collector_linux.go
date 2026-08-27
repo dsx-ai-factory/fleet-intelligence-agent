@@ -43,7 +43,7 @@ func New(options Options) (*Collector, error) {
 	if options.SourceTimeout <= 0 {
 		options.SourceTimeout = defaultCollectionTimeout
 	}
-	nvmlInstance, err := nvmlsource.New()
+	nvmlSource, err := nvmlsource.New()
 	if err != nil {
 		return nil, fmt.Errorf("initialize shared NVML source: %w", err)
 	}
@@ -57,15 +57,15 @@ func New(options Options) (*Collector, error) {
 	if err != nil {
 		return nil, errors.Join(
 			fmt.Errorf("initialize shared DCGM sensor: %w", err),
-			nvmlInstance.Shutdown(),
+			nvmlSource.Shutdown(),
 			dcgmSource.Close(),
 		)
 	}
 
 	return &Collector{
-		nvml:       nvmlInstance,
+		nvml:       nvmlSource,
 		dcgm:       dcgmSource,
-		nvmlSensor: nvmlsensor.New(nvmlInstance),
+		nvmlSensor: nvmlsensor.New(nvmlSource),
 		dcgmSensor: dcgmSensor,
 		timeout:    options.SourceTimeout,
 	}, nil
