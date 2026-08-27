@@ -24,6 +24,8 @@ import (
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/version"
 )
 
+const defaultLogLevel = "warn"
+
 func App() *cli.App {
 	app := cli.NewApp()
 
@@ -51,6 +53,7 @@ func App() *cli.App {
 				&cli.StringFlag{
 					Name:  "log-level,l",
 					Usage: "set the logging level [debug, info, warn, error]",
+					Value: defaultLogLevel,
 				},
 				&cli.StringFlag{
 					Name:   "infiniband-expected-port-states",
@@ -73,6 +76,7 @@ func App() *cli.App {
 				&cli.StringFlag{
 					Name:  "log-level,l",
 					Usage: "set the logging level [debug, info, warn, error]",
+					Value: defaultLogLevel,
 				},
 				&cli.StringFlag{
 					Name:  "log-file",
@@ -137,6 +141,7 @@ func App() *cli.App {
 				&cli.StringFlag{
 					Name:  "log-level,l",
 					Usage: "set the logging level [debug, info, warn, error]",
+					Value: defaultLogLevel,
 				},
 				&cli.StringFlag{
 					Name:  "server-url",
@@ -154,6 +159,7 @@ func App() *cli.App {
 				&cli.StringFlag{
 					Name:  "log-level,l",
 					Usage: "set the logging level [debug, info, warn, error]",
+					Value: defaultLogLevel,
 				},
 			},
 		},
@@ -165,6 +171,7 @@ func App() *cli.App {
 				&cli.StringFlag{
 					Name:  "log-level,l",
 					Usage: "set the logging level [debug, info, warn, error]",
+					Value: defaultLogLevel,
 				},
 				&cli.StringFlag{
 					Name:  "set-key",
@@ -184,6 +191,7 @@ func App() *cli.App {
 				&cli.StringFlag{
 					Name:  "log-level,l",
 					Usage: "set the logging level [debug, info, warn, error]",
+					Value: defaultLogLevel,
 				},
 			},
 		},
