@@ -120,7 +120,7 @@ These are the `fleetint run` flags supported by the CLI.
 
 | Flag | Description | Default | Bare metal | Kubernetes |
 | --- | --- | --- | --- | --- |
-| `--log-level` | Log level: `debug`, `info`, `warn`, `error`. | unset by CLI; packaged bare-metal default is `warn` via `FLEETINT_FLAGS` | `FLEETINT_FLAGS="--log-level=..."` | `logLevel` |
+| `--log-level` | Log level: `debug`, `info`, `warn`, `error`. | `warn` | `FLEETINT_FLAGS="--log-level=..."` | `logLevel` |
 | `--log-file` | Log file path. Leave empty to log to stdout/stderr. | empty | `FLEETINT_FLAGS="--log-file=..."` | not exposed by chart by default |
 | `--listen-address` | Listen address for the agent API server. An absolute path creates a Unix socket; a `host:port` value opens a TCP listener. | `/run/fleetint/fleetint.sock` | `FLEETINT_FLAGS="--listen-address=..."` | `listenAddress` |
 | `--retention-period` | Retention period for stored metrics and events. Minimum `1m`. | `24h` | `FLEETINT_FLAGS="--retention-period=..."` | `retentionPeriod` |
