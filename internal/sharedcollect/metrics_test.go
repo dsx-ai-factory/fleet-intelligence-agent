@@ -16,17 +16,18 @@ import (
 )
 
 func TestMetricsFromObservationsPreservesFIContract(t *testing.T) {
-	timestamp := time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC)
+	observedAt := time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC)
+	scrapedAt := observedAt.Add(30 * time.Second)
 	entity := &observation.Entity{Type: "gpu", Id: "GPU-test"}
 	observations := []*observation.Observation{
-		testIntObservation(observation.SignalGPUInventoryIndex, sourceDCGM, entity, timestamp, 3),
-		testDoubleObservation(observation.SignalPowerDraw, sourceDCGM, entity, timestamp, 125.5),
-		testIntObservation(observation.SignalPowerViolationDuration, sourceDCGM, entity, timestamp, 42),
+		testIntObservation(observation.SignalGPUInventoryIndex, sourceDCGM, entity, observedAt, 3),
+		testDoubleObservation(observation.SignalPowerDraw, sourceDCGM, entity, observedAt, 125.5),
+		testIntObservation(observation.SignalPowerViolationDuration, sourceDCGM, entity, observedAt.Add(-20*time.Second), 42),
 		observation.NewCollectionErrorObservation(
 			observation.SignalGPUTemperatureCelsius,
 			sourceDCGM,
 			entity,
-			timestamppb.New(timestamp),
+			timestamppb.New(observedAt),
 			observation.UnitForSignal(observation.SignalGPUTemperatureCelsius),
 			&observation.CollectionError{Category: observation.CollectionErrorCategoryUnavailable, Detail: "GPU is lost"},
 		),
@@ -34,7 +35,7 @@ func TestMetricsFromObservationsPreservesFIContract(t *testing.T) {
 			SignalId:   observation.SignalPowerLimitEnforced,
 			Source:     sourceDCGM,
 			Entity:     entity,
-			ObservedAt: timestamppb.New(timestamp),
+			ObservedAt: timestamppb.New(observedAt),
 			Unit:       observation.UnitForSignal(observation.SignalPowerLimitEnforced),
 			Outcome: &observation.Observation_Value{Value: &observation.Value{
 				Kind: &observation.Value_StringValue{StringValue: "not numeric"},
@@ -42,13 +43,13 @@ func TestMetricsFromObservationsPreservesFIContract(t *testing.T) {
 		},
 	}
 
-	metrics, collectionErrors, projectionErrors := MetricsFromObservations(observations)
+	metrics, collectionErrors, projectionErrors := MetricsFromObservations(observations, scrapedAt)
 	require.Len(t, metrics, 2)
 	require.Len(t, collectionErrors, 1)
 	require.Len(t, projectionErrors, 1)
 
 	require.Equal(t, pkgmetrics.Metric{
-		UnixMilliseconds: timestamp.UnixMilli(),
+		UnixMilliseconds: scrapedAt.UnixMilli(),
 		Component:        componentPower,
 		Name:             "dcgm_fi_dev_power_usage",
 		Type:             pkgmetrics.MetricTypeGauge,
@@ -57,6 +58,7 @@ func TestMetricsFromObservationsPreservesFIContract(t *testing.T) {
 	}, metrics[0])
 	require.Equal(t, pkgmetrics.MetricTypeGauge, metrics[1].Type)
 	require.Equal(t, "dcgm_fi_dev_power_violation", metrics[1].Name)
+	require.Equal(t, scrapedAt.UnixMilli(), metrics[1].UnixMilliseconds)
 }
 
 func TestMetricDefinitionsAreUnique(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"time"
 
 	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
 
@@ -107,10 +108,11 @@ var metricDefinitions = []metricDefinition{
 var metricDefinitionBySignal = indexMetricDefinitionsBySignal(metricDefinitions)
 
 // MetricsFromObservations converts successful DCGM observations into FI's
-// current database metric model. Collection errors are returned separately and
-// never become numeric samples, preventing a failed read from refreshing a
-// stale value.
-func MetricsFromObservations(observations []*observation.Observation) (pkgmetrics.Metrics, []*observation.Observation, []error) {
+// current database metric model. FI metrics use the scrape time, matching the
+// existing Prometheus scraper and dcgm-exporter. Canonical observations retain
+// their source timestamps for consumers that need freshness information.
+// Collection errors are returned separately and never become numeric samples.
+func MetricsFromObservations(observations []*observation.Observation, scrapedAt time.Time) (pkgmetrics.Metrics, []*observation.Observation, []error) {
 	indexes := gpuIndexes(observations)
 	metrics := make(pkgmetrics.Metrics, 0, len(observations))
 	collectionErrors := make([]*observation.Observation, 0)
@@ -154,7 +156,7 @@ func MetricsFromObservations(observations []*observation.Observation) (pkgmetric
 			labels["gpu"] = index
 		}
 		metrics = append(metrics, pkgmetrics.Metric{
-			UnixMilliseconds: observedAt.AsTime().UnixMilli(),
+			UnixMilliseconds: scrapedAt.UnixMilli(),
 			Component:        definition.component,
 			Name:             definition.name,
 			Type:             definition.metricType,

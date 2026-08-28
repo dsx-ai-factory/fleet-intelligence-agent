@@ -6,6 +6,7 @@ package sharedcollect
 import (
 	"context"
 	"fmt"
+	"time"
 
 	pkglog "github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
@@ -34,6 +35,7 @@ func (scraper *sharedMetricsScraper) Scrape(ctx context.Context) (pkgmetrics.Met
 	}
 
 	batch, err := scraper.collect(ctx)
+	scrapedAt := time.Now().UTC()
 	if err != nil {
 		// A collection can return usable observations together with an error.
 		pkglog.Logger.Errorw("shared metric collection failed", "error", err)
@@ -42,7 +44,7 @@ func (scraper *sharedMetricsScraper) Scrape(ctx context.Context) (pkgmetrics.Met
 		return nil, nil
 	}
 
-	metrics, collectionErrors, projectionErrors := MetricsFromObservations(batch.GetObservations())
+	metrics, collectionErrors, projectionErrors := MetricsFromObservations(batch.GetObservations(), scrapedAt)
 	logCollectionErrors("metrics", collectionErrors)
 	for _, projectionErr := range projectionErrors {
 		pkglog.Logger.Errorw("failed to project shared metric", "error", projectionErr)

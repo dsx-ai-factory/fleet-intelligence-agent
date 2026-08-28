@@ -40,9 +40,14 @@ func TestSharedMetricsScraperProjectsObservations(t *testing.T) {
 		return batch, nil
 	})
 
+	beforeScrape := time.Now().UTC()
 	sharedMetrics, err := sharedScraper.Scrape(context.Background())
+	afterScrape := time.Now().UTC()
 	require.NoError(t, err)
 	require.Len(t, sharedMetrics, 1)
+	require.GreaterOrEqual(t, sharedMetrics[0].UnixMilliseconds, beforeScrape.UnixMilli())
+	require.LessOrEqual(t, sharedMetrics[0].UnixMilliseconds, afterScrape.UnixMilli())
+	require.NotEqual(t, timestamp.UnixMilli(), sharedMetrics[0].UnixMilliseconds)
 	require.Equal(t, componentPower, sharedMetrics[0].Component)
 	require.Equal(t, 125.5, sharedMetrics[0].Value)
 	require.Equal(t, map[string]string{"gpu": "0", "uuid": "GPU-test"}, sharedMetrics[0].Labels)
