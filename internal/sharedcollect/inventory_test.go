@@ -92,6 +92,8 @@ func TestGPUInventoryFromObservationsReportsMalformedValues(t *testing.T) {
 
 func TestDCGMInventorySignalsCoverFIInventoryExceptBoardID(t *testing.T) {
 	require.ElementsMatch(t, []string{
+		observation.SignalNodeNVIDIADriverVersion,
+		observation.SignalNodeNVIDIACUDADriverVersion,
 		observation.SignalGPUInventoryIndex,
 		observation.SignalGPUInventoryModel,
 		observation.SignalGPUInventoryManufacturer,

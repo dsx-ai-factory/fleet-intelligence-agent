@@ -28,7 +28,6 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/eventstore"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 	"github.com/google/uuid"
 
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
@@ -81,16 +80,17 @@ type collector struct {
 }
 
 type collectorOptions struct {
-	nvmlInstance nvidianvml.Instance
+	collectMachineInfo func(context.Context) (*machineinfo.MachineInfo, error)
 }
 
 // Option configures optional collector dependencies.
 type Option func(*collectorOptions)
 
-// WithNVMLInstance enables cached machine-info collection for health exports.
-func WithNVMLInstance(nvmlInstance nvidianvml.Instance) Option {
+// WithMachineInfoCollector enables cached machine-info collection for health
+// exports without coupling the exporter to a native GPU source.
+func WithMachineInfoCollector(collect func(context.Context) (*machineinfo.MachineInfo, error)) Option {
 	return func(o *collectorOptions) {
-		o.nvmlInstance = nvmlInstance
+		o.collectMachineInfo = collect
 	}
 }
 
@@ -111,12 +111,8 @@ func New(
 
 	var provider machineInfoProvider
 	needsIdentity := cfg != nil && (cfg.IncludeMachineInfo || cfg.IncludeMetrics || cfg.IncludeEvents || cfg.IncludeComponentData)
-	if needsIdentity && collectorOpts.nvmlInstance != nil {
-		var machineInfoOpts []machineinfo.MachineInfoOption
-		if len(dcgmGPUIndexes) > 0 {
-			machineInfoOpts = append(machineInfoOpts, machineinfo.WithDCGMGPUIndexes(dcgmGPUIndexes))
-		}
-		provider = newCachedMachineInfoProvider(collectorOpts.nvmlInstance, 0, machineInfoOpts...)
+	if needsIdentity && collectorOpts.collectMachineInfo != nil {
+		provider = newCachedMachineInfoProvider(collectorOpts.collectMachineInfo, 0)
 		provider.RefreshAsync(context.Background())
 	}
 

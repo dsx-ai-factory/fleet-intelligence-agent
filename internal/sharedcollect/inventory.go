@@ -226,7 +226,8 @@ func isInventorySignal(signalID observation.SignalID) bool {
 }
 
 func dcgmInventorySignals() []string {
-	signals := make([]string, 0, len(observation.GPUInventorySignalIDs))
+	signals := make([]string, 0, len(observation.NodeInventorySignalIDs)+len(observation.GPUInventorySignalIDs))
+	signals = append(signals, observation.NodeInventorySignalIDs...)
 	for _, signalID := range observation.GPUInventorySignalIDs {
 		if signalID != observation.SignalGPUInventoryBoardID {
 			signals = append(signals, signalID)

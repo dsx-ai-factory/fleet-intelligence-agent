@@ -27,7 +27,6 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/components"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/eventstore"
 	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -117,7 +116,7 @@ func TestCollector_Collect_BasicFlow(t *testing.T) {
 	assert.Empty(t, data.ComponentData, "ComponentData should be empty when disabled")
 }
 
-func TestCollector_CollectMachineInfo_NoNVML(t *testing.T) {
+func TestCollector_CollectMachineInfo_NoCollector(t *testing.T) {
 	ctx := context.Background()
 	cfg := &config.HealthExporterConfig{
 		IncludeMachineInfo: true,
@@ -130,8 +129,8 @@ func TestCollector_CollectMachineInfo_NoNVML(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, data)
 
-	// MachineInfo should be nil because NVML is not available
-	assert.Nil(t, data.MachineInfo, "MachineInfo should be nil without NVML")
+	// MachineInfo should be nil because no collector was configured.
+	assert.Nil(t, data.MachineInfo, "MachineInfo should be nil without a collector")
 }
 
 func TestCollector_CollectMachineInfo_UsesCachedProvider(t *testing.T) {
@@ -157,20 +156,15 @@ func TestCollector_CollectMachineInfo_UsesCachedProvider(t *testing.T) {
 }
 
 func TestCachedMachineInfoProvider_DeduplicatesConcurrentRefresh(t *testing.T) {
-	originalGetMachineInfo := getMachineInfo
-	defer func() {
-		getMachineInfo = originalGetMachineInfo
-	}()
-
 	var calls atomic.Int32
 	blocker := make(chan struct{})
-	getMachineInfo = func(nvmlInstance nvidianvml.Instance, opts ...machineinfo.MachineInfoOption) (*machineinfo.MachineInfo, error) {
+	collect := func(context.Context) (*machineinfo.MachineInfo, error) {
 		calls.Add(1)
 		<-blocker
 		return &machineinfo.MachineInfo{Hostname: "refreshed"}, nil
 	}
 
-	provider := newCachedMachineInfoProvider(nvidianvml.NewNoOp(), time.Minute).(*cachedMachineInfoProvider)
+	provider := newCachedMachineInfoProvider(collect, time.Minute).(*cachedMachineInfoProvider)
 	ctx := context.Background()
 
 	for range 3 {
@@ -190,7 +184,10 @@ func TestCachedMachineInfoProvider_DeduplicatesConcurrentRefresh(t *testing.T) {
 }
 
 func TestCachedMachineInfoProvider_WaitForInitialRefreshReturnsAfterCompletion(t *testing.T) {
-	provider := newCachedMachineInfoProvider(nvidianvml.NewNoOp(), time.Minute).(*cachedMachineInfoProvider)
+	provider := newCachedMachineInfoProvider(
+		func(context.Context) (*machineinfo.MachineInfo, error) { return nil, nil },
+		time.Minute,
+	).(*cachedMachineInfoProvider)
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -206,7 +203,10 @@ func TestCachedMachineInfoProvider_WaitForInitialRefreshReturnsAfterCompletion(t
 }
 
 func TestCachedMachineInfoProvider_WaitForInitialRefreshTimesOut(t *testing.T) {
-	provider := newCachedMachineInfoProvider(nvidianvml.NewNoOp(), time.Minute).(*cachedMachineInfoProvider)
+	provider := newCachedMachineInfoProvider(
+		func(context.Context) (*machineinfo.MachineInfo, error) { return nil, nil },
+		time.Minute,
+	).(*cachedMachineInfoProvider)
 
 	start := time.Now()
 	provider.WaitForInitialRefresh(context.Background(), 100*time.Millisecond)

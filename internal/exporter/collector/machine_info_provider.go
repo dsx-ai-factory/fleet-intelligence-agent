@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
 )
@@ -30,8 +29,6 @@ const (
 	defaultMachineInfoStaleAfter = 5 * time.Minute
 )
 
-var getMachineInfo = machineinfo.GetMachineInfo
-
 type machineInfoProvider interface {
 	Get() (*machineinfo.MachineInfo, bool)
 	RefreshAsync(parent context.Context)
@@ -39,9 +36,8 @@ type machineInfoProvider interface {
 }
 
 type cachedMachineInfoProvider struct {
-	nvmlInstance nvidianvml.Instance
-	opts         []machineinfo.MachineInfoOption
-	staleAfter   time.Duration
+	collect    func(context.Context) (*machineinfo.MachineInfo, error)
+	staleAfter time.Duration
 
 	mu                 sync.RWMutex
 	cached             *machineinfo.MachineInfo
@@ -53,17 +49,15 @@ type cachedMachineInfoProvider struct {
 }
 
 func newCachedMachineInfoProvider(
-	nvmlInstance nvidianvml.Instance,
+	collect func(context.Context) (*machineinfo.MachineInfo, error),
 	staleAfter time.Duration,
-	opts ...machineinfo.MachineInfoOption,
 ) machineInfoProvider {
 	if staleAfter <= 0 {
 		staleAfter = defaultMachineInfoStaleAfter
 	}
 
 	return &cachedMachineInfoProvider{
-		nvmlInstance:       nvmlInstance,
-		opts:               opts,
+		collect:            collect,
 		staleAfter:         staleAfter,
 		initialRefreshDone: make(chan struct{}),
 	}
@@ -81,7 +75,7 @@ func (p *cachedMachineInfoProvider) Get() (*machineinfo.MachineInfo, bool) {
 }
 
 func (p *cachedMachineInfoProvider) RefreshAsync(parent context.Context) {
-	if p == nil || p.nvmlInstance == nil {
+	if p == nil || p.collect == nil {
 		return
 	}
 
@@ -101,7 +95,7 @@ func (p *cachedMachineInfoProvider) RefreshAsync(parent context.Context) {
 			p.markInitialRefreshDone()
 		}()
 
-		info, err := getMachineInfo(p.nvmlInstance, p.opts...)
+		info, err := p.collect(parent)
 		if err != nil {
 			log.Logger.Warnw("Machine info refresh failed", "error", err)
 			return

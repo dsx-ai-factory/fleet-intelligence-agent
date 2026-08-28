@@ -306,10 +306,8 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 	// Determine health check interval
 	healthCheckInterval := getHealthCheckInterval(config)
 
-	// The prototype keeps source policy in FI: DCGM supplies migrated metrics,
-	// while NVML supplies GPU inventory. One collector is reused by the metrics
-	// and inventory loops so native initialization and the DCGM watch are not
-	// rebuilt on every pass.
+	// One shared collector is reused by the metrics and inventory loops so native
+	// initialization and the DCGM watch are not rebuilt on every pass.
 	s.sharedCollector, err = sharedcollect.New(sharedcollect.Options{
 		DCGMGroupNamePrefix: "fleet-intelligence-agent",
 	})
@@ -317,6 +315,8 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 		return nil, fmt.Errorf("initialize shared collection: %w", err)
 	}
 	log.Logger.Infow("shared collection prototype enabled")
+
+	collectMachineInfo := s.sharedCollector.CollectMachineInfo
 
 	// Create shared DCGM caches
 	dcgmHealthCache := nvidiadcgm.NewHealthCache(ctx, dcgmInstance, healthCheckInterval)
@@ -392,7 +392,7 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 		}
 	}
 
-	s.startInventoryLoop(loopCtx, config, nvmlInstance)
+	s.startInventoryLoop(loopCtx, config, collectMachineInfo)
 	s.startAttestationLoop(loopCtx, config)
 
 	// Create and start health exporter with all dependencies if enabled
@@ -404,7 +404,7 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 			exporter.WithMetricsStore(metricsSQLiteStore),
 			exporter.WithEventStore(eventStore),
 			exporter.WithComponentsRegistry(s.componentsRegistry),
-			exporter.WithNVMLInstance(nvmlInstance),
+			exporter.WithMachineInfoCollector(collectMachineInfo),
 			exporter.WithDatabaseConnections(dbRW, dbRO),
 			exporter.WithMachineID(machineID),
 			exporter.WithDCGMGPUIndexes(dcgmGPUIndexes),
@@ -428,7 +428,7 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 func (s *Server) startInventoryLoop(
 	ctx context.Context,
 	cfg *config.Config,
-	nvmlInstance nvidianvml.Instance,
+	collectMachineInfo func(context.Context) (*machineinfo.MachineInfo, error),
 ) {
 	interval := getInventorySyncInterval(cfg)
 	if interval <= 0 {
@@ -448,9 +448,7 @@ func (s *Server) startInventoryLoop(
 	attestationEnabled, attestationIntervalSeconds := cfg.AttestationLoopAgentConfig()
 
 	source := inventorysource.NewMachineInfoSourceWithAgentConfig(
-		inventoryMachineInfoCollectorFunc(func(context.Context) (*machineinfo.MachineInfo, error) {
-			return machineinfo.GetMachineInfo(nvmlInstance, machineinfo.WithoutGPUInfo())
-		}),
+		inventoryMachineInfoCollectorFunc(collectMachineInfo),
 		&inventory.AgentConfig{
 			TotalComponents:             int64(len(allComponents)),
 			RetentionPeriodSeconds:      retentionPeriodSeconds,
@@ -463,7 +461,6 @@ func (s *Server) startInventoryLoop(
 			AttestationIntervalSeconds:  attestationIntervalSeconds,
 		},
 	)
-	source = sharedcollect.NewInventoryAdapter(source, s.sharedCollector.CollectGPUInventory)
 	sink := inventorysink.NewBackendSink(agentstate.NewSQLite())
 	manager := inventory.NewManager(source, sink, inventory.InventoryConfig{
 		Interval:      interval,

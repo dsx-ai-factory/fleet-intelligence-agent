@@ -84,7 +84,7 @@ func New(ctx context.Context, opts ...ExporterOption) (Exporter, error) {
 		options.componentsRegistry,
 		options.machineID,
 		options.dcgmGPUIndexes,
-		collector.WithNVMLInstance(options.nvmlInstance),
+		collector.WithMachineInfoCollector(options.collectMachineInfo),
 	)
 
 	otlpConverter := converter.NewOTLPConverter()

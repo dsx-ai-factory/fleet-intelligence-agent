@@ -9,19 +9,14 @@ import (
 	"testing"
 	"time"
 
+	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dsx-ai-factory/health-validation/collect/observation"
 
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/inventory"
+	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
 )
-
-type inventorySourceFunc func(context.Context) (*inventory.Snapshot, error)
-
-func (function inventorySourceFunc) Collect(ctx context.Context) (*inventory.Snapshot, error) {
-	return function(ctx)
-}
 
 func TestSharedMetricsScraperProjectsObservations(t *testing.T) {
 	timestamp := time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC)
@@ -63,7 +58,7 @@ func TestSharedMetricsScraperReturnsNoMetricsWhenCollectionFails(t *testing.T) {
 	require.Empty(t, sharedMetrics)
 }
 
-func TestInventoryAdapterReplacesOnlyGPUInventory(t *testing.T) {
+func TestCollectMachineInfoReplacesNVIDIAInfo(t *testing.T) {
 	timestamp := time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC)
 	entity := &observation.Entity{Type: "gpu", Id: "GPU-test"}
 	batch := &observation.ObservationBatch{
@@ -71,30 +66,33 @@ func TestInventoryAdapterReplacesOnlyGPUInventory(t *testing.T) {
 		Observations: []*observation.Observation{
 			testIntObservation(observation.SignalGPUInventoryIndex, sourceDCGM, entity, timestamp, 3),
 			testStringObservation(observation.SignalGPUInventoryModel, sourceDCGM, entity, timestamp, "NVIDIA H100"),
+			testStringObservation(observation.SignalNodeNVIDIADriverVersion, sourceDCGM, &observation.Entity{Type: "node"}, timestamp, "580.173.02"),
+			testStringObservation(observation.SignalNodeNVIDIACUDADriverVersion, sourceDCGM, &observation.Entity{Type: "node"}, timestamp, "13.0"),
 		},
 	}
-	baseSnapshot := &inventory.Snapshot{
+	baseInfo := &machineinfo.MachineInfo{
 		Hostname: "node-1",
-		Resources: inventory.Resources{
-			CPUInfo: inventory.CPUInfo{Type: "CPU"},
-			GPUInfo: inventory.GPUInfo{GPUs: []inventory.GPUDevice{{UUID: "legacy-GPU"}}},
-		},
+		CPUInfo:  &apiv1.MachineCPUInfo{Type: "CPU"},
+		GPUInfo:  &apiv1.MachineGPUInfo{GPUs: []apiv1.MachineGPUInstance{{UUID: "legacy-GPU"}}},
 	}
-	adapter := NewInventoryAdapter(inventorySourceFunc(func(context.Context) (*inventory.Snapshot, error) {
-		return baseSnapshot, nil
-	}), func(context.Context) (*observation.ObservationBatch, error) {
+
+	info, err := collectMachineInfo(context.Background(), func() (*machineinfo.MachineInfo, error) {
+		return baseInfo, nil
+	}, func(context.Context) (*observation.ObservationBatch, error) {
 		return batch, nil
 	})
-
-	snapshot, err := adapter.Collect(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, "node-1", snapshot.Hostname)
-	require.Equal(t, "CPU", snapshot.Resources.CPUInfo.Type)
-	require.Equal(t, "NVIDIA-H100", snapshot.Resources.GPUInfo.Product)
-	require.Equal(t, []inventory.GPUDevice{{UUID: "GPU-test", GPUIndex: "3"}}, snapshot.Resources.GPUInfo.GPUs)
+	require.Equal(t, "node-1", info.Hostname)
+	require.Equal(t, "CPU", info.CPUInfo.Type)
+	require.Equal(t, "580.173.02", info.GPUDriverVersion)
+	require.Equal(t, "13.0", info.CUDAVersion)
+	require.Equal(t, "NVIDIA-H100", info.GPUInfo.Product)
+	require.Equal(t, []apiv1.MachineGPUInstance{{
+		UUID: "GPU-test", GPUIndex: "3", ModelName: "NVIDIA-H100",
+	}}, info.GPUInfo.GPUs)
 }
 
-func TestInventoryAdapterRejectsUnverifiedEmptyInventory(t *testing.T) {
+func TestCollectMachineInfoRejectsUnverifiedEmptyInventory(t *testing.T) {
 	timestamp := time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC)
 	batch := &observation.ObservationBatch{
 		CollectionId: "test-cycle",
@@ -109,13 +107,33 @@ func TestInventoryAdapterRejectsUnverifiedEmptyInventory(t *testing.T) {
 			),
 		},
 	}
-	adapter := NewInventoryAdapter(inventorySourceFunc(func(context.Context) (*inventory.Snapshot, error) {
-		return &inventory.Snapshot{}, nil
-	}), func(context.Context) (*observation.ObservationBatch, error) {
+
+	info, err := collectMachineInfo(context.Background(), func() (*machineinfo.MachineInfo, error) {
+		return &machineinfo.MachineInfo{}, nil
+	}, func(context.Context) (*observation.ObservationBatch, error) {
 		return batch, nil
 	})
-
-	snapshot, err := adapter.Collect(context.Background())
-	require.Nil(t, snapshot)
+	require.Nil(t, info)
 	require.ErrorContains(t, err, "shared GPU inventory produced no GPUs")
+}
+
+func TestSoftwareVersionsRequireNodeEntity(t *testing.T) {
+	timestamp := time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC)
+	driverVersion, cudaDriverVersion, collectionErrors, projectionErrors := softwareVersionsFromObservations(
+		[]*observation.Observation{
+			testStringObservation(
+				observation.SignalNodeNVIDIADriverVersion,
+				sourceDCGM,
+				&observation.Entity{Type: "gpu", Id: "GPU-test"},
+				timestamp,
+				"580.173.02",
+			),
+		},
+	)
+
+	require.Empty(t, driverVersion)
+	require.Empty(t, cudaDriverVersion)
+	require.Empty(t, collectionErrors)
+	require.Len(t, projectionErrors, 1)
+	require.ErrorContains(t, projectionErrors[0], "node entity is required")
 }

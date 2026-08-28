@@ -19,22 +19,23 @@ import (
 	"github.com/dsx-ai-factory/health-validation/collect/observation"
 	dcgmsensor "github.com/dsx-ai-factory/health-validation/collect/sensors/dcgm"
 	dcgmsource "github.com/dsx-ai-factory/health-validation/collect/source/dcgm"
+
+	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
 )
 
 const defaultCollectionTimeout = 15 * time.Second
 
 // Collector owns the shared DCGM source and sensor used by the prototype. It
-// is constructed once so repeated collection cycles reuse the DCGM field
-// watch.
+// is constructed once so repeated collection cycles reuse native initialization
+// and the field watch.
 type Collector struct {
 	dcgm       *dcgmsource.Source
 	dcgmSensor *dcgmsensor.Sensor
 	timeout    time.Duration
 }
 
-// New constructs the DCGM source and configures its complete field watch before
-// the first collection starts. Native DCGM initialization remains lazy inside
-// the shared source.
+// New constructs the DCGM source and configures its complete field watch
+// before collection starts.
 func New(options Options) (*Collector, error) {
 	if options.SourceTimeout <= 0 {
 		options.SourceTimeout = defaultCollectionTimeout
@@ -82,26 +83,36 @@ func (collector *Collector) CollectMetrics(ctx context.Context) (*observation.Ob
 	return batch, nil
 }
 
-// CollectGPUInventory reads the inventory fields available through DCGM.
-// Board ID remains unavailable because DCGM does not expose it.
-func (collector *Collector) CollectGPUInventory(ctx context.Context) (*observation.ObservationBatch, error) {
+// CollectInventory reads node-level NVIDIA software and GPU inventory through
+// DCGM.
+func (collector *Collector) CollectInventory(ctx context.Context) (*observation.ObservationBatch, error) {
 	currentCycle, batch, err := collector.newCycle(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	measured, err := collector.dcgmSensor.Measure(
+	dcgmMeasured, dcgmErr := collector.dcgmSensor.Measure(
 		ctx,
 		shared.WithCycle(currentCycle),
 		shared.WithSignalID(dcgmInventorySignals()...),
 	)
-	if measured != nil {
-		batch.Observations = append(batch.Observations, measured.GetObservations()...)
+	if dcgmMeasured != nil {
+		batch.Observations = append(batch.Observations, dcgmMeasured.GetObservations()...)
 	}
-	if err != nil {
-		return batch, fmt.Errorf("measure DCGM inventory: %w", err)
+
+	if dcgmErr != nil {
+		return batch, fmt.Errorf("measure DCGM inventory: %w", dcgmErr)
 	}
 	return batch, nil
+}
+
+// CollectMachineInfo returns FI's existing machine-information model with host
+// facts collected locally and NVIDIA fields projected from shared observations.
+func (collector *Collector) CollectMachineInfo(ctx context.Context) (*machineinfo.MachineInfo, error) {
+	if collector == nil {
+		return nil, fmt.Errorf("shared collector is required")
+	}
+	return collectMachineInfo(ctx, machineinfo.CollectHostInfo, collector.CollectInventory)
 }
 
 func (collector *Collector) newCycle(ctx context.Context) (*shared.Cycle, *observation.ObservationBatch, error) {
@@ -120,7 +131,7 @@ func (collector *Collector) newCycle(ctx context.Context) (*shared.Cycle, *obser
 	return currentCycle, batch, nil
 }
 
-// Close releases the DCGM source.
+// Close releases the shared DCGM source.
 func (collector *Collector) Close() error {
 	if collector == nil {
 		return nil

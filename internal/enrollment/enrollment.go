@@ -25,7 +25,6 @@ import (
 
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	pkgmetadata "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metadata"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/agentstate"
@@ -38,6 +37,7 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/nodeidentity"
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/registry"
+	"github.com/NVIDIA/fleet-intelligence-agent/internal/sharedcollect"
 )
 
 var (
@@ -214,16 +214,20 @@ func syncInventoryOnce(ctx context.Context, cfg *config.Config) error {
 	inventoryEnabled, inventoryIntervalSeconds := cfg.InventoryLoopAgentConfig()
 	attestationEnabled, attestationIntervalSeconds := cfg.AttestationLoopAgentConfig()
 
-	nvmlInstance, err := nvidianvml.New()
+	sharedCollector, err := sharedcollect.New(sharedcollect.Options{
+		DCGMGroupNamePrefix: "fleet-intelligence-agent-enrollment",
+	})
 	if err != nil {
-		return fmt.Errorf("initialize nvml for inventory sync: %w", err)
+		return fmt.Errorf("initialize shared collection for inventory sync: %w", err)
 	}
-	defer func() { _ = nvmlInstance.Shutdown() }()
+	defer func() {
+		if err := sharedCollector.Close(); err != nil {
+			log.Logger.Warnw("shared collection shutdown failed", "error", err)
+		}
+	}()
 
 	src := inventorysource.NewMachineInfoSourceWithAgentConfig(
-		machineInfoCollectorFunc(func(context.Context) (*machineinfo.MachineInfo, error) {
-			return machineinfo.GetMachineInfo(nvmlInstance)
-		}),
+		machineInfoCollectorFunc(sharedCollector.CollectMachineInfo),
 		&inventory.AgentConfig{
 			TotalComponents:             int64(len(allComponents)),
 			RetentionPeriodSeconds:      retentionPeriodSeconds,

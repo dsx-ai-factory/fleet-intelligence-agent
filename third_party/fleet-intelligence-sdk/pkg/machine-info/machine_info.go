@@ -45,23 +45,27 @@ const diskPartitionsTimeout = 10 * time.Second
 var listPCIGPUs = nvidiapci.ListPCIGPUs
 
 func GetMachineInfo(nvmlInstance nvidianvml.Instance) (*apiv1.MachineInfo, error) {
-	return getMachineInfo(nvmlInstance, true)
+	return getMachineInfo(nvmlInstance, true, true)
 }
 
 // GetMachineInfoWithoutGPUInfo skips the legacy per-device NVML inventory
 // read. Callers can use it when another collector owns GPU inventory.
 func GetMachineInfoWithoutGPUInfo(nvmlInstance nvidianvml.Instance) (*apiv1.MachineInfo, error) {
-	return getMachineInfo(nvmlInstance, false)
+	return getMachineInfo(nvmlInstance, false, true)
 }
 
-func getMachineInfo(nvmlInstance nvidianvml.Instance, includeGPUInfo bool) (*apiv1.MachineInfo, error) {
+// GetMachineInfoWithoutNVIDIAInfo skips GPU inventory and NVIDIA software
+// versions. Callers can use it when another collector owns those fields.
+func GetMachineInfoWithoutNVIDIAInfo() (*apiv1.MachineInfo, error) {
+	return getMachineInfo(nil, false, false)
+}
+
+func getMachineInfo(nvmlInstance nvidianvml.Instance, includeGPUInfo, includeSoftwareInfo bool) (*apiv1.MachineInfo, error) {
 
 	hostname, _ := os.Hostname()
 	info := &apiv1.MachineInfo{
 		GPUdVersion: version.Version,
 
-		GPUDriverVersion:        nvmlInstance.DriverVersion(),
-		CUDAVersion:             nvmlInstance.CUDAVersion(),
 		ContainerRuntimeVersion: "",
 		KernelVersion:           pkghost.KernelVersion(),
 		OSImage:                 pkghost.OSName(),
@@ -75,6 +79,10 @@ func getMachineInfo(nvmlInstance nvidianvml.Instance, includeGPUInfo bool) (*api
 		CPUInfo:    GetMachineCPUInfo(),
 		MemoryInfo: GetMachineMemoryInfo(),
 		NICInfo:    GetMachineNICInfo(),
+	}
+	if includeSoftwareInfo {
+		info.GPUDriverVersion = nvmlInstance.DriverVersion()
+		info.CUDAVersion = nvmlInstance.CUDAVersion()
 	}
 
 	var err error

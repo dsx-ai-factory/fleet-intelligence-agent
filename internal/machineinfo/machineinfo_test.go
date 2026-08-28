@@ -23,7 +23,6 @@ import (
 	"time"
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/providers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,8 +31,8 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/version"
 )
 
-// TestGetMachineInfo tests the GetMachineInfo function
-func TestGetMachineInfo(t *testing.T) {
+// TestCollectHostInfo tests the CollectHostInfo function.
+func TestCollectHostInfo(t *testing.T) {
 	originalGetDCGMVersion := getDCGMVersion
 	t.Cleanup(func() {
 		getDCGMVersion = originalGetDCGMVersion
@@ -45,12 +44,11 @@ func TestGetMachineInfo(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		opts     []MachineInfoOption
 		wantErr  bool
 		validate func(*testing.T, *MachineInfo)
 	}{
 		{
-			name:    "successful_retrieval_with_noop_nvml",
+			name:    "successful_host_retrieval",
 			wantErr: false,
 			validate: func(t *testing.T, info *MachineInfo) {
 				assert.NotNil(t, info)
@@ -62,20 +60,19 @@ func TestGetMachineInfo(t *testing.T) {
 			},
 		},
 		{
-			name: "gpu_info_disabled",
-			opts: []MachineInfoOption{WithoutGPUInfo()},
+			name: "nvidia_info_is_not_collected",
 			validate: func(t *testing.T, info *MachineInfo) {
 				assert.NotNil(t, info)
 				assert.Nil(t, info.GPUInfo)
+				assert.Empty(t, info.GPUDriverVersion)
+				assert.Empty(t, info.CUDAVersion)
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Use the no-op NVML instance for testing
-			nvmlInstance := nvidianvml.NewNoOp()
-			info, err := GetMachineInfo(nvmlInstance, tt.opts...)
+			info, err := CollectHostInfo()
 			if tt.wantErr {
 				assert.Error(t, err)
 				assert.Nil(t, info)
@@ -497,7 +494,7 @@ func TestMachineInfo_JSONMarshaling(t *testing.T) {
 	assert.NotEmpty(t, info.DCGMVersion)
 }
 
-func TestGetMachineInfo_DCGMVersionBestEffort(t *testing.T) {
+func TestCollectHostInfo_DCGMVersionBestEffort(t *testing.T) {
 	originalGetDCGMVersion := getDCGMVersion
 	t.Cleanup(func() {
 		getDCGMVersion = originalGetDCGMVersion
@@ -507,7 +504,7 @@ func TestGetMachineInfo_DCGMVersionBestEffort(t *testing.T) {
 		return "", assert.AnError
 	}
 
-	info, err := GetMachineInfo(nvidianvml.NewNoOp())
+	info, err := CollectHostInfo()
 	require.NoError(t, err)
 	assert.Empty(t, info.DCGMVersion)
 }

@@ -16,6 +16,7 @@
 package exporter
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -24,9 +25,9 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/components"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/eventstore"
 	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
+	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
 )
 
 // ExporterOption defines a function that configures the health exporter
@@ -41,7 +42,7 @@ type exporterOptions struct {
 	metricsStore       pkgmetrics.Store
 	eventStore         eventstore.Store
 	componentsRegistry components.Registry
-	nvmlInstance       nvidianvml.Instance
+	collectMachineInfo func(context.Context) (*machineinfo.MachineInfo, error)
 	httpClient         *http.Client
 	timeout            time.Duration
 	dbRW               *sql.DB           // Read-write database connection
@@ -86,10 +87,11 @@ func WithComponentsRegistry(registry components.Registry) ExporterOption {
 	}
 }
 
-// WithNVMLInstance sets the NVML instance used for cached machine-info collection.
-func WithNVMLInstance(instance nvidianvml.Instance) ExporterOption {
+// WithMachineInfoCollector sets the source used to refresh cached machine
+// information. Native source ownership remains with the caller.
+func WithMachineInfoCollector(collect func(context.Context) (*machineinfo.MachineInfo, error)) ExporterOption {
 	return func(c *exporterOptions) error {
-		c.nvmlInstance = instance
+		c.collectMachineInfo = collect
 		return nil
 	}
 }

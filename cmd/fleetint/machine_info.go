@@ -24,13 +24,13 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	pkgmetadata "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metadata"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/netutil"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 	"github.com/urfave/cli"
 
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/cmdutil"
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/config"
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
+	"github.com/NVIDIA/fleet-intelligence-agent/internal/sharedcollect"
 )
 
 func machineInfoCommand(cliContext *cli.Context) error {
@@ -74,12 +74,19 @@ func machineInfoCommand(cliContext *cli.Context) error {
 		fmt.Printf("Fleetint machine ID: %q\n\n", machineID)
 	}
 
-	nvmlInstance, err := nvidianvml.New()
+	sharedCollector, err := sharedcollect.New(sharedcollect.Options{
+		DCGMGroupNamePrefix: "fleet-intelligence-agent-machine-info",
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("initialize shared collection: %w", err)
 	}
+	defer func() {
+		if err := sharedCollector.Close(); err != nil {
+			log.Logger.Warnw("shared collection shutdown failed", "error", err)
+		}
+	}()
 
-	machineInfo, err := machineinfo.GetMachineInfo(nvmlInstance)
+	machineInfo, err := sharedCollector.CollectMachineInfo(context.Background())
 	if err != nil {
 		return err
 	}

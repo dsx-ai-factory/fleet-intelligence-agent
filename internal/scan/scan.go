@@ -35,8 +35,8 @@ import (
 	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/cmdutil"
-	"github.com/NVIDIA/fleet-intelligence-agent/internal/machineinfo"
 	"github.com/NVIDIA/fleet-intelligence-agent/internal/registry"
+	"github.com/NVIDIA/fleet-intelligence-agent/internal/sharedcollect"
 )
 
 // Op holds the configuration for a scan operation.
@@ -108,8 +108,25 @@ func Scan(ctx context.Context, opts ...Option) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err := nvmlInstance.Shutdown(); err != nil {
+			log.Logger.Warnw("NVML shutdown failed", "error", err)
+		}
+	}()
 
-	mi, err := machineinfo.GetMachineInfo(nvmlInstance)
+	sharedCollector, err := sharedcollect.New(sharedcollect.Options{
+		DCGMGroupNamePrefix: "fleet-intelligence-agent-scan",
+	})
+	if err != nil {
+		return fmt.Errorf("initialize shared collection: %w", err)
+	}
+	defer func() {
+		if err := sharedCollector.Close(); err != nil {
+			log.Logger.Warnw("shared collection shutdown failed", "error", err)
+		}
+	}()
+
+	mi, err := sharedCollector.CollectMachineInfo(ctx)
 	if err != nil {
 		return err
 	}
