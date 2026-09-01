@@ -5,85 +5,30 @@ package machineinfo
 
 import (
 	"errors"
-	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/device"
-	nvmllib "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/lib"
-	nvidiaproduct "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/product"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 )
-
-// mockNVMLInstance implements the nvidianvml.Instance interface for testing
-type mockNVMLInstance struct{}
-
-func (m *mockNVMLInstance) NVMLExists() bool                  { return false }
-func (m *mockNVMLInstance) Library() nvmllib.Library          { return nil }
-func (m *mockNVMLInstance) Devices() map[string]device.Device { return nil }
-func (m *mockNVMLInstance) ProductName() string               { return "Test GPU" }
-func (m *mockNVMLInstance) Architecture() string              { return "test-arch" }
-func (m *mockNVMLInstance) Brand() string                     { return "Test Brand" }
-func (m *mockNVMLInstance) DriverVersion() string             { return "123.45" }
-func (m *mockNVMLInstance) DriverMajor() int                  { return 123 }
-func (m *mockNVMLInstance) CUDAVersion() string               { return "11.7" }
-func (m *mockNVMLInstance) FabricManagerSupported() bool      { return false }
-func (m *mockNVMLInstance) FabricStateSupported() bool        { return false }
-func (m *mockNVMLInstance) GetMemoryErrorManagementCapabilities() nvidiaproduct.MemoryErrorManagementCapabilities {
-	return nvidiaproduct.MemoryErrorManagementCapabilities{}
-}
-func (m *mockNVMLInstance) Shutdown() error { return nil }
-
-// TestCreateGossipRequest tests the gossip request creation
-func TestCreateGossipRequest(t *testing.T) {
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
-		t.Skip("Test only runs on Linux or macOS")
-	}
-
-	// Skip if NVML is not available
-	nvmlInstance, err := nvidianvml.New()
-	if err != nil {
-		t.Skip("NVML not available, skipping test")
-	}
-	defer func() {
-		if err := nvmlInstance.Shutdown(); err != nil {
-			log.Logger.Warnw("failed to shutdown nvml instance", "error", err)
-		}
-	}()
-
-	// Test with valid parameters
-	machineID := "test-machine-id"
-	req, err := CreateGossipRequest(machineID, nvmlInstance)
-	if err != nil {
-		t.Skipf("Could not create gossip request: %v", err)
-	}
-
-	// Validate request fields
-	assert.Equal(t, machineID, req.MachineID)
-	assert.NotNil(t, req.MachineInfo)
-	assert.NotEmpty(t, req.MachineInfo.Hostname)
-	assert.NotNil(t, req.MachineInfo.CPUInfo)
-}
 
 // TestCreateGossipRequestMocked tests the createGossipRequest function with mocked dependencies
 func TestCreateGossipRequestMocked(t *testing.T) {
 	// Setup
 	machineID := "test-machine-id"
-	nvmlInstance := &mockNVMLInstance{}
+	gpuProvider := nvidiadcgm.NewNoOp()
 
 	// Test cases for the private function
 	tests := []struct {
 		name               string
-		getMachineInfoFunc func(nvmlInstance nvidianvml.Instance) (*apiv1.MachineInfo, error)
+		getMachineInfoFunc func(gpuProvider nvidiadcgm.Instance, fieldCache *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error)
 		wantError          bool
 		expectedErrorMsg   string
 	}{
 		{
 			name: "successful request creation",
-			getMachineInfoFunc: func(nvmlInstance nvidianvml.Instance) (*apiv1.MachineInfo, error) {
+			getMachineInfoFunc: func(gpuProvider nvidiadcgm.Instance, fieldCache *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
 				return &apiv1.MachineInfo{
 					Hostname: "test-host",
 					CPUInfo: &apiv1.MachineCPUInfo{
@@ -95,7 +40,7 @@ func TestCreateGossipRequestMocked(t *testing.T) {
 		},
 		{
 			name: "getMachineInfo returns error",
-			getMachineInfoFunc: func(nvmlInstance nvidianvml.Instance) (*apiv1.MachineInfo, error) {
+			getMachineInfoFunc: func(gpuProvider nvidiadcgm.Instance, fieldCache *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
 				return nil, errors.New("machine info error")
 			},
 			wantError:        true,
@@ -106,7 +51,7 @@ func TestCreateGossipRequestMocked(t *testing.T) {
 	// Run all test cases
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req, err := createGossipRequest(machineID, nvmlInstance, tc.getMachineInfoFunc)
+			req, err := createGossipRequest(machineID, gpuProvider, nil, tc.getMachineInfoFunc)
 
 			if tc.wantError {
 				assert.Error(t, err)

@@ -341,9 +341,10 @@ func TestNewWithContextReturnsNoOpOnTimeout(t *testing.T) {
 	}
 
 	blocker := make(chan struct{})
+	lateInstance := newShutdownTrackingInstance()
 	newInstanceFunc = func() (Instance, error) {
 		<-blocker
-		return &instance{}, nil
+		return lateInstance, nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
@@ -362,6 +363,63 @@ func TestNewWithContextReturnsNoOpOnTimeout(t *testing.T) {
 	}
 
 	close(blocker)
+	select {
+	case <-lateInstance.shutdownCh:
+	case <-time.After(time.Second):
+		t.Fatal("late DCGM instance was not shut down")
+	}
+}
+
+func TestNewOnceWithContextReturnsInitializedInstanceWithoutWrapping(t *testing.T) {
+	originalNewInstanceFunc := newInstanceFunc
+	defer func() {
+		newInstanceFunc = originalNewInstanceFunc
+	}()
+
+	expected := newMockTrackingInstance()
+	newInstanceFunc = func() (Instance, error) {
+		return expected, nil
+	}
+
+	inst, err := NewOnceWithContextAndGroupName(context.Background(), defaultDCGMGroupName)
+	if err != nil {
+		t.Fatalf("NewOnceWithContextAndGroupName() returned error: %v", err)
+	}
+	if inst != expected {
+		t.Fatalf("expected one-shot constructor to return the initialized instance directly, got %T", inst)
+	}
+}
+
+func TestNewOnceWithContextReturnsNoOpAndCleansUpLateInstance(t *testing.T) {
+	originalNewInstanceFunc := newInstanceFunc
+	defer func() {
+		newInstanceFunc = originalNewInstanceFunc
+	}()
+
+	blocker := make(chan struct{})
+	lateInstance := newShutdownTrackingInstance()
+	newInstanceFunc = func() (Instance, error) {
+		<-blocker
+		return lateInstance, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	inst, err := NewOnceWithContextAndGroupName(ctx, defaultDCGMGroupName)
+	if err != nil {
+		t.Fatalf("NewOnceWithContextAndGroupName() returned error: %v", err)
+	}
+	if inst == nil || inst.DCGMExists() {
+		t.Fatalf("expected no-op instance after timeout")
+	}
+
+	close(blocker)
+	select {
+	case <-lateInstance.shutdownCh:
+	case <-time.After(time.Second):
+		t.Fatal("late one-shot DCGM instance was not shut down")
+	}
 }
 
 func TestReconnectingInstanceReplaysDeferredState(t *testing.T) {
@@ -959,6 +1017,26 @@ func (m *mockTrackingInstance) GetLatestValuesForFields(deviceID uint, fields []
 func (m *mockTrackingInstance) GetGroupHandle() dcgm.GroupHandle { return dcgm.GroupHandle{} }
 func (m *mockTrackingInstance) GetDevices() []DeviceInfo         { return slices.Clone(m.devices) }
 func (m *mockTrackingInstance) Shutdown() error                  { return nil }
+
+type shutdownTrackingInstance struct {
+	*mockTrackingInstance
+	shutdownOnce sync.Once
+	shutdownCh   chan struct{}
+}
+
+func newShutdownTrackingInstance() *shutdownTrackingInstance {
+	return &shutdownTrackingInstance{
+		mockTrackingInstance: newMockTrackingInstance(),
+		shutdownCh:           make(chan struct{}),
+	}
+}
+
+func (m *shutdownTrackingInstance) Shutdown() error {
+	m.shutdownOnce.Do(func() {
+		close(m.shutdownCh)
+	})
+	return nil
+}
 
 type blockingReplayMockInstance struct {
 	*mockTrackingInstance

@@ -5,24 +5,21 @@ package machineinfo
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"os"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
-	nvmldevice "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/device"
-	nvidiadev "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/dev"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 )
 
 func TestGetMachineNetwork(t *testing.T) {
@@ -69,40 +66,6 @@ func TestGetMachineLocation(t *testing.T) {
 	}
 }
 
-func TestGetSystemResourceGPUCount(t *testing.T) {
-	// Skip if NVML is not available
-	nvmlInstance, err := nvidianvml.New()
-	if err != nil {
-		t.Skip("NVML not available, skipping test")
-	}
-	defer func() {
-		if err := nvmlInstance.Shutdown(); err != nil {
-			log.Logger.Warnw("failed to shutdown nvml instance", "error", err)
-		}
-	}()
-
-	_, err = nvidiadev.CountAllDevicesFromDevDir()
-	assert.NoError(t, err)
-	gpuCnt, err := GetSystemResourceGPUCount(nvmlInstance)
-	assert.NoError(t, err)
-	assert.NotEmpty(t, gpuCnt)
-
-	expectedCount := len(nvmlInstance.Devices())
-	if expectedCount == 0 {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		pciDevs, err := listPCIGPUs(ctx)
-		assert.NoError(t, err)
-		expectedCount = len(pciDevs)
-	}
-
-	if expectedCount == 0 {
-		assert.Equal(t, "0", gpuCnt)
-	} else {
-		assert.Equal(t, strconv.Itoa(expectedCount), gpuCnt)
-	}
-}
-
 func TestGetSystemResourceRootVolumeTotal(t *testing.T) {
 	// Skip test on non-Linux platforms or in environments where root volume check fails
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
@@ -122,74 +85,6 @@ func TestGetSystemResourceRootVolumeTotal(t *testing.T) {
 }
 
 // TestGetMachineInfo tests only basic functionality without mocking
-func TestGetMachineInfo(t *testing.T) {
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
-		t.Skip("Test only runs on Linux or macOS")
-	}
-
-	// Skip if NVML is not available
-	nvmlInstance, err := nvidianvml.New()
-	if err != nil {
-		t.Skip("NVML not available, skipping test")
-	}
-	defer func() {
-		if err := nvmlInstance.Shutdown(); err != nil {
-			log.Logger.Warnw("failed to shutdown nvml instance", "error", err)
-		}
-	}()
-
-	// Test the functionality, but don't verify detailed outputs
-	info, err := GetMachineInfo(nvmlInstance)
-	if err != nil {
-		t.Skipf("Could not get machine info: %v", err)
-	}
-
-	// Basic validations
-	assert.NotEmpty(t, info.GPUdVersion)
-	assert.NotEmpty(t, info.Hostname)
-	assert.NotNil(t, info.CPUInfo)
-	if info.GPUInfo != nil && len(info.GPUInfo.GPUs) > 0 {
-		assert.NotEmpty(t, info.GPUInfo.Memory)
-	}
-}
-
-// TestGetMachineGPUInfo tests GPU info without complex mocking
-func TestGetMachineGPUInfo(t *testing.T) {
-	// Skip if NVML is not available
-	nvmlInstance, err := nvidianvml.New()
-	if err != nil {
-		t.Skip("NVML not available, skipping test")
-	}
-	defer func() {
-		if err := nvmlInstance.Shutdown(); err != nil {
-			log.Logger.Warnw("failed to shutdown nvml instance", "error", err)
-		}
-	}()
-
-	if len(nvmlInstance.Devices()) == 0 {
-		t.Skip("No GPU devices found, skipping test")
-	}
-
-	info, err := GetMachineGPUInfo(nvmlInstance)
-	if err != nil {
-		t.Skipf("Could not get GPU info: %v", err)
-	}
-
-	assert.NotEmpty(t, info.Product)
-	assert.NotEmpty(t, info.Manufacturer)
-	assert.NotEmpty(t, info.Memory)
-	assert.NotEmpty(t, info.GPUs)
-
-	for _, gpu := range info.GPUs {
-		assert.NotEmpty(t, gpu.UUID)
-		assert.NotEmpty(t, gpu.MinorID)
-	}
-
-	// Test memory parsing
-	memQty, err := resource.ParseQuantity(info.Memory)
-	assert.NoError(t, err)
-	assert.NotZero(t, memQty.Value())
-}
 
 // TestGetMachineDiskInfo tests disk info with minimal validation
 func TestGetMachineDiskInfo(t *testing.T) {
@@ -251,12 +146,111 @@ func TestGetSystemResourceGPUCount_NoGPU(t *testing.T) {
 		return nil, nil
 	}
 
-	// Create a mock NVML instance with no devices
-	mockInstance := &mockNvmlInstance{}
-
-	count, err := GetSystemResourceGPUCount(mockInstance)
+	count, err := GetSystemResourceGPUCount(nvidiadcgm.NewNoOp())
 	assert.NoError(t, err)
 	assert.Equal(t, "0", count, "GPU count should be 0 when no devices are present")
+}
+
+func TestArchitectureFromComputeCapability(t *testing.T) {
+	tests := []struct {
+		major uint64
+		minor uint64
+		want  string
+	}{
+		{major: 7, minor: 0, want: "volta"},
+		{major: 7, minor: 5, want: "turing"},
+		{major: 8, minor: 0, want: "ampere"},
+		{major: 8, minor: 9, want: "ada-lovelace"},
+		{major: 9, minor: 0, want: "hopper"},
+		{major: 10, minor: 0, want: "blackwell"},
+	}
+	for _, tc := range tests {
+		capability := int64((tc.major << 16) | tc.minor)
+		assert.Equal(t, tc.want, architectureFromComputeCapability(capability))
+	}
+}
+
+func TestFormatCUDADriverVersion(t *testing.T) {
+	assert.Equal(t, "12.8", formatCUDADriverVersion(12080))
+	assert.Empty(t, formatCUDADriverVersion(0))
+}
+
+func TestGetMachineGPUInfoFromDCGM(t *testing.T) {
+	device := nvidiadcgm.DeviceInfo{
+		ID:                     3,
+		UUID:                   "GPU-123",
+		BusID:                  "0000:17:00.0",
+		Brand:                  "NVIDIA",
+		Model:                  "NVIDIA H100 80GB HBM3",
+		Serial:                 "serial-123",
+		VBIOSVersion:           "96.00.5E.00.01",
+		DriverVersion:          "570.86.15",
+		FramebufferMemoryBytes: 80 * 1024 * 1024 * 1024,
+	}
+	instance := &staticDeviceInstance{
+		Instance: nvidiadcgm.NewNoOp(),
+		devices:  []nvidiadcgm.DeviceInfo{device},
+	}
+	reader := staticFieldReader{results: []nvidiadcgm.DeviceFieldValues{{
+		DeviceID: device.ID,
+		UUID:     device.UUID,
+		Values: []dcgm.FieldValue_v1{
+			int64Field(dcgm.DCGM_FI_CUDA_DRIVER_VERSION, 12080),
+			int64Field(dcgm.DCGM_FI_DEV_MINOR_NUMBER, 7),
+			int64Field(dcgm.DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY, (9 << 16)),
+			stringField(dcgm.DCGM_FI_DEV_FABRIC_CLUSTER_UUID, "cluster-123"),
+			int64Field(dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID, 9),
+			stringField(dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER, "chassis-123"),
+		},
+	}}}
+
+	info, driverVersion, cudaVersion, err := getMachineGPUInfo(instance, reader)
+	require.NoError(t, err)
+	assert.Equal(t, "570.86.15", driverVersion)
+	assert.Equal(t, "12.8", cudaVersion)
+	assert.Equal(t, "NVIDIA-H100-80GB-HBM3", info.Product)
+	assert.Equal(t, "NVIDIA", info.Manufacturer)
+	assert.Equal(t, "hopper", info.Architecture)
+	memory, err := resource.ParseQuantity(info.Memory)
+	require.NoError(t, err)
+	assert.Equal(t, int64(device.FramebufferMemoryBytes), memory.Value())
+	require.Len(t, info.GPUs, 1)
+	assert.Equal(t, "GPU-123", info.GPUs[0].UUID)
+	assert.Equal(t, "3", info.GPUs[0].GPUIndex)
+	assert.Equal(t, "7", info.GPUs[0].MinorID)
+	assert.Equal(t, "cluster-123", info.GPUs[0].ClusterUUID)
+	require.NotNil(t, info.GPUs[0].CliqueID)
+	assert.Equal(t, uint32(9), *info.GPUs[0].CliqueID)
+	assert.Equal(t, "chassis-123", info.GPUs[0].ChassisSN)
+	assert.Zero(t, info.GPUs[0].BoardID)
+}
+
+type staticDeviceInstance struct {
+	nvidiadcgm.Instance
+	devices []nvidiadcgm.DeviceInfo
+}
+
+func (i *staticDeviceInstance) GetDevices() []nvidiadcgm.DeviceInfo { return i.devices }
+
+type staticFieldReader struct {
+	results []nvidiadcgm.DeviceFieldValues
+	err     error
+}
+
+func (r staticFieldReader) GetResult([]dcgm.Short) ([]nvidiadcgm.DeviceFieldValues, error) {
+	return r.results, r.err
+}
+
+func int64Field(fieldID dcgm.Short, value int64) dcgm.FieldValue_v1 {
+	field := dcgm.FieldValue_v1{FieldID: fieldID, FieldType: dcgm.DCGM_FT_INT64}
+	binary.NativeEndian.PutUint64(field.Value[:8], uint64(value))
+	return field
+}
+
+func stringField(fieldID dcgm.Short, value string) dcgm.FieldValue_v1 {
+	field := dcgm.FieldValue_v1{FieldID: fieldID, FieldType: dcgm.DCGM_FT_STRING}
+	copy(field.Value[:], value)
+	return field
 }
 
 // TestGetProvider tests provider detection
@@ -320,60 +314,6 @@ func TestGetMachineLocation_Basic(t *testing.T) {
 }
 
 // TestGetMachineInfo_Components tests individual components of machine info
-func TestGetMachineInfo_Components(t *testing.T) {
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
-		t.Skip("Test only runs on Linux or macOS")
-	}
-
-	// Skip if NVML is not available
-	nvmlInstance, err := nvidianvml.New()
-	if err != nil {
-		t.Skip("NVML not available, skipping test")
-	}
-	defer func() {
-		if err := nvmlInstance.Shutdown(); err != nil {
-			log.Logger.Warnw("failed to shutdown nvml instance", "error", err)
-		}
-	}()
-
-	info, err := GetMachineInfo(nvmlInstance)
-	if err != nil {
-		t.Skipf("Could not get machine info: %v", err)
-	}
-
-	// Test individual components
-	t.Run("version_info", func(t *testing.T) {
-		assert.NotEmpty(t, info.GPUdVersion)
-		assert.NotEmpty(t, info.Hostname)
-		assert.NotEmpty(t, info.OperatingSystem)
-	})
-
-	t.Run("cpu_info", func(t *testing.T) {
-		assert.NotNil(t, info.CPUInfo)
-		assert.Equal(t, runtime.GOARCH, info.CPUInfo.Architecture)
-		assert.NotZero(t, info.CPUInfo.LogicalCores)
-	})
-
-	t.Run("memory_info", func(t *testing.T) {
-		assert.NotNil(t, info.MemoryInfo)
-		assert.NotZero(t, info.MemoryInfo.TotalBytes)
-	})
-
-	t.Run("nic_info", func(t *testing.T) {
-		assert.NotNil(t, info.NICInfo)
-		// PrivateIPInterfaces can be empty in some environments
-		t.Logf("Found %d network interfaces", len(info.NICInfo.PrivateIPInterfaces))
-	})
-
-	if runtime.GOOS == "linux" {
-		t.Run("disk_info", func(t *testing.T) {
-			if info.DiskInfo != nil {
-				assert.NotEmpty(t, info.DiskInfo.BlockDevices)
-				t.Logf("Found %d block devices", len(info.DiskInfo.BlockDevices))
-			}
-		})
-	}
-}
 
 // TestGetMachineCPUInfo_Details tests detailed CPU information
 func TestGetMachineCPUInfo_Details(t *testing.T) {
@@ -413,180 +353,6 @@ func TestGetMachineNICInfo_Details(t *testing.T) {
 			t.Logf("Interface %d: %s (%s) - %s", i, iface.Interface, iface.MAC, iface.IP)
 		})
 	}
-}
-
-// TestGetMachineGPUInfo_NoDevices tests GPU info when no devices are available
-func TestGetMachineGPUInfo_NoDevices(t *testing.T) {
-	// Use the existing mockNvmlInstance which has no devices
-	mockInstance := &mockNvmlInstance{}
-
-	info, err := GetMachineGPUInfo(mockInstance)
-	assert.NoError(t, err)
-	assert.NotNil(t, info)
-	// When no devices are present, these fields should be empty
-	assert.Empty(t, info.GPUs)
-	assert.Empty(t, info.Memory)
-}
-
-func Test_nvmlByteArrayToString(t *testing.T) {
-	t.Parallel()
-
-	b := make([]uint8, 16)
-	copy(b, []byte("1583425610002"))
-
-	got := nvmlByteArrayToString(b)
-	assert.Equal(t, "1583425610002", got)
-}
-
-func TestGetMachineGPUInfo_ChassisSNPerGPU_MockNVML(t *testing.T) {
-	t.Parallel()
-
-	// Use NVML mock to make this deterministic.
-	old := os.Getenv("GPUD_NVML_MOCK_ALL_SUCCESS")
-	t.Cleanup(func() {
-		_ = os.Setenv("GPUD_NVML_MOCK_ALL_SUCCESS", old)
-	})
-	require.NoError(t, os.Setenv("GPUD_NVML_MOCK_ALL_SUCCESS", "true"))
-
-	nvmlInstance, err := nvidianvml.New()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = nvmlInstance.Shutdown() })
-
-	info, err := GetMachineGPUInfo(nvmlInstance)
-	require.NoError(t, err)
-	require.NotNil(t, info)
-	require.NotEmpty(t, info.GPUs)
-
-	if nvidianvml.PlatformInfoSupported() {
-		for _, gpu := range info.GPUs {
-			assert.Equal(t, "1583425610002", gpu.ChassisSN)
-		}
-	} else {
-		for _, gpu := range info.GPUs {
-			assert.Empty(t, gpu.ChassisSN)
-		}
-	}
-}
-
-func TestGetMachineGPUInfo_PartialNVMLFailureIsNonFatal(t *testing.T) {
-	t.Parallel()
-
-	info, err := GetMachineGPUInfo(&partialFailureMockNVMLInstance{})
-	require.NoError(t, err)
-	require.NotNil(t, info)
-	require.Len(t, info.GPUs, 1)
-	require.Equal(t, "GPU-failing-device", info.GPUs[0].UUID)
-}
-
-func TestGetMachineGPUInfo_CollectsFabricIdentity(t *testing.T) {
-	t.Parallel()
-
-	info, err := GetMachineGPUInfo(&fabricIdentityMockNVMLInstance{})
-	require.NoError(t, err)
-	require.NotNil(t, info)
-	require.Len(t, info.GPUs, 1)
-	require.NotNil(t, info.GPUs[0].CliqueID)
-	assert.Equal(t, uint32(0), *info.GPUs[0].CliqueID)
-	assert.Equal(t, "11111111-2222-3333-4444-555555555555", info.GPUs[0].ClusterUUID)
-}
-
-type partialFailureMockNVMLInstance struct {
-	nvidianvml.Instance
-}
-
-func (m *partialFailureMockNVMLInstance) ProductName() string {
-	return "H100"
-}
-
-func (m *partialFailureMockNVMLInstance) Brand() string {
-	return "NVIDIA"
-}
-
-func (m *partialFailureMockNVMLInstance) Architecture() string {
-	return "hopper"
-}
-
-func (m *partialFailureMockNVMLInstance) FabricStateSupported() bool {
-	return false
-}
-
-func (m *partialFailureMockNVMLInstance) Devices() map[string]nvmldevice.Device {
-	return map[string]nvmldevice.Device{
-		"GPU-failing-device": &partialFailureMockGPUDevice{},
-	}
-}
-
-type partialFailureMockGPUDevice struct {
-	nvmldevice.Device
-}
-
-func (d *partialFailureMockGPUDevice) PCIBusID() string {
-	return "0000:01:00.0"
-}
-
-func (d *partialFailureMockGPUDevice) GetPlatformInfo() (nvml.PlatformInfo, nvml.Return) {
-	return nvml.PlatformInfo{}, nvml.ERROR_GPU_IS_LOST
-}
-
-func (d *partialFailureMockGPUDevice) GetMemoryInfo_v2() (nvml.Memory_v2, nvml.Return) {
-	return nvml.Memory_v2{}, nvml.ERROR_UNKNOWN
-}
-
-func (d *partialFailureMockGPUDevice) GetMemoryInfo() (nvml.Memory, nvml.Return) {
-	return nvml.Memory{}, nvml.ERROR_GPU_IS_LOST
-}
-
-func (d *partialFailureMockGPUDevice) GetSerial() (string, nvml.Return) {
-	return "", nvml.ERROR_GPU_IS_LOST
-}
-
-func (d *partialFailureMockGPUDevice) GetMinorNumber() (int, nvml.Return) {
-	return 0, nvml.ERROR_GPU_IS_LOST
-}
-
-func (d *partialFailureMockGPUDevice) GetBoardId() (uint32, nvml.Return) {
-	return 0, nvml.ERROR_GPU_IS_LOST
-}
-
-func (d *partialFailureMockGPUDevice) GetPCIBusID() (string, error) {
-	return "0000:01:00.0", fmt.Errorf("gpu lost")
-}
-
-func (d *partialFailureMockGPUDevice) GetName() (string, nvml.Return) {
-	return "", nvml.ERROR_GPU_IS_LOST
-}
-
-func (d *partialFailureMockGPUDevice) GetVbiosVersion() (string, nvml.Return) {
-	return "", nvml.ERROR_GPU_IS_LOST
-}
-
-func (d *partialFailureMockGPUDevice) GetIndex() (int, nvml.Return) {
-	return 0, nvml.ERROR_GPU_IS_LOST
-}
-
-type fabricIdentityMockNVMLInstance struct {
-	partialFailureMockNVMLInstance
-}
-
-func (m *fabricIdentityMockNVMLInstance) FabricStateSupported() bool {
-	return true
-}
-
-func (m *fabricIdentityMockNVMLInstance) Devices() map[string]nvmldevice.Device {
-	return map[string]nvmldevice.Device{
-		"GPU-fabric-device": &fabricIdentityMockGPUDevice{},
-	}
-}
-
-type fabricIdentityMockGPUDevice struct {
-	partialFailureMockGPUDevice
-}
-
-func (d *fabricIdentityMockGPUDevice) GetFabricState() (nvmldevice.FabricState, error) {
-	return nvmldevice.FabricState{
-		CliqueID:    0,
-		ClusterUUID: "11111111-2222-3333-4444-555555555555",
-	}, nil
 }
 
 // TestGetSystemResourceRootVolumeTotal_Validation tests root volume total validation

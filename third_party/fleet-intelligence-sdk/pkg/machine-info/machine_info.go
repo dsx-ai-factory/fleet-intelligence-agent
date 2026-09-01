@@ -15,15 +15,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
-	nvidiamemory "github.com/NVIDIA/fleet-intelligence-sdk/components/accelerator/nvidia/memory"
-	componentnvml "github.com/NVIDIA/fleet-intelligence-sdk/components/accelerator/nvidia/nvml"
 	componentcontainerd "github.com/NVIDIA/fleet-intelligence-sdk/components/containerd"
 	componenttailscale "github.com/NVIDIA/fleet-intelligence-sdk/components/tailscale"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/asn"
@@ -32,8 +30,9 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/netutil"
 	pkgnetutillatencyedge "github.com/NVIDIA/fleet-intelligence-sdk/pkg/netutil/latency/edge"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 	nvidiapci "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/pci"
+	nvidiaproduct "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/product"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/providers"
 	pkgprovidersall "github.com/NVIDIA/fleet-intelligence-sdk/pkg/providers/all"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/providers/nebius"
@@ -44,13 +43,31 @@ const diskPartitionsTimeout = 10 * time.Second
 
 var listPCIGPUs = nvidiapci.ListPCIGPUs
 
-func GetMachineInfo(nvmlInstance nvidianvml.Instance) (*apiv1.MachineInfo, error) {
+// MachineInfoFields are the DCGM fields required to augment static device
+// attributes with the remaining machine inventory values.
+var MachineInfoFields = []dcgm.Short{
+	dcgm.DCGM_FI_CUDA_DRIVER_VERSION,
+	dcgm.DCGM_FI_DEV_MINOR_NUMBER,
+	dcgm.DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY,
+	dcgm.DCGM_FI_DEV_FABRIC_CLUSTER_UUID,
+	dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID,
+	dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER,
+}
+
+// RegisterDCGMFields registers machine-inventory fields before the shared
+// FieldValueCache creates its field group.
+func RegisterDCGMFields(dcgmInstance nvidiadcgm.Instance) error {
+	if dcgmInstance == nil {
+		return nil
+	}
+	return dcgmInstance.AddFieldsToWatch(MachineInfoFields)
+}
+
+func GetMachineInfo(dcgmInstance nvidiadcgm.Instance, fieldCache *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
 	hostname, _ := os.Hostname()
 	info := &apiv1.MachineInfo{
 		GPUdVersion: version.Version,
 
-		GPUDriverVersion:        nvmlInstance.DriverVersion(),
-		CUDAVersion:             nvmlInstance.CUDAVersion(),
 		ContainerRuntimeVersion: "",
 		KernelVersion:           pkghost.KernelVersion(),
 		OSImage:                 pkghost.OSName(),
@@ -67,7 +84,7 @@ func GetMachineInfo(nvmlInstance nvidianvml.Instance) (*apiv1.MachineInfo, error
 	}
 
 	var err error
-	info.GPUInfo, err = GetMachineGPUInfo(nvmlInstance)
+	info.GPUInfo, info.GPUDriverVersion, info.CUDAVersion, err = GetMachineGPUInfo(dcgmInstance, fieldCache)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get machine gpu info: %w", err)
 	}
@@ -304,10 +321,13 @@ func GetMachineLocation() *apiv1.MachineLocation {
 // This is different from the device count in DCGM.
 // ref. "CountDevEntry" in "nvvs/plugin_src/software/Software.cpp"
 // ref. https://github.com/NVIDIA/DCGM/blob/903d745504f50153be8293f8566346f9de3b3c93/nvvs/plugin_src/software/Software.cpp#L220-L249
-func GetSystemResourceGPUCount(nvmlInstance nvidianvml.Instance) (string, error) {
-	deviceCount := len(nvmlInstance.Devices())
+func GetSystemResourceGPUCount(dcgmInstance nvidiadcgm.Instance) (string, error) {
+	deviceCount := 0
+	if dcgmInstance != nil {
+		deviceCount = len(dcgmInstance.GetDevices())
+	}
 	if deviceCount == 0 {
-		// fallback to pci in case nvml/nvidia driver has not been loaded
+		// Fall back to PCI in case DCGM or the NVIDIA driver is unavailable.
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
@@ -325,144 +345,146 @@ func GetSystemResourceGPUCount(nvmlInstance nvidianvml.Instance) (string, error)
 	return qty.String(), nil
 }
 
-func GetMachineGPUInfo(nvmlInstance nvidianvml.Instance) (*apiv1.MachineGPUInfo, error) {
-	info := &apiv1.MachineGPUInfo{
-		Product:      nvmlInstance.ProductName(),
-		Manufacturer: nvmlInstance.Brand(),
-		Architecture: nvmlInstance.Architecture(),
+type machineInfoFieldReader interface {
+	GetResult([]dcgm.Short) ([]nvidiadcgm.DeviceFieldValues, error)
+}
+
+func GetMachineGPUInfo(dcgmInstance nvidiadcgm.Instance, fieldCache *nvidiadcgm.FieldValueCache) (*apiv1.MachineGPUInfo, string, string, error) {
+	var fieldReader machineInfoFieldReader
+	if fieldCache != nil {
+		fieldReader = fieldCache
 	}
-	collectionErrors := make([]string, 0)
-	appendCollectionError := func(uuid, stage, message string) {
-		msg := strings.TrimSpace(message)
-		if msg == "" {
-			msg = "unknown error"
-		}
-		collectionErrors = append(collectionErrors, fmt.Sprintf("gpu %s: %s failed: %s", uuid, stage, msg))
+	return getMachineGPUInfo(dcgmInstance, fieldReader)
+}
+
+func getMachineGPUInfo(dcgmInstance nvidiadcgm.Instance, fieldReader machineInfoFieldReader) (*apiv1.MachineGPUInfo, string, string, error) {
+	info := &apiv1.MachineGPUInfo{}
+	if dcgmInstance == nil {
+		return info, "", "", nil
 	}
 
-	platformInfoSupported := nvidianvml.PlatformInfoSupported()
-
-	productName := nvmlInstance.ProductName()
-	for uuid, dev := range nvmlInstance.Devices() {
-		// Best-effort: NVML platform info (per GPU).
-		// nvidia-smi surfaces this under "Platform Info" -> "Chassis Serial Number".
-		chassisSN := ""
-		if platformInfoSupported {
-			pi, ret := dev.GetPlatformInfo()
-			if ret == nvml.SUCCESS {
-				chassisSN = nvmlByteArrayToString(pi.ChassisSerialNumber[:])
-			} else if ret != nvml.ERROR_NOT_SUPPORTED {
-				log.Logger.Debugw("failed to get NVML platform info", "uuid", uuid, "error", nvml.ErrorString(ret))
-			}
-		}
-
-		if info.Memory == "" {
-			gpuMemory, err := nvidiamemory.GetMemory(uuid, dev, productName, mem.VirtualMemoryWithContext)
-			if err != nil {
-				appendCollectionError(uuid, "get_memory", err.Error())
-			} else {
-				qty := resource.NewQuantity(int64(gpuMemory.TotalBytes), resource.DecimalSI)
-				info.Memory = qty.String()
-			}
-		}
-
-		serialID, ret := dev.GetSerial()
-		if ret != nvml.SUCCESS {
-			if ret != nvml.ERROR_NOT_SUPPORTED {
-				appendCollectionError(uuid, "get_serial", nvml.ErrorString(ret))
-			}
-		}
-
-		var minorID int
-		minorID, ret = dev.GetMinorNumber()
-		if ret != nvml.SUCCESS {
-			if ret != nvml.ERROR_NOT_SUPPORTED {
-				appendCollectionError(uuid, "get_minor_id", nvml.ErrorString(ret))
-			}
-			minorID = -1 // set to -1 when not supported
-		}
-
-		var boardID uint32
-		boardID, ret = dev.GetBoardId()
-		if ret != nvml.SUCCESS {
-			if ret != nvml.ERROR_NOT_SUPPORTED {
-				appendCollectionError(uuid, "get_board_id", nvml.ErrorString(ret))
-			}
-			boardID = 0 // set to 0 when not supported
-		}
-
-		busID, err := dev.GetPCIBusID()
+	fieldsByDevice := make(map[uint]map[dcgm.Short]dcgm.FieldValue_v1)
+	if fieldReader != nil {
+		results, err := fieldReader.GetResult(MachineInfoFields)
 		if err != nil {
-			appendCollectionError(uuid, "get_pci_bus_id", err.Error())
-		}
-
-		modelName, ret := dev.GetName()
-		if ret != nvml.SUCCESS {
-			if ret != nvml.ERROR_NOT_SUPPORTED {
-				appendCollectionError(uuid, "get_name", nvml.ErrorString(ret))
+			log.Logger.Debugw("DCGM machine inventory fields unavailable", "error", err)
+		} else {
+			for _, result := range results {
+				values := make(map[dcgm.Short]dcgm.FieldValue_v1, len(result.Values))
+				for _, value := range result.Values {
+					values[value.FieldID] = value
+				}
+				fieldsByDevice[result.DeviceID] = values
 			}
-			modelName = ""
+		}
+	}
+
+	driverVersion := ""
+	cudaVersion := ""
+	for _, dev := range dcgmInstance.GetDevices() {
+		values := fieldsByDevice[dev.ID]
+		if driverVersion == "" {
+			driverVersion = strings.TrimSpace(dev.DriverVersion)
+		}
+		if cudaVersion == "" {
+			if value, ok := values[dcgm.DCGM_FI_CUDA_DRIVER_VERSION]; ok {
+				cudaVersion = formatCUDADriverVersion(value.Int64())
+			}
 		}
 
-		var clusterUUID string
+		if info.Product == "" {
+			info.Product = nvidiaproduct.SanitizeProductName(dev.Model)
+			info.Manufacturer = strings.TrimSpace(dev.Brand)
+			if dev.FramebufferMemoryBytes > 0 {
+				qty := resource.NewQuantity(int64(dev.FramebufferMemoryBytes), resource.DecimalSI)
+				info.Memory = qty.String()
+			} else if strings.HasSuffix(info.Product, "GB10") {
+				if vm, err := mem.VirtualMemoryWithContext(context.Background()); err == nil {
+					qty := resource.NewQuantity(int64(vm.Total), resource.DecimalSI)
+					info.Memory = qty.String()
+				}
+			}
+			if value, ok := values[dcgm.DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY]; ok {
+				info.Architecture = architectureFromComputeCapability(value.Int64())
+			}
+		}
+
+		minorID := "-1"
+		if value, ok := values[dcgm.DCGM_FI_DEV_MINOR_NUMBER]; ok {
+			minorID = strconv.FormatInt(value.Int64(), 10)
+		}
+		clusterUUID := ""
+		if value, ok := values[dcgm.DCGM_FI_DEV_FABRIC_CLUSTER_UUID]; ok {
+			clusterUUID = strings.TrimSpace(value.String())
+		}
 		var cliqueID *uint32
-		if nvmlInstance.FabricStateSupported() {
-			fabricState, fabricErr := dev.GetFabricState()
-			if fabricErr != nil {
-				log.Logger.Debugw("failed to get NVLink fabric identity", "uuid", uuid, "error", fabricErr)
-			} else {
-				clusterUUID = fabricState.ClusterUUID
-				id := fabricState.CliqueID
-				cliqueID = &id
-			}
+		if value, ok := values[dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID]; ok {
+			id := uint32(value.Int64())
+			cliqueID = &id
 		}
-
-		vbios, ret := dev.GetVbiosVersion()
-		vbiosVersion := ""
-		if ret != nvml.SUCCESS {
-			appendCollectionError(uuid, "get_vbios_version", nvml.ErrorString(ret))
-			log.Logger.Debugw("failed to get VBIOS version", "uuid", uuid, "error", nvml.ErrorString(ret))
-		} else {
-			vbiosVersion = vbios
-		}
-
-		gpuIndex := ""
-		idx, ret := dev.GetIndex()
-		if ret != nvml.SUCCESS {
-			appendCollectionError(uuid, "get_index", nvml.ErrorString(ret))
-			log.Logger.Debugw("failed to get GPU index", "uuid", uuid, "error", nvml.ErrorString(ret))
-		} else {
-			gpuIndex = strconv.Itoa(idx)
+		chassisSN := ""
+		if value, ok := values[dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER]; ok {
+			chassisSN = strings.TrimSpace(value.String())
 		}
 
 		info.GPUs = append(info.GPUs, apiv1.MachineGPUInstance{
-			UUID:         uuid,
-			GPUIndex:     gpuIndex,
-			ModelName:    modelName,
+			UUID:         dev.UUID,
+			GPUIndex:     strconv.FormatUint(uint64(dev.ID), 10),
+			ModelName:    strings.TrimSpace(dev.Model),
 			ClusterUUID:  clusterUUID,
 			CliqueID:     cliqueID,
-			SN:           serialID,
-			MinorID:      strconv.Itoa(minorID),
-			BoardID:      boardID,
-			BusID:        busID,
-			VBIOSVersion: vbiosVersion,
+			SN:           strings.TrimSpace(dev.Serial),
+			MinorID:      minorID,
+			BoardID:      0, // DCGM does not expose nvmlDeviceGetBoardId semantics.
+			BusID:        strings.TrimSpace(dev.BusID),
+			VBIOSVersion: strings.TrimSpace(dev.VBIOSVersion),
 			ChassisSN:    chassisSN,
 		})
 	}
-	componentnvml.RunCheckWithErrors(collectionErrors)
 
-	return info, nil
+	return info, driverVersion, cudaVersion, nil
 }
 
-func nvmlByteArrayToString(b []uint8) string {
-	// NVML returns fixed-size byte arrays; treat as null-terminated string.
-	n := 0
-	for ; n < len(b); n++ {
-		if b[n] == 0 {
-			break
-		}
+func formatCUDADriverVersion(version int64) string {
+	if version <= 0 {
+		return ""
 	}
-	return strings.TrimSpace(string(b[:n]))
+	return fmt.Sprintf("%d.%d", version/1000, (version%1000)/10)
+}
+
+func architectureFromComputeCapability(capability int64) string {
+	major := (uint64(capability) >> 16) & 0xffff
+	minor := uint64(capability) & 0xffff
+	switch major {
+	case 1:
+		return "tesla"
+	case 2:
+		return "fermi"
+	case 3:
+		return "kepler"
+	case 5:
+		return "maxwell"
+	case 6:
+		return "pascal"
+	case 7:
+		if minor >= 5 {
+			return "turing"
+		}
+		return "volta"
+	case 8:
+		if minor >= 9 {
+			return "ada-lovelace"
+		}
+		return "ampere"
+	case 9:
+		return "hopper"
+	case 10, 12:
+		return "blackwell"
+	case 13:
+		return "rubin"
+	default:
+		return "undefined"
+	}
 }
 
 func GetMachineDiskInfo(ctx context.Context) (*apiv1.MachineDiskInfo, error) {

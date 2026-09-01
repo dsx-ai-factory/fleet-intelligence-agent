@@ -12,17 +12,18 @@ import (
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/netutil"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/providers"
 )
 
-func CreateLoginRequest(token string, machineID string, nodeGroup string, gpuCount string, nvmlInstance nvidianvml.Instance) (*apiv1.LoginRequest, error) {
+func CreateLoginRequest(token string, machineID string, nodeGroup string, gpuCount string, dcgmInstance nvidiadcgm.Instance, fieldCache *nvidiadcgm.FieldValueCache) (*apiv1.LoginRequest, error) {
 	return createLoginRequest(
 		token,
 		machineID,
 		nodeGroup,
 		gpuCount,
-		nvmlInstance,
+		dcgmInstance,
+		fieldCache,
 		netutil.PublicIP,
 		GetMachineLocation,
 		GetMachineInfo,
@@ -37,13 +38,14 @@ func createLoginRequest(
 	machineID string,
 	nodeGroup string,
 	gpuCount string,
-	nvmlInstance nvidianvml.Instance,
+	dcgmInstance nvidiadcgm.Instance,
+	fieldCache *nvidiadcgm.FieldValueCache,
 	getPublicIPFunc func() (string, error),
 	getMachineLocationFunc func() *apiv1.MachineLocation,
-	getMachineInfoFunc func(nvmlInstance nvidianvml.Instance) (*apiv1.MachineInfo, error),
+	getMachineInfoFunc func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error),
 	getProviderFunc func(ip string) *providers.Info,
 	getSystemResourceRootVolumeTotalFunc func() (string, error),
-	getSystemResourceGPUCountFunc func(nvmlInstance nvidianvml.Instance) (string, error),
+	getSystemResourceGPUCountFunc func(nvidiadcgm.Instance) (string, error),
 ) (*apiv1.LoginRequest, error) {
 	donec := make(chan struct{})
 	defer close(donec)
@@ -93,7 +95,7 @@ func createLoginRequest(
 		"provider", req.Provider,
 		"providerInstanceID", req.ProviderInstanceID)
 
-	req.MachineInfo, err = getMachineInfoFunc(nvmlInstance)
+	req.MachineInfo, err = getMachineInfoFunc(dcgmInstance, fieldCache)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get machine info: %w", err)
 	}
@@ -132,7 +134,7 @@ func createLoginRequest(
 
 	gpuCnt := gpuCount
 	if gpuCnt == "" {
-		gpuCnt, err = getSystemResourceGPUCountFunc(nvmlInstance)
+		gpuCnt, err = getSystemResourceGPUCountFunc(dcgmInstance)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get system resource gpu count: %w", err)
 		}

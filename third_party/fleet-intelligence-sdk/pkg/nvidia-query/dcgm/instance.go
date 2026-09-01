@@ -186,23 +186,22 @@ func NewWithContext(ctx context.Context) (Instance, error) {
 	return NewWithContextAndGroupName(ctx, defaultDCGMGroupName)
 }
 
-// NewWithContextAndGroupName creates a DCGM instance with a bounded wait and
-// caller-owned DCGM group name.
-func NewWithContextAndGroupName(ctx context.Context, groupName string) (Instance, error) {
-	type result struct {
-		inst Instance
-		err  error
-	}
+type initializationResult struct {
+	inst Instance
+	err  error
+}
 
-	resultCh := make(chan result, 1)
-	abandonCh := make(chan struct{})
+func initializeWithContext(ctx context.Context, groupName string) (Instance, error, bool) {
+	resultCh := make(chan initializationResult)
 	initFn := newInstanceFunc
 
 	go func() {
 		inst, err := initFnWithGroupName(initFn, groupName)
 		select {
-		case resultCh <- result{inst: inst, err: err}:
-		case <-abandonCh:
+		case resultCh <- initializationResult{inst: inst, err: err}:
+		case <-ctx.Done():
+			// The caller has stopped waiting, so this goroutine owns any
+			// instance that finished initialization after the deadline.
 			if err == nil && inst != nil {
 				_ = inst.Shutdown()
 			}
@@ -211,18 +210,21 @@ func NewWithContextAndGroupName(ctx context.Context, groupName string) (Instance
 
 	select {
 	case res := <-resultCh:
-		if res.err != nil {
-			return nil, res.err
-		}
-		if res.inst == nil || !res.inst.DCGMExists() {
-			log.Logger.Warnw(
-				"DCGM session unavailable at startup; continuing with no-op instance and retrying complete initialization in background",
-				"retryInterval", dcgmReconnectInterval.String(),
-			)
-		}
-		return newReconnectingInstanceWithGroupName(res.inst, dcgmReconnectInterval, groupName), nil
+		return res.inst, res.err, false
 	case <-ctx.Done():
-		close(abandonCh)
+		return nil, nil, true
+	}
+}
+
+// NewWithContextAndGroupName creates a DCGM instance with a bounded wait and
+// caller-owned DCGM group name. If a complete session cannot be initialized,
+// it starts with a no-op instance so initialization can be retried.
+func NewWithContextAndGroupName(ctx context.Context, groupName string) (Instance, error) {
+	inst, err, timedOut := initializeWithContext(ctx, groupName)
+	if err != nil {
+		return nil, err
+	}
+	if timedOut {
 		log.Logger.Warnw(
 			"DCGM initialization timed out; continuing with no-op instance and retrying complete initialization in background",
 			"error", ctx.Err(),
@@ -230,6 +232,34 @@ func NewWithContextAndGroupName(ctx context.Context, groupName string) (Instance
 		)
 		return newReconnectingInstanceWithGroupName(NewNoOp(), dcgmReconnectInterval, groupName), nil
 	}
+	if inst == nil || !inst.DCGMExists() {
+		log.Logger.Warnw(
+			"DCGM session unavailable at startup; continuing with no-op instance and retrying complete initialization in background",
+			"retryInterval", dcgmReconnectInterval.String(),
+		)
+	}
+	return newReconnectingInstanceWithGroupName(inst, dcgmReconnectInterval, groupName), nil
+}
+
+// NewOnceWithContextAndGroupName creates a bounded, non-reconnecting DCGM
+// instance for short-lived operations. If initialization exceeds the context
+// deadline, it returns a no-op instance and cleans up any late result.
+func NewOnceWithContextAndGroupName(ctx context.Context, groupName string) (Instance, error) {
+	inst, err, timedOut := initializeWithContext(ctx, groupName)
+	if err != nil {
+		return nil, err
+	}
+	if timedOut {
+		log.Logger.Warnw(
+			"DCGM initialization timed out; continuing with no-op instance",
+			"error", ctx.Err(),
+		)
+		return NewNoOp(), nil
+	}
+	if inst == nil {
+		return NewNoOp(), nil
+	}
+	return inst, nil
 }
 
 func initFnWithGroupName(initFn func() (Instance, error), groupName string) (Instance, error) {

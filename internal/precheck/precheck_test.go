@@ -393,20 +393,20 @@ func TestEvaluateDCGMSkipsWhenReachabilityUnset(t *testing.T) {
 	assert.Contains(t, checkMessages(result.Checks), "DCGM checks skipped")
 }
 
-func TestCollectInputCallsDCGMInit(t *testing.T) {
-	originalNewNVML := newNVML
+func TestCollectInputCallsDCGMDetection(t *testing.T) {
+	originalCollectGPUInventory := collectGPUInventory
 	originalLookPath := lookPath
 	originalDetectDCGMVersion := detectDCGMVersion
 	originalListPCIGPUs := listPCIGPUs
 	t.Cleanup(func() {
-		newNVML = originalNewNVML
+		collectGPUInventory = originalCollectGPUInventory
 		lookPath = originalLookPath
 		detectDCGMVersion = originalDetectDCGMVersion
 		listPCIGPUs = originalListPCIGPUs
 	})
 
-	newNVML = func() (nvmlInstance, error) {
-		return nil, fmt.Errorf("skip nvml in test")
+	collectGPUInventory = func() (*apiv1.MachineGPUInfo, string, error) {
+		return nil, "", fmt.Errorf("skip DCGM inventory in test")
 	}
 	lookPath = func(file string) (string, error) {
 		return "/usr/bin/" + file, nil
@@ -433,19 +433,19 @@ func TestCollectInputCallsDCGMInit(t *testing.T) {
 }
 
 func TestCollectInputPreservesGPUProbeError(t *testing.T) {
-	originalNewNVML := newNVML
+	originalCollectGPUInventory := collectGPUInventory
 	originalLookPath := lookPath
 	originalDetectDCGMVersion := detectDCGMVersion
 	originalListPCIGPUs := listPCIGPUs
 	t.Cleanup(func() {
-		newNVML = originalNewNVML
+		collectGPUInventory = originalCollectGPUInventory
 		lookPath = originalLookPath
 		detectDCGMVersion = originalDetectDCGMVersion
 		listPCIGPUs = originalListPCIGPUs
 	})
 
-	newNVML = func() (nvmlInstance, error) {
-		return nil, fmt.Errorf("skip nvml in test")
+	collectGPUInventory = func() (*apiv1.MachineGPUInfo, string, error) {
+		return nil, "", fmt.Errorf("skip DCGM inventory in test")
 	}
 	lookPath = func(file string) (string, error) {
 		return "/usr/bin/" + file, nil

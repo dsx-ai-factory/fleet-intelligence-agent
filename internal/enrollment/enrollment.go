@@ -20,17 +20,18 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	pkgmetadata "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metadata"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/dcgminventory"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/endpoint"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory"
 	inventorysink "github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory/sink"
@@ -207,15 +208,15 @@ func syncInventoryOnce(ctx context.Context, cfg *config.Config) error {
 	inventoryEnabled, inventoryIntervalSeconds := cfg.InventoryLoopAgentConfig()
 	attestationEnabled, attestationIntervalSeconds := cfg.AttestationLoopAgentConfig()
 
-	nvmlInstance, err := nvidianvml.New()
+	dcgmSession, err := dcgminventory.Open(ctx, fmt.Sprintf("enroll-%d", os.Getpid()), time.Minute)
 	if err != nil {
-		return fmt.Errorf("initialize nvml for inventory sync: %w", err)
+		return err
 	}
-	defer func() { _ = nvmlInstance.Shutdown() }()
+	defer func() { _ = dcgmSession.Close() }()
 
 	src := inventorysource.NewMachineInfoSourceWithAgentConfig(
 		machineInfoCollectorFunc(func(context.Context) (*machineinfo.MachineInfo, error) {
-			return machineinfo.GetMachineInfo(nvmlInstance)
+			return machineinfo.GetMachineInfo(dcgmSession.Instance, dcgmSession.FieldCache)
 		}),
 		&inventory.AgentConfig{
 			TotalComponents:             int64(len(allComponents)),

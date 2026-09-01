@@ -30,9 +30,10 @@ import (
 	nvidiainfiniband "github.com/NVIDIA/fleet-intelligence-sdk/components/accelerator/nvidia/infiniband"
 	infinibandclass "github.com/NVIDIA/fleet-intelligence-sdk/components/accelerator/nvidia/infiniband/class"
 	nvidiacommon "github.com/NVIDIA/fleet-intelligence-sdk/pkg/config/common"
+	pkghost "github.com/NVIDIA/fleet-intelligence-sdk/pkg/host"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
+	nvidiaproduct "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/product"
 
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/cmdutil"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
@@ -104,42 +105,18 @@ func Scan(ctx context.Context, opts ...Option) error {
 
 	fmt.Printf("\n\n%s scanning the host (GOOS %s)\n\n", cmdutil.InProgress, runtime.GOOS)
 
-	nvmlInstance, err := nvidianvml.New()
-	if err != nil {
-		return err
-	}
-
-	mi, err := machineinfo.GetMachineInfo(nvmlInstance)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("\n%s machine info\n", cmdutil.CheckMark)
-	mi.RenderTable(os.Stdout)
-
-	if mi.GPUInfo != nil && mi.GPUInfo.Product != "" {
-		threshold, err := nvidiainfiniband.SupportsInfinibandPortRate(mi.GPUInfo.Product)
-		if err == nil {
-			log.Logger.Infow("setting default expected port states", "product", mi.GPUInfo.Product, "at_least_ports", threshold.AtLeastPorts, "at_least_rate", threshold.AtLeastRate)
-			nvidiainfiniband.SetDefaultExpectedPortStates(threshold)
-		}
-	}
-
 	dcgmGroupNames := components.NewDCGMGroupNames(fmt.Sprintf("scan-%d", os.Getpid()))
 
 	// Initialize DCGM instance for DCGM-based health checks
-	dcgmInstance, err := nvidiadcgm.NewWithGroupName(dcgmGroupNames.HealthMonitoringGroup)
+	dcgmInstance, err := nvidiadcgm.NewOnceWithContextAndGroupName(ctx, dcgmGroupNames.HealthMonitoringGroup)
 	if err != nil {
 		return err
 	}
-
-	// For scan mode, create a health cache
-	dcgmHealthCache := nvidiadcgm.NewHealthCache(ctx, dcgmInstance, time.Minute)
-
-	// Create field value cache for GPU device fields (placeholder)
-	// Field watching will be set up after components register their fields
-	// Note: CPU component manages its own field watching separately
-	dcgmFieldValueCache := nvidiadcgm.NewFieldValueCache(ctx, dcgmInstance, time.Minute)
-
+	var (
+		dcgmHealthCache     *nvidiadcgm.HealthCache
+		dcgmFieldValueCache *nvidiadcgm.FieldValueCache
+		componentsToClose   []components.Component
+	)
 	defer func() {
 		if dcgmHealthCache != nil {
 			dcgmHealthCache.Stop()
@@ -147,17 +124,40 @@ func Scan(ctx context.Context, opts ...Option) error {
 		if dcgmFieldValueCache != nil {
 			dcgmFieldValueCache.Stop()
 		}
+		for i := len(componentsToClose) - 1; i >= 0; i-- {
+			component := componentsToClose[i]
+			if err := component.Close(); err != nil {
+				log.Logger.Warnw("failed to close scan component", "component", component.Name(), "error", err)
+			}
+		}
 		if err := dcgmInstance.Shutdown(); err != nil {
 			log.Logger.Warnw("DCGM shutdown failed", "error", err)
 		}
 	}()
 
+	// For scan mode, create a health cache
+	dcgmHealthCache = nvidiadcgm.NewHealthCache(ctx, dcgmInstance, time.Minute)
+
+	// Create field value cache for GPU device fields (placeholder)
+	// Field watching will be set up after components register their fields
+	// Note: CPU component manages its own field watching separately
+	dcgmFieldValueCache = nvidiadcgm.NewFieldValueCache(ctx, dcgmInstance, time.Minute)
+	if err := machineinfo.RegisterDCGMFields(dcgmInstance); err != nil {
+		return fmt.Errorf("failed to register machine inventory DCGM fields: %w", err)
+	}
+
+	if devices := dcgmInstance.GetDevices(); len(devices) > 0 {
+		product := nvidiaproduct.SanitizeProductName(devices[0].Model)
+		if threshold, err := nvidiainfiniband.SupportsInfinibandPortRate(product); err == nil {
+			log.Logger.Infow("setting default expected port states", "product", product, "at_least_ports", threshold.AtLeastPorts, "at_least_rate", threshold.AtLeastRate)
+			nvidiainfiniband.SetDefaultExpectedPortStates(threshold)
+		}
+	}
+
 	gpudInstance := &components.GPUdInstance{
-		RootCtx: ctx,
+		RootCtx:   ctx,
+		MachineID: pkghost.OSMachineID(),
 
-		MachineID: mi.MachineID,
-
-		NVMLInstance:        nvmlInstance,
 		DCGMInstance:        dcgmInstance,
 		DCGMHealthCache:     dcgmHealthCache,
 		DCGMFieldValueCache: dcgmFieldValueCache,
@@ -182,6 +182,7 @@ func Scan(ctx context.Context, opts ...Option) error {
 		if err != nil {
 			return err
 		}
+		componentsToClose = append(componentsToClose, comp)
 		if !comp.IsSupported() {
 			continue
 		}
@@ -202,6 +203,13 @@ func Scan(ctx context.Context, opts ...Option) error {
 	if err := dcgmFieldValueCache.Poll(); err != nil {
 		log.Logger.Warnw("DCGM field value poll failed", "error", err)
 	}
+
+	mi, err := machineinfo.GetMachineInfo(dcgmInstance, dcgmFieldValueCache)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("\n%s machine info\n", cmdutil.CheckMark)
+	mi.RenderTable(os.Stdout)
 
 	// Run checks on all initialized components
 	for _, c := range initializedComponents {
