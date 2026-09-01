@@ -4,8 +4,6 @@ go 1.25.0
 
 require (
 	github.com/NVIDIA/go-dcgm v0.0.0-20260214140307-ad5d86fe3d32
-	github.com/NVIDIA/go-nvlib v0.8.1
-	github.com/NVIDIA/go-nvml v0.13.0-1
 	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/google/uuid v1.6.0
