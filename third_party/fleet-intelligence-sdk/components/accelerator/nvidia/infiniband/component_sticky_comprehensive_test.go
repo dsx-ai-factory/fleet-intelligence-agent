@@ -145,7 +145,7 @@ func TestComprehensiveStickyWindowScenarios(t *testing.T) {
 				ctx:              context.Background(),
 				dropStickyWindow: tt.dropStickyWindow,
 				ibPortsStore:     mockStore,
-				nvmlInstance:     &mockNVMLInstance{exists: true, productName: "Test GPU"},
+				gpuProvider:      &mockGPUProvider{exists: true, productName: "Test GPU"},
 				getTimeNowFunc: func() time.Time {
 					return now
 				},
@@ -202,7 +202,7 @@ func TestStickyWindowTransitions(t *testing.T) {
 		ctx:              context.Background(),
 		dropStickyWindow: 10 * time.Minute,
 		ibPortsStore:     mockStore,
-		nvmlInstance:     &mockNVMLInstance{exists: true, productName: "Test GPU"},
+		gpuProvider:      &mockGPUProvider{exists: true, productName: "Test GPU"},
 		getTimeNowFunc: func() time.Time {
 			return currentTime
 		},
@@ -316,7 +316,7 @@ func TestDormantPortFiltering(t *testing.T) {
 		ctx:              context.Background(),
 		dropStickyWindow: 10 * time.Minute,
 		ibPortsStore:     mockStore,
-		nvmlInstance:     &mockNVMLInstance{exists: true, productName: "Test GPU"},
+		gpuProvider:      &mockGPUProvider{exists: true, productName: "Test GPU"},
 		getTimeNowFunc: func() time.Time {
 			return baseTime
 		},
@@ -371,7 +371,7 @@ func TestEdgeCasesAndErrorConditions(t *testing.T) {
 			ctx:              context.Background(),
 			dropStickyWindow: 10 * time.Minute,
 			ibPortsStore:     mockStore,
-			nvmlInstance:     &mockNVMLInstance{exists: true, productName: "Test GPU"},
+			gpuProvider:      &mockGPUProvider{exists: true, productName: "Test GPU"},
 			getTimeNowFunc: func() time.Time {
 				return time.Now().UTC()
 			},
@@ -416,7 +416,7 @@ func TestEdgeCasesAndErrorConditions(t *testing.T) {
 			ctx:              context.Background(),
 			dropStickyWindow: 10 * time.Minute,
 			ibPortsStore:     mockStore,
-			nvmlInstance:     &mockNVMLInstance{exists: true, productName: "Test GPU"},
+			gpuProvider:      &mockGPUProvider{exists: true, productName: "Test GPU"},
 			getTimeNowFunc: func() time.Time {
 				return now
 			},

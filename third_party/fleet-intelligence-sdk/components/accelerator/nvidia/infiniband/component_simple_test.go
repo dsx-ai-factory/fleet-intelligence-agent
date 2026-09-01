@@ -37,7 +37,7 @@ func TestSimpleDropProcessing(t *testing.T) {
 			ctx:              context.Background(),
 			dropStickyWindow: 10 * time.Minute,
 			ibPortsStore:     mockStore,
-			nvmlInstance:     &mockNVMLInstance{exists: true, productName: "Test GPU"},
+			gpuProvider:      &mockGPUProvider{exists: true, productName: "Test GPU"},
 			getTimeNowFunc: func() time.Time {
 				return now
 			},
@@ -77,7 +77,7 @@ func TestSimpleDropProcessing(t *testing.T) {
 			ctx:              context.Background(),
 			dropStickyWindow: 10 * time.Minute,
 			ibPortsStore:     mockStore,
-			nvmlInstance:     &mockNVMLInstance{exists: true, productName: "Test GPU"},
+			gpuProvider:      &mockGPUProvider{exists: true, productName: "Test GPU"},
 			getTimeNowFunc: func() time.Time {
 				return now
 			},

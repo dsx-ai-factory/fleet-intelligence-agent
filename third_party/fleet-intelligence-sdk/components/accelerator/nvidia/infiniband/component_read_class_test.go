@@ -45,7 +45,7 @@ func TestComponentReadClass(t *testing.T) {
 		checkInterval:  time.Minute,
 		requestTimeout: 15 * time.Second,
 
-		nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 		eventBucket: bucket,
 
@@ -318,7 +318,7 @@ func TestComponentReadClass_FlapDetection(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket: bucket,
 
@@ -381,7 +381,7 @@ func TestComponentReadClass_FlapDetection(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket: bucket,
 
@@ -433,7 +433,7 @@ func TestComponentReadClass_FlapDetection(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket: bucket,
 
@@ -503,7 +503,7 @@ func TestComponentReadClass_DropDetection(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket: bucket,
 
@@ -557,7 +557,7 @@ func TestComponentReadClass_DropDetection(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket: bucket,
 
@@ -605,7 +605,7 @@ func TestComponentReadClass_DropDetection(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket: bucket,
 
@@ -683,7 +683,7 @@ func TestComponentReadClass_CombinedFlapAndDrop(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket: bucket,
 
@@ -773,7 +773,7 @@ func TestComponentReadClass_ErrorCounterRates(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket: bucket,
 
@@ -813,7 +813,7 @@ func TestComponentReadClass_ErrorCounterRates(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket: bucket,
 
@@ -863,7 +863,7 @@ func TestComponentReadClass_ErrorCounterRates(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket: bucket,
 
@@ -927,7 +927,7 @@ func TestComponentReadClass_EdgeCases(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket: bucket,
 
@@ -977,7 +977,7 @@ func TestComponentReadClass_EdgeCases(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket: bucket,
 
@@ -1029,7 +1029,7 @@ func TestComponentReadClass_EdgeCases(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket: bucket,
 
@@ -1076,7 +1076,7 @@ func TestComponentReadClass_EdgeCases(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket: bucket,
 
@@ -1193,7 +1193,7 @@ func TestComponentReadClass_12PortsMeetingThresholdsWithEvents(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket:  bucket,
 			ibPortsStore: mockStore,
@@ -1293,7 +1293,7 @@ func TestComponentReadClass_12PortsMeetingThresholdsWithEvents(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket:  bucket,
 			ibPortsStore: mockStore,
@@ -1405,7 +1405,7 @@ func TestComponentReadClass_RealisticScenarioWith12IBPorts(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket:  bucket,
 			ibPortsStore: mockStore,
@@ -1505,7 +1505,7 @@ func TestComponentReadClass_RealisticScenarioWith12IBPorts(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket:  bucket,
 			ibPortsStore: mockStore,
@@ -1610,7 +1610,7 @@ func TestComponentReadClass_RealisticScenarioWith12IBPorts(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket:  bucket,
 			ibPortsStore: mockStore,
@@ -1701,7 +1701,7 @@ func TestComponentReadClass_RealisticScenarioWith12IBPorts(t *testing.T) {
 			checkInterval:  time.Minute,
 			requestTimeout: 15 * time.Second,
 
-			nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 
 			eventBucket:  bucket,
 			ibPortsStore: mockStore,

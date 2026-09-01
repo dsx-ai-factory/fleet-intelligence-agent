@@ -21,9 +21,7 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/eventstore"
 	pkghost "github.com/NVIDIA/fleet-intelligence-sdk/pkg/host"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/kmsg"
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/device"
-	nvmllib "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/lib"
-	nvidiaproduct "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/product"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 )
 
@@ -426,10 +424,10 @@ func TestSXIDComponent_Check(t *testing.T) {
 	defer cleanup()
 
 	// Create a mock NVML instance
-	mockNVML := &MockNVMLInstance{
+	mockNVML := &MockGPUProvider{
 		exists: true,
 	}
-	component.nvmlInstance = mockNVML
+	component.gpuProvider = mockNVML
 
 	// Mock the readAllKmsg function to return test data
 	mockMessages := []kmsg.Message{
@@ -465,10 +463,10 @@ func TestSXIDComponent_Check_Error(t *testing.T) {
 	defer cleanup()
 
 	// Create a mock NVML instance
-	mockNVML := &MockNVMLInstance{
+	mockNVML := &MockGPUProvider{
 		exists: true,
 	}
-	component.nvmlInstance = mockNVML
+	component.gpuProvider = mockNVML
 
 	// Mock the readAllKmsg function to return an error
 	component.readAllKmsg = func(ctx context.Context) ([]kmsg.Message, error) {
@@ -493,8 +491,8 @@ func TestSXIDComponent_Check_NoNVML(t *testing.T) {
 	component, cleanup := initComponentForTest(ctx, t)
 	defer cleanup()
 
-	// Set nvmlInstance to nil to simulate no NVML
-	component.nvmlInstance = nil
+	// Set gpuProvider to nil to simulate no NVML
+	component.gpuProvider = nil
 
 	// Run the check
 	result := component.Check()
@@ -503,7 +501,7 @@ func TestSXIDComponent_Check_NoNVML(t *testing.T) {
 	data, ok := result.(*checkResult)
 	assert.True(t, ok, "Result should be of type *checkResult")
 	assert.Equal(t, apiv1.HealthStateTypeHealthy, data.health)
-	assert.Contains(t, data.reason, "NVIDIA NVML instance is nil")
+	assert.Contains(t, data.reason, "GPU is not detected by DCGM")
 }
 
 func TestSXIDComponent_Close(t *testing.T) {
@@ -551,47 +549,49 @@ func TestTags(t *testing.T) {
 	assert.Len(t, tags, 4, "Component should return exactly 4 tags")
 }
 
-// MockNVMLInstanceNoProduct is a mock implementation that has exists=true but empty product name
-type MockNVMLInstanceNoProduct struct {
-	MockNVMLInstance
+// MockGPUProviderNoProduct is a mock implementation that has exists=true but empty product name
+type MockGPUProviderNoProduct struct {
+	MockGPUProvider
 }
 
-func (m *MockNVMLInstanceNoProduct) ProductName() string {
+func (m *MockGPUProviderNoProduct) ProductName() string {
 	return ""
 }
 
-// MockNVMLInstanceWithProduct is a mock implementation that has exists=true and a valid product name
-type MockNVMLInstanceWithProduct struct {
-	MockNVMLInstance
+func (m *MockGPUProviderNoProduct) GPUDevices() []nvidiadcgm.DeviceInfo { return nil }
+
+// MockGPUProviderWithProduct is a mock implementation that has exists=true and a valid product name
+type MockGPUProviderWithProduct struct {
+	MockGPUProvider
 }
 
-func (m *MockNVMLInstanceWithProduct) ProductName() string {
+func (m *MockGPUProviderWithProduct) ProductName() string {
 	return "Tesla V100"
 }
 
 func TestIsSupported(t *testing.T) {
-	// Test when nvmlInstance is nil
+	// Test when gpuProvider is nil
 	comp := &component{}
 	assert.False(t, comp.IsSupported())
 
 	// Test when NVMLExists returns false
 	comp = &component{
-		nvmlInstance: &MockNVMLInstance{exists: false},
+		gpuProvider: &MockGPUProvider{exists: false},
 	}
 	assert.False(t, comp.IsSupported())
 
 	// Test when ProductName returns empty string
 	comp = &component{
-		nvmlInstance: &MockNVMLInstanceNoProduct{
-			MockNVMLInstance: MockNVMLInstance{exists: true},
+		gpuProvider: &MockGPUProviderNoProduct{
+			MockGPUProvider: MockGPUProvider{exists: true},
 		},
 	}
 	assert.False(t, comp.IsSupported())
 
 	// Test when all conditions are met
 	comp = &component{
-		nvmlInstance: &MockNVMLInstanceWithProduct{
-			MockNVMLInstance: MockNVMLInstance{exists: true},
+		gpuProvider: &MockGPUProviderWithProduct{
+			MockGPUProvider: MockGPUProvider{exists: true},
 		},
 	}
 	assert.True(t, comp.IsSupported())
@@ -885,69 +885,20 @@ func (m *mockEventBucket) Purge(ctx context.Context, beforeUnixTime int64) (int,
 	return 0, nil
 }
 
-// MockNVMLInstance implements nvidianvml.Instance for testing
-type MockNVMLInstance struct {
+// MockGPUProvider supplies a minimal GPU inventory for tests.
+type MockGPUProvider struct {
 	exists bool
 }
 
-func (m *MockNVMLInstance) NVMLExists() bool {
-	return m.exists
-}
-
-func (m *MockNVMLInstance) DeviceGetCount() (int, error) {
-	return 0, nil
-}
-
-func (m *MockNVMLInstance) DeviceGetHandleByIndex(idx int) (interface{}, error) {
-	return nil, nil
-}
-
-func (m *MockNVMLInstance) Devices() map[string]device.Device {
-	return make(map[string]device.Device)
-}
-
-func (m *MockNVMLInstance) Library() nvmllib.Library {
-	return nil
-}
-
-func (m *MockNVMLInstance) ProductName() string {
+func (m *MockGPUProvider) ProductName() string {
 	return "Test GPU"
 }
 
-func (m *MockNVMLInstance) Architecture() string {
-	return ""
-}
-
-func (m *MockNVMLInstance) Brand() string {
-	return ""
-}
-
-func (m *MockNVMLInstance) DriverVersion() string {
-	return "test-driver-version"
-}
-
-func (m *MockNVMLInstance) DriverMajor() int {
-	return 0
-}
-
-func (m *MockNVMLInstance) CUDAVersion() string {
-	return "test-cuda-version"
-}
-
-func (m *MockNVMLInstance) FabricManagerSupported() bool {
-	return true
-}
-
-func (m *MockNVMLInstance) FabricStateSupported() bool {
-	return false
-}
-
-func (m *MockNVMLInstance) GetMemoryErrorManagementCapabilities() nvidiaproduct.MemoryErrorManagementCapabilities {
-	return nvidiaproduct.MemoryErrorManagementCapabilities{}
-}
-
-func (m *MockNVMLInstance) Shutdown() error {
-	return nil
+func (m *MockGPUProvider) GPUDevices() []nvidiadcgm.DeviceInfo {
+	if m == nil || !m.exists {
+		return nil
+	}
+	return []nvidiadcgm.DeviceInfo{{ID: 0, UUID: "GPU-test", Model: m.ProductName()}}
 }
 
 func TestSXIDComponent_Start(t *testing.T) {

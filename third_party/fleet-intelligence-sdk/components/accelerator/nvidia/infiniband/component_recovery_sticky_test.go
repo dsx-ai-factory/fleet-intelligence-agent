@@ -44,7 +44,7 @@ func TestRecoveryStickyWindow(t *testing.T) {
 		ctx:              context.Background(),
 		dropStickyWindow: 10 * time.Minute,
 		ibPortsStore:     mockStore,
-		nvmlInstance:     &mockNVMLInstance{exists: true, productName: "Test GPU"},
+		gpuProvider:      &mockGPUProvider{exists: true, productName: "Test GPU"},
 		getTimeNowFunc: func() time.Time {
 			return currentTime
 		},
@@ -137,7 +137,7 @@ func TestMultipleRecoveries(t *testing.T) {
 		ctx:              context.Background(),
 		dropStickyWindow: 5 * time.Minute, // Shorter window for faster test
 		ibPortsStore:     mockStore,
-		nvmlInstance:     &mockNVMLInstance{exists: true, productName: "Test GPU"},
+		gpuProvider:      &mockGPUProvider{exists: true, productName: "Test GPU"},
 		getTimeNowFunc: func() time.Time {
 			return currentTime
 		},
@@ -233,7 +233,7 @@ func TestDormantPortsWithRecovery(t *testing.T) {
 		ctx:              context.Background(),
 		dropStickyWindow: 10 * time.Minute,
 		ibPortsStore:     mockStore,
-		nvmlInstance:     &mockNVMLInstance{exists: true, productName: "Test GPU"},
+		gpuProvider:      &mockGPUProvider{exists: true, productName: "Test GPU"},
 		getTimeNowFunc: func() time.Time {
 			return currentTime
 		},

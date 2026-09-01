@@ -41,8 +41,8 @@ func TestCheckWithEmptyIbportsToEvaluate(t *testing.T) {
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
-		nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
-		eventBucket:  mockBucket,
+		gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
+		eventBucket: mockBucket,
 		getClassDevicesFunc: func(ignoreFiles map[string]struct{}) (infinibandclass.Devices, error) {
 			return mockDevices, nil
 		},

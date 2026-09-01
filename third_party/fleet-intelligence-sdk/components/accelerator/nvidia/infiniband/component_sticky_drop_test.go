@@ -30,7 +30,7 @@ func TestDropStickyWindow(t *testing.T) {
 		ctx:              context.Background(),
 		dropStickyWindow: 10 * time.Minute, // 10 minute sticky window
 		ibPortsStore:     mockStore,
-		nvmlInstance:     &mockNVMLInstance{exists: true, productName: "Test GPU"},
+		gpuProvider:      &mockGPUProvider{exists: true, productName: "Test GPU"},
 		getTimeNowFunc: func() time.Time {
 			return mockTime
 		},
@@ -147,7 +147,7 @@ func TestDropStickyWindowEdgeCases(t *testing.T) {
 		ctx:              context.Background(),
 		dropStickyWindow: 5 * time.Minute, // 5 minute sticky window
 		ibPortsStore:     mockStore,
-		nvmlInstance:     &mockNVMLInstance{exists: true, productName: "Test GPU"},
+		gpuProvider:      &mockGPUProvider{exists: true, productName: "Test GPU"},
 		getTimeNowFunc: func() time.Time {
 			return mockTime
 		},
@@ -212,7 +212,7 @@ func TestDropStickyWindowDisabled(t *testing.T) {
 		ctx:              context.Background(),
 		dropStickyWindow: 0,
 		ibPortsStore:     mockStore,
-		nvmlInstance:     &mockNVMLInstance{exists: true, productName: "Test GPU"},
+		gpuProvider:      &mockGPUProvider{exists: true, productName: "Test GPU"},
 		getTimeNowFunc: func() time.Time {
 			return mockTime
 		},
@@ -259,7 +259,7 @@ func TestDropStickyWindowRecoveryLongOutage(t *testing.T) {
 		ctx:              context.Background(),
 		dropStickyWindow: 10 * time.Minute,
 		ibPortsStore:     mockStore,
-		nvmlInstance:     &mockNVMLInstance{exists: true, productName: "Test GPU"},
+		gpuProvider:      &mockGPUProvider{exists: true, productName: "Test GPU"},
 		getTimeNowFunc: func() time.Time {
 			return currentTime
 		},

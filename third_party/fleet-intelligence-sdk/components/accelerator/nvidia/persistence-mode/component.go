@@ -14,15 +14,14 @@ import (
 	"sync"
 	"time"
 
+	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
 	"github.com/olekukonko/tablewriter"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
 	"github.com/NVIDIA/fleet-intelligence-sdk/components"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/device"
-	nvmlerrors "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/errors"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 )
 
 const Name = "accelerator-nvidia-persistence-mode"
@@ -40,8 +39,9 @@ type component struct {
 	getTimeNowFunc      func() time.Time
 	healthCheckInterval time.Duration
 
-	nvmlInstance           nvidianvml.Instance
-	getPersistenceModeFunc func(uuid string, dev device.Device) (PersistenceMode, error)
+	gpuProvider                    components.GPUDeviceProvider
+	getPersistenceModesFunc        func() ([]PersistenceMode, error)
+	defaultGetPersistenceModesFunc func() ([]PersistenceMode, error)
 
 	lastMu          sync.RWMutex
 	lastCheckResult *checkResult
@@ -55,6 +55,9 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 		healthCheckInterval = gpudInstance.HealthCheckInterval
 	}
 
+	getPersistenceModes := func() ([]PersistenceMode, error) {
+		return getPersistenceModesFromDCGM(gpudInstance.GPUDevices(), gpudInstance.DCGMFieldValueCache)
+	}
 	c := &component{
 		ctx:    cctx,
 		cancel: ccancel,
@@ -64,22 +67,29 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 
 		healthCheckInterval: healthCheckInterval,
 
-		nvmlInstance:           gpudInstance.NVMLInstance,
-		getPersistenceModeFunc: GetPersistenceMode,
+		gpuProvider:                    gpudInstance,
+		getPersistenceModesFunc:        getPersistenceModes,
+		defaultGetPersistenceModesFunc: getPersistenceModes,
+	}
+	if gpudInstance.DCGMInstance != nil {
+		if err := gpudInstance.DCGMInstance.AddFieldsToWatch([]dcgm.Short{dcgm.DCGM_FI_DEV_PERSISTENCE_MODE}); err != nil {
+			ccancel()
+			return nil, fmt.Errorf("failed to register DCGM persistence-mode field: %w", err)
+		}
 	}
 	return c, nil
 }
 
 // InjectFault injects a fault into the persistence-mode component by replacing the getPersistenceModeFunc
 func (c *component) InjectFault(errMsg string) {
-	c.getPersistenceModeFunc = func(uuid string, dev device.Device) (PersistenceMode, error) {
-		return PersistenceMode{}, errors.New(errMsg)
+	c.getPersistenceModesFunc = func() ([]PersistenceMode, error) {
+		return nil, errors.New(errMsg)
 	}
 }
 
 // ClearFault clears any injected faults and restores the original persistence mode checking function
 func (c *component) ClearFault() {
-	c.getPersistenceModeFunc = GetPersistenceMode
+	c.getPersistenceModesFunc = c.defaultGetPersistenceModesFunc
 }
 
 func (c *component) Name() string { return Name }
@@ -94,10 +104,10 @@ func (c *component) Tags() []string {
 }
 
 func (c *component) IsSupported() bool {
-	if c.nvmlInstance == nil {
+	if c.gpuProvider == nil {
 		return false
 	}
-	return c.nvmlInstance.NVMLExists() && c.nvmlInstance.ProductName() != ""
+	return len(c.gpuProvider.GPUDevices()) > 0
 }
 
 func (c *component) Start() error {
@@ -149,56 +159,34 @@ func (c *component) Check() components.CheckResult {
 		c.lastMu.Unlock()
 	}()
 
-	if c.nvmlInstance == nil {
-		cr.health = apiv1.HealthStateTypeHealthy
-		cr.reason = "NVIDIA NVML instance is nil"
-		return cr
+	var devices []nvidiadcgm.DeviceInfo
+	if c.gpuProvider != nil {
+		devices = c.gpuProvider.GPUDevices()
 	}
-	if !c.nvmlInstance.NVMLExists() {
+	if len(devices) == 0 {
 		cr.health = apiv1.HealthStateTypeHealthy
-		cr.reason = "NVIDIA NVML library is not loaded"
-		return cr
-	}
-	if c.nvmlInstance.ProductName() == "" {
-		cr.health = apiv1.HealthStateTypeHealthy
-		cr.reason = "NVIDIA NVML is loaded but GPU is not detected (missing product name)"
+		cr.reason = "GPU is not detected by DCGM"
 		return cr
 	}
 
-	devs := c.nvmlInstance.Devices()
-	for uuid, dev := range devs {
-		persistenceMode, err := c.getPersistenceModeFunc(uuid, dev)
-		if err != nil {
-			cr.err = err
-			// deliberately stayed Unhealthy to indicate NVML query errors, GPU-lost, and GPU-requires-reset
+	var err error
+	cr.PersistenceModes, err = c.getPersistenceModesFunc()
+	if err != nil {
+		cr.err = err
+		// The legacy NVML implementation queried persistence mode per GPU and
+		// attached reboot advice to GPU-lost/reset errors here. The shared DCGM
+		// cache polls all registered fields together, so those failures are
+		// device-wide rather than persistence-mode-specific. Keep this aligned
+		// with the common DCGM field-component error policy.
+		if nvidiadcgm.IsUnhealthyAPIError(err) {
 			cr.health = apiv1.HealthStateTypeUnhealthy
-			cr.reason = "error getting persistence mode"
-
-			if errors.Is(err, nvmlerrors.ErrGPURequiresReset) {
-				cr.reason = nvmlerrors.ErrGPURequiresReset.Error()
-				cr.suggestedActions = &apiv1.SuggestedActions{
-					Description: nvmlerrors.ErrGPURequiresReset.Error(),
-					RepairActions: []apiv1.RepairActionType{
-						apiv1.RepairActionTypeRebootSystem,
-					},
-				}
-			}
-
-			if errors.Is(err, nvmlerrors.ErrGPULost) {
-				cr.reason = nvmlerrors.ErrGPULost.Error()
-				cr.suggestedActions = &apiv1.SuggestedActions{
-					Description: nvmlerrors.ErrGPULost.Error(),
-					RepairActions: []apiv1.RepairActionType{
-						apiv1.RepairActionTypeRebootSystem,
-					},
-				}
-			}
-
-			log.Logger.Warnw(cr.reason, "uuid", uuid, "error", cr.err)
-			return cr
+			cr.reason = nvidiadcgm.AppendDCGMErrorType("failed to get DCGM persistence-mode field", err)
+		} else {
+			cr.health = apiv1.HealthStateTypeDegraded
+			cr.reason = fmt.Sprintf("failed to get DCGM persistence-mode field: %v", err)
 		}
-
-		cr.PersistenceModes = append(cr.PersistenceModes, persistenceMode)
+		log.Logger.Warnw(cr.reason, "error", cr.err)
+		return cr
 	}
 
 	notEnabled := []string{}
@@ -214,13 +202,13 @@ func (c *component) Check() components.CheckResult {
 		// rather than critical (Unhealthy).
 		cr.health = apiv1.HealthStateTypeDegraded
 		if len(notEnabled) == len(cr.PersistenceModes) {
-			cr.reason = fmt.Sprintf("all %d GPU(s) disabled persistence mode", len(devs))
+			cr.reason = fmt.Sprintf("all %d GPU(s) disabled persistence mode", len(devices))
 		} else {
 			cr.reason = strings.Join(notEnabled, ", ")
 		}
 	} else {
 		cr.health = apiv1.HealthStateTypeHealthy
-		cr.reason = fmt.Sprintf("all %d GPU(s) were checked, no persistence mode issue found", len(devs))
+		cr.reason = fmt.Sprintf("all %d GPU(s) were checked, no persistence mode issue found", len(devices))
 	}
 
 	return cr

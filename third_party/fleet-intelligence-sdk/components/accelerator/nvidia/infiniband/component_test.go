@@ -23,10 +23,7 @@ import (
 	pkgconfigcommon "github.com/NVIDIA/fleet-intelligence-sdk/pkg/config/common"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/eventstore"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/kmsg"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/device"
-	nvmllib "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/lib"
-	nvidiaproduct "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/product"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 )
 
 func TestComponentCheck(t *testing.T) {
@@ -57,17 +54,17 @@ func TestComponentCheck(t *testing.T) {
 	require.True(t, ok)
 	require.NotNil(t, data)
 	assert.Equal(t, apiv1.HealthStateTypeHealthy, data.health)
-	assert.Equal(t, "NVIDIA NVML instance is nil", data.reason)
+	assert.Equal(t, "GPU is not detected by DCGM", data.reason)
 
 	// Case 2: With NVML but missing product name
-	nvmlMock := &mockNVMLInstance{exists: true, productName: ""}
-	c.nvmlInstance = nvmlMock
+	nvmlMock := &mockGPUProvider{exists: true, productName: ""}
+	c.gpuProvider = nvmlMock
 	result = c.Check()
 	data, ok = result.(*checkResult)
 	require.True(t, ok)
 	require.NotNil(t, data)
 	assert.Equal(t, apiv1.HealthStateTypeHealthy, data.health)
-	assert.Equal(t, "NVIDIA NVML is loaded but GPU is not detected (missing product name)", data.reason)
+	assert.Equal(t, "GPU is not detected by DCGM", data.reason)
 
 	// Case 3: With NVML and valid product name but zero threshold
 	nvmlMock.productName = "Tesla V100"
@@ -482,66 +479,17 @@ func (m *mockEventBucket) GetAPIEvents() apiv1.Events {
 	return result
 }
 
-// Test helpers for mocking NVML
-type mockNVMLInstance struct {
+// Test helper for GPU inventory gates.
+type mockGPUProvider struct {
 	exists      bool
 	productName string
 }
 
-func (m *mockNVMLInstance) NVMLExists() bool {
-	return m.exists
-}
-
-// Simple mock implementation of required InstanceV2 interface methods
-func (m *mockNVMLInstance) Devices() map[string]device.Device {
-	return nil
-}
-
-func (m *mockNVMLInstance) Library() nvmllib.Library {
-	return nil
-}
-
-func (m *mockNVMLInstance) ProductName() string {
-	if m.productName == "" {
-		return "" // Empty string for testing
+func (m *mockGPUProvider) GPUDevices() []nvidiadcgm.DeviceInfo {
+	if m == nil || !m.exists || m.productName == "" {
+		return nil
 	}
-	return m.productName // Return custom value for testing
-}
-
-func (m *mockNVMLInstance) Architecture() string {
-	return ""
-}
-
-func (m *mockNVMLInstance) Brand() string {
-	return ""
-}
-
-func (m *mockNVMLInstance) DriverVersion() string {
-	return ""
-}
-
-func (m *mockNVMLInstance) DriverMajor() int {
-	return 0
-}
-
-func (m *mockNVMLInstance) CUDAVersion() string {
-	return ""
-}
-
-func (m *mockNVMLInstance) FabricManagerSupported() bool {
-	return true
-}
-
-func (m *mockNVMLInstance) FabricStateSupported() bool {
-	return false
-}
-
-func (m *mockNVMLInstance) GetMemoryErrorManagementCapabilities() nvidiaproduct.MemoryErrorManagementCapabilities {
-	return nvidiaproduct.MemoryErrorManagementCapabilities{}
-}
-
-func (m *mockNVMLInstance) Shutdown() error {
-	return nil
+	return []nvidiadcgm.DeviceInfo{{ID: 0, UUID: "GPU-test", Model: m.productName}}
 }
 
 func mockGetThresholds() types.ExpectedPortStates {
@@ -626,7 +574,7 @@ func TestComponentCheckErrorCases(t *testing.T) {
 				AtLeastRate:  0,
 			}
 		},
-		nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider: &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getClassDevicesFunc: func(ignoreFiles map[string]struct{}) (infinibandclass.Devices, error) {
 			return infinibandclass.Devices{}, nil
 		},
@@ -695,7 +643,7 @@ func TestIsSupported(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		nvml     nvidianvml.Instance
+		nvml     components.GPUDeviceProvider
 		expected bool
 	}{
 		{
@@ -705,17 +653,17 @@ func TestIsSupported(t *testing.T) {
 		},
 		{
 			name:     "nvml exists false",
-			nvml:     &mockNVMLInstance{exists: false, productName: ""},
+			nvml:     &mockGPUProvider{exists: false, productName: ""},
 			expected: false,
 		},
 		{
 			name:     "nvml exists but no product name",
-			nvml:     &mockNVMLInstance{exists: true, productName: ""},
+			nvml:     &mockGPUProvider{exists: true, productName: ""},
 			expected: false,
 		},
 		{
 			name:     "nvml exists with product name",
-			nvml:     &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+			nvml:     &mockGPUProvider{exists: true, productName: "Tesla V100"},
 			expected: true,
 		},
 	}
@@ -723,7 +671,7 @@ func TestIsSupported(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &component{
-				nvmlInstance: tt.nvml,
+				gpuProvider: tt.nvml,
 			}
 			assert.Equal(t, tt.expected, c.IsSupported())
 		})
@@ -861,7 +809,7 @@ func TestCheckWithClassDevicesSuccess(t *testing.T) {
 		ctx:         cctx,
 		cancel:      ccancel,
 		eventBucket: mockBucket,
-		nvmlInstance: &mockNVMLInstance{
+		gpuProvider: &mockGPUProvider{
 			exists:      true,
 			productName: "Tesla V100",
 		},
@@ -929,7 +877,7 @@ func TestComponentCheckWithUnknownEventType(t *testing.T) {
 		cancel:       ccancel,
 		eventBucket:  mockBucket,
 		ibPortsStore: mockStore,
-		nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:  &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -1027,7 +975,7 @@ func TestComponentCheckWithNoEvents(t *testing.T) {
 		cancel:       ccancel,
 		eventBucket:  mockBucket,
 		ibPortsStore: mockStore,
-		nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:  &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -1082,7 +1030,7 @@ func TestComponentCheckWithUnhealthyIBPortsAndEvents(t *testing.T) {
 		cancel:       ccancel,
 		eventBucket:  mockBucket,
 		ibPortsStore: mockStore,
-		nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:  &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -1162,7 +1110,7 @@ func TestComponentCheckWithExistingReasonAndEvents(t *testing.T) {
 		cancel:       ccancel,
 		eventBucket:  mockBucket,
 		ibPortsStore: mockStore,
-		nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:  &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -1261,7 +1209,7 @@ func TestComponentCheckWithEmptyReasonAndEvents(t *testing.T) {
 		cancel:       ccancel,
 		eventBucket:  mockBucket,
 		ibPortsStore: mockStore,
-		nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:  &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -1397,7 +1345,7 @@ func TestComponentCheckWithTrueEmptyReasonAndEvents(t *testing.T) {
 		cancel:       ccancel,
 		eventBucket:  mockBucket,
 		ibPortsStore: mockStore,
-		nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:  &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -1512,7 +1460,7 @@ func TestComponentCheckWithLastEventsError(t *testing.T) {
 		eventBucket:    mockBucket,
 		ibPortsStore:   mockStore,
 		requestTimeout: 5 * time.Second,
-		nvmlInstance:   &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:    &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -1571,7 +1519,7 @@ func TestComponentCheckWithNilIBPortsStore(t *testing.T) {
 		eventBucket:    mockBucket,
 		ibPortsStore:   nil, // Nil store should skip LastEvents processing
 		requestTimeout: 5 * time.Second,
-		nvmlInstance:   &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:    &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -1652,7 +1600,7 @@ func TestComponentCheckWithMultipleEventTypes(t *testing.T) {
 		eventBucket:    mockBucket,
 		ibPortsStore:   mockStore,
 		requestTimeout: 5 * time.Second,
-		nvmlInstance:   &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:    &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -1736,7 +1684,7 @@ func TestComponentCheckWithEmptyEvents(t *testing.T) {
 		eventBucket:    mockBucket,
 		ibPortsStore:   mockStore,
 		requestTimeout: 5 * time.Second,
-		nvmlInstance:   &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:    &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -1814,7 +1762,7 @@ func TestComponentCheckWithEventFindError(t *testing.T) {
 		eventBucket:    mockBucket,
 		ibPortsStore:   mockStore,
 		requestTimeout: 5 * time.Second,
-		nvmlInstance:   &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:    &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -1919,7 +1867,7 @@ func TestComponentCheckHealthyPortsWithHistoricalEvents(t *testing.T) {
 		eventBucket:    mockBucket,
 		ibPortsStore:   mockStore,
 		requestTimeout: 5 * time.Second,
-		nvmlInstance:   &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:    &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -2014,7 +1962,7 @@ func TestComponentCheckWithUnknownEventTypeDefaultCase(t *testing.T) {
 		eventBucket:    mockBucket,
 		ibPortsStore:   mockStore,
 		requestTimeout: 5 * time.Second,
-		nvmlInstance:   &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:    &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -2100,7 +2048,7 @@ func TestComponentCheckDropEventsIgnoredWhenHealthy(t *testing.T) {
 		eventBucket:    mockBucket,
 		ibPortsStore:   mockStore,
 		requestTimeout: 5 * time.Second,
-		nvmlInstance:   &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:    &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -2180,7 +2128,7 @@ func TestComponentCheckThresholdMismatchNoHardwareInspection(t *testing.T) {
 		cancel:       ccancel,
 		eventBucket:  mockBucket,
 		ibPortsStore: nil, // No events store, pure threshold evaluation
-		nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:  &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -2291,7 +2239,7 @@ func TestComponentCheckRateMismatchNoHardwareInspection(t *testing.T) {
 		cancel:       ccancel,
 		eventBucket:  mockBucket,
 		ibPortsStore: nil, // No events store, pure threshold evaluation
-		nvmlInstance: &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:  &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -2384,7 +2332,7 @@ func TestComponentCheckDropEventsProcessedWhenUnhealthy(t *testing.T) {
 		eventBucket:    mockBucket,
 		ibPortsStore:   mockStore,
 		requestTimeout: 5 * time.Second,
-		nvmlInstance:   &mockNVMLInstance{exists: true, productName: "Tesla V100"},
+		gpuProvider:    &mockGPUProvider{exists: true, productName: "Tesla V100"},
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
 		},

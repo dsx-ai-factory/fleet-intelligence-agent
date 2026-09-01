@@ -38,7 +38,7 @@ func TestDebugThresholdFailingOldDrop(t *testing.T) {
 		ctx:              context.Background(),
 		dropStickyWindow: 10 * time.Minute,
 		ibPortsStore:     mockStore,
-		nvmlInstance:     &mockNVMLInstance{exists: true, productName: "Test GPU"},
+		gpuProvider:      &mockGPUProvider{exists: true, productName: "Test GPU"},
 		getTimeNowFunc: func() time.Time {
 			return now
 		},
@@ -166,7 +166,7 @@ func TestThreeConditionsIndependently(t *testing.T) {
 				ctx:                   context.Background(),
 				dropStickyWindow:      10 * time.Minute,
 				ibPortsStore:          mockStore,
-				nvmlInstance:          &mockNVMLInstance{exists: true, productName: "Test GPU"},
+				gpuProvider:           &mockGPUProvider{exists: true, productName: "Test GPU"},
 				thresholdRecoveryTime: tc.recoveryTime,
 				getTimeNowFunc: func() time.Time {
 					return now

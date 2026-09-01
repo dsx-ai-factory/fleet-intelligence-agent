@@ -22,68 +22,20 @@ import (
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
 	"github.com/NVIDIA/fleet-intelligence-sdk/components"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/device"
-	nvmllib "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/lib"
-	nvidiaproduct "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/product"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 )
 
-// Mock NVML instance for testing
-type mockNVMLInstance struct {
+// Mock GPU inventory provider for testing.
+type mockGPUProvider struct {
 	nvmlExists  bool
 	productName string
 }
 
-func (m *mockNVMLInstance) NVMLExists() bool {
-	return m.nvmlExists
-}
-
-func (m *mockNVMLInstance) ProductName() string {
-	return m.productName
-}
-
-func (m *mockNVMLInstance) Architecture() string {
-	return "mock-architecture"
-}
-
-func (m *mockNVMLInstance) Library() nvmllib.Library {
-	return nil
-}
-
-func (m *mockNVMLInstance) Devices() map[string]device.Device {
-	return nil
-}
-
-func (m *mockNVMLInstance) Brand() string {
-	return "NVIDIA"
-}
-
-func (m *mockNVMLInstance) DriverVersion() string {
-	return "470.00"
-}
-
-func (m *mockNVMLInstance) DriverMajor() int {
-	return 470
-}
-
-func (m *mockNVMLInstance) CUDAVersion() string {
-	return "11.4"
-}
-
-func (m *mockNVMLInstance) FabricManagerSupported() bool {
-	return false
-}
-
-func (m *mockNVMLInstance) FabricStateSupported() bool {
-	return false
-}
-
-func (m *mockNVMLInstance) GetMemoryErrorManagementCapabilities() nvidiaproduct.MemoryErrorManagementCapabilities {
-	return nvidiaproduct.MemoryErrorManagementCapabilities{}
-}
-
-func (m *mockNVMLInstance) Shutdown() error {
-	return nil
+func (m *mockGPUProvider) GPUDevices() []nvidiadcgm.DeviceInfo {
+	if m == nil || !m.nvmlExists || m.productName == "" {
+		return nil
+	}
+	return []nvidiadcgm.DeviceInfo{{ID: 0, UUID: "GPU-test", Model: m.productName}}
 }
 
 func Test_componentStart(t *testing.T) {
@@ -2042,7 +1994,7 @@ func Test_checkContainerdRunningFunc(t *testing.T) {
 func TestNVMLValidationWithContainerToolkit(t *testing.T) {
 	tests := []struct {
 		name                              string
-		nvmlInstance                      nvidianvml.Instance
+		gpuProvider                       components.GPUDeviceProvider
 		getContainerdConfigFunc           func() ([]byte, error)
 		pods                              []PodSandbox
 		getTimeNowFunc                    func() time.Time
@@ -2052,7 +2004,7 @@ func TestNVMLValidationWithContainerToolkit(t *testing.T) {
 	}{
 		{
 			name: "nvml with nvidia config and container toolkit present and running long enough",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -2084,7 +2036,7 @@ func TestNVMLValidationWithContainerToolkit(t *testing.T) {
 		},
 		{
 			name: "nvml without nvidia config but container toolkit present and running long enough",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -2107,7 +2059,7 @@ func TestNVMLValidationWithContainerToolkit(t *testing.T) {
 		},
 		{
 			name: "nvml with container toolkit but not running long enough",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -2139,7 +2091,7 @@ func TestNVMLValidationWithContainerToolkit(t *testing.T) {
 		},
 		{
 			name: "nvml with container toolkit but container not running",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -2171,7 +2123,7 @@ func TestNVMLValidationWithContainerToolkit(t *testing.T) {
 		},
 		{
 			name: "nvml with container toolkit pod but pod not ready",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -2197,7 +2149,7 @@ func TestNVMLValidationWithContainerToolkit(t *testing.T) {
 		},
 		{
 			name: "nvml with nvidia GPUs but no container toolkit pod",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -2222,7 +2174,7 @@ func TestNVMLValidationWithContainerToolkit(t *testing.T) {
 		},
 		{
 			name: "nvml with config error when checking containerd config",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -2254,7 +2206,7 @@ func TestNVMLValidationWithContainerToolkit(t *testing.T) {
 				ctx:    ctx,
 				cancel: cancel,
 
-				nvmlInstance:                      tt.nvmlInstance,
+				gpuProvider:                       tt.gpuProvider,
 				getContainerdConfigFunc:           tt.getContainerdConfigFunc,
 				getTimeNowFunc:                    tt.getTimeNowFunc,
 				containerToolkitCreationThreshold: tt.containerToolkitCreationThreshold,
@@ -2880,14 +2832,14 @@ func TestCheckWhenContainerdCRINotEnabled(t *testing.T) {
 func TestNVMLValidation(t *testing.T) {
 	tests := []struct {
 		name                    string
-		nvmlInstance            nvidianvml.Instance
+		gpuProvider             components.GPUDeviceProvider
 		getContainerdConfigFunc func() ([]byte, error)
 		expectedHealth          apiv1.HealthStateType
 		expectedReason          string
 	}{
 		{
-			name:         "nvml instance is nil",
-			nvmlInstance: nil,
+			name:        "nvml instance is nil",
+			gpuProvider: nil,
 			getContainerdConfigFunc: func() ([]byte, error) {
 				return []byte("nvidia"), nil
 			},
@@ -2896,7 +2848,7 @@ func TestNVMLValidation(t *testing.T) {
 		},
 		{
 			name: "nvml does not exist",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  false,
 				productName: "Tesla V100",
 			},
@@ -2908,7 +2860,7 @@ func TestNVMLValidation(t *testing.T) {
 		},
 		{
 			name: "product name is empty",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "",
 			},
@@ -2920,7 +2872,7 @@ func TestNVMLValidation(t *testing.T) {
 		},
 		{
 			name: "getContainerdConfigFunc is nil - skips config check",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -2930,7 +2882,7 @@ func TestNVMLValidation(t *testing.T) {
 		},
 		{
 			name: "config read error",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -2942,7 +2894,7 @@ func TestNVMLValidation(t *testing.T) {
 		},
 		{
 			name: "config contains nvidia - healthy",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -2965,7 +2917,7 @@ func TestNVMLValidation(t *testing.T) {
 		},
 		{
 			name: "config does not contain nvidia - healthy, only logs warning",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -2981,7 +2933,7 @@ func TestNVMLValidation(t *testing.T) {
 		},
 		{
 			name: "config missing required nvidia runtime - healthy, only logs warning",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -3002,7 +2954,7 @@ func TestNVMLValidation(t *testing.T) {
 				ctx:    ctx,
 				cancel: cancel,
 
-				nvmlInstance:            tt.nvmlInstance,
+				gpuProvider:             tt.gpuProvider,
 				getContainerdConfigFunc: tt.getContainerdConfigFunc,
 
 				// Mock all dependencies as successful to focus on NVML validation
@@ -3046,7 +2998,7 @@ func TestNVMLValidationIntegration(t *testing.T) {
 		ctx:    ctx,
 		cancel: cancel,
 
-		nvmlInstance: &mockNVMLInstance{
+		gpuProvider: &mockGPUProvider{
 			nvmlExists:  true,
 			productName: "Tesla V100-SXM2-32GB",
 		},
@@ -3272,7 +3224,7 @@ func TestCheckContainerdActiveness(t *testing.T) {
 func TestContainerToolkitValidation(t *testing.T) {
 	tests := []struct {
 		name                              string
-		nvmlInstance                      nvidianvml.Instance
+		gpuProvider                       components.GPUDeviceProvider
 		pods                              []PodSandbox
 		getTimeNowFunc                    func() time.Time
 		containerToolkitCreationThreshold time.Duration
@@ -3280,8 +3232,8 @@ func TestContainerToolkitValidation(t *testing.T) {
 		expectedReason                    string
 	}{
 		{
-			name:         "no nvml instance - skips container toolkit check",
-			nvmlInstance: nil,
+			name:        "no nvml instance - skips container toolkit check",
+			gpuProvider: nil,
 			pods: []PodSandbox{
 				{Name: "regular-pod", Containers: []PodSandboxContainerStatus{{Name: "regular-container"}}},
 			},
@@ -3294,7 +3246,7 @@ func TestContainerToolkitValidation(t *testing.T) {
 		},
 		{
 			name: "nvml exists but no product name - skips container toolkit check",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "",
 			},
@@ -3310,7 +3262,7 @@ func TestContainerToolkitValidation(t *testing.T) {
 		},
 		{
 			name: "no pods - skips container toolkit check",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -3324,7 +3276,7 @@ func TestContainerToolkitValidation(t *testing.T) {
 		},
 		{
 			name: "container toolkit daemonset not found - logs warning",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -3345,7 +3297,7 @@ func TestContainerToolkitValidation(t *testing.T) {
 		},
 		{
 			name: "container toolkit found and running long enough",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -3371,7 +3323,7 @@ func TestContainerToolkitValidation(t *testing.T) {
 		},
 		{
 			name: "container toolkit found but not running long enough",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -3397,7 +3349,7 @@ func TestContainerToolkitValidation(t *testing.T) {
 		},
 		{
 			name: "container toolkit found but container not running",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -3423,7 +3375,7 @@ func TestContainerToolkitValidation(t *testing.T) {
 		},
 		{
 			name: "container toolkit daemonset found but pod not ready",
-			nvmlInstance: &mockNVMLInstance{
+			gpuProvider: &mockGPUProvider{
 				nvmlExists:  true,
 				productName: "Tesla V100",
 			},
@@ -3458,7 +3410,7 @@ func TestContainerToolkitValidation(t *testing.T) {
 				ctx:    ctx,
 				cancel: cancel,
 
-				nvmlInstance:                      tt.nvmlInstance,
+				gpuProvider:                       tt.gpuProvider,
 				getTimeNowFunc:                    tt.getTimeNowFunc,
 				containerToolkitCreationThreshold: tt.containerToolkitCreationThreshold,
 				getContainerdConfigFunc: func() ([]byte, error) {
