@@ -116,10 +116,32 @@ var allHealthSystems = []dcgm.HealthSystem{
 	dcgm.DCGM_HEALTH_WATCH_NVSWITCH_FATAL,
 }
 
-// DeviceInfo stores cached device information
+// DeviceInfo stores cached device identity and static inventory information.
+// Values are populated from dcgmGetDeviceAttributes when the connection is
+// established and refreshed whenever the reconnecting instance reconnects.
 type DeviceInfo struct {
-	ID   uint
-	UUID string
+	ID                     uint
+	UUID                   string
+	BusID                  string
+	Brand                  string
+	Model                  string
+	Serial                 string
+	VBIOSVersion           string
+	DriverVersion          string
+	FramebufferMemoryBytes uint64
+}
+
+func framebufferMemoryBytes(totalMiB uint) uint64 {
+	const bytesPerMiB uint64 = 1024 * 1024
+
+	value := uint64(totalMiB)
+	if value == 0 || value >= uint64(dcgm.DCGM_FT_INT64_BLANK) {
+		return 0
+	}
+	if value > ^uint64(0)/bytesPerMiB {
+		return 0
+	}
+	return value * bytesPerMiB
 }
 
 // Instance is the DCGM library connector interface.
@@ -321,8 +343,15 @@ func newConnectedInstance(groupName string) (Instance, error) {
 				continue
 			}
 			devices = append(devices, DeviceInfo{
-				ID:   deviceID,
-				UUID: deviceInfo.UUID,
+				ID:                     deviceID,
+				UUID:                   deviceInfo.UUID,
+				BusID:                  deviceInfo.PCI.BusID,
+				Brand:                  deviceInfo.Identifiers.Brand,
+				Model:                  deviceInfo.Identifiers.Model,
+				Serial:                 deviceInfo.Identifiers.Serial,
+				VBIOSVersion:           deviceInfo.Identifiers.Vbios,
+				DriverVersion:          deviceInfo.Identifiers.DriverVersion,
+				FramebufferMemoryBytes: framebufferMemoryBytes(deviceInfo.PCI.FBTotal),
 			})
 		}
 		log.Logger.Infow("cached device information", "numDevices", len(devices))

@@ -59,6 +59,30 @@ func TestResolveInitFromEnv(t *testing.T) {
 	}
 }
 
+func TestFramebufferMemoryBytes(t *testing.T) {
+	tests := []struct {
+		name     string
+		totalMiB uint
+		want     uint64
+	}{
+		{name: "zero", totalMiB: 0, want: 0},
+		{name: "valid", totalMiB: 80 * 1024, want: 80 * 1024 * 1024 * 1024},
+		{name: "blank", totalMiB: uint(dcgm.DCGM_FT_INT64_BLANK), want: 0},
+		{name: "not found", totalMiB: uint(dcgm.DCGM_FT_INT64_NOT_FOUND), want: 0},
+		{name: "not supported", totalMiB: uint(dcgm.DCGM_FT_INT64_NOT_SUPPORTED), want: 0},
+		{name: "not permissioned", totalMiB: uint(dcgm.DCGM_FT_INT64_NOT_PERMISSIONED), want: 0},
+		{name: "conversion overflow", totalMiB: ^uint(0), want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := framebufferMemoryBytes(tt.totalMiB); got != tt.want {
+				t.Fatalf("framebufferMemoryBytes(%d) = %d, want %d", tt.totalMiB, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNewConnectedInstanceCleansUpWhenGroupCreationFails(t *testing.T) {
 	originalDCGMInitFunc := dcgmInitFunc
 	originalDCGMNewDefaultGroupFunc := dcgmNewDefaultGroupFunc
