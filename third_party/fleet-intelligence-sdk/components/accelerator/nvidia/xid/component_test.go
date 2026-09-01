@@ -6,6 +6,7 @@ package xid
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"sync"
@@ -924,21 +925,22 @@ func TestUpdateCurrentState(t *testing.T) {
 	c.eventBucket = eventBucket
 }
 
-// Helper function to create a mock NVML instance for testing
+// Helper function to create a mock GPU provider for testing.
 func createMockGPUProvider() *mockGPUProvider {
 	return &mockGPUProvider{
 		rowRemappingSupported: false,
 	}
 }
 
-// Helper function to create a mock NVML instance with row remapping support
+// Helper function to create a mock GPU provider with row remapping support.
 func createMockGPUProviderWithRowRemapping() *mockGPUProvider {
 	return &mockGPUProvider{
 		rowRemappingSupported: true,
 	}
 }
 
-// Mock NVML implementation for testing
+// mockGPUProvider includes each PCI bus used by the XID component tests so
+// row-remapping support can be evaluated for the GPU that emitted the event.
 type mockGPUProvider struct {
 	rowRemappingSupported bool
 }
@@ -948,7 +950,69 @@ func (m *mockGPUProvider) GPUDevices() []nvidiadcgm.DeviceInfo {
 	if m != nil && m.rowRemappingSupported {
 		model = "H100"
 	}
-	return []nvidiadcgm.DeviceInfo{{ID: 0, UUID: "GPU-test", Model: model, BusID: "0000:9b:00.0"}}
+
+	devices := make([]nvidiadcgm.DeviceInfo, 0, 5)
+	for i := 1; i <= 5; i++ {
+		devices = append(devices, nvidiadcgm.DeviceInfo{
+			ID:    uint(i - 1),
+			UUID:  fmt.Sprintf("GPU-test-%d", i),
+			Model: model,
+			BusID: fmt.Sprintf("00000000:%02x:00.0", i),
+		})
+	}
+	return devices
+}
+
+func TestShouldDiscardRowRemappingXIDUsesEventGPU(t *testing.T) {
+	devices := map[string]nvidiadcgm.DeviceInfo{
+		"GPU-h100": {
+			UUID:  "GPU-h100",
+			Model: "H100",
+			BusID: "00000000:01:00.0",
+		},
+		"GPU-v100": {
+			UUID:  "GPU-v100",
+			Model: "V100",
+			BusID: "00000000:02:00.0",
+		},
+	}
+
+	tests := []struct {
+		name   string
+		xidErr *XidError
+		want   bool
+	}{
+		{
+			name:   "supported event GPU",
+			xidErr: &XidError{Xid: 63, DeviceUUID: "PCI:0000:01:00"},
+			want:   true,
+		},
+		{
+			name:   "unsupported event GPU on mixed-model host",
+			xidErr: &XidError{Xid: 64, DeviceUUID: "PCI:0000:02:00"},
+			want:   false,
+		},
+		{
+			name:   "unresolved event GPU",
+			xidErr: &XidError{Xid: 63, DeviceUUID: "PCI:0000:03:00"},
+			want:   false,
+		},
+		{
+			name:   "other XID on supported GPU",
+			xidErr: &XidError{Xid: 31, DeviceUUID: "PCI:0000:01:00"},
+			want:   false,
+		},
+		{
+			name: "nil XID",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, shouldDiscardRowRemappingXID(tt.xidErr, devices))
+		})
+	}
 }
 
 func TestDataString(t *testing.T) {

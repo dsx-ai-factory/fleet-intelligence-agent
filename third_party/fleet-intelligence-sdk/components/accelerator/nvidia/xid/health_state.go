@@ -167,17 +167,25 @@ func (xidErr *xidErrorEventDetail) buildMessage(devices map[string]nvidiadcgm.De
 }
 
 func convertBusIDToUUID(busID string, devices map[string]nvidiadcgm.DeviceInfo) string {
-	busID, ok := normalizePCIBusID(busID)
+	uuid, _, ok := deviceByBusID(busID, devices)
 	if !ok {
 		return ""
 	}
-	for k, v := range devices {
-		deviceBusID, ok := normalizePCIBusID(v.BusID)
+	return uuid
+}
+
+func deviceByBusID(busID string, devices map[string]nvidiadcgm.DeviceInfo) (string, nvidiadcgm.DeviceInfo, bool) {
+	busID, ok := normalizePCIBusID(busID)
+	if !ok {
+		return "", nvidiadcgm.DeviceInfo{}, false
+	}
+	for uuid, device := range devices {
+		deviceBusID, ok := normalizePCIBusID(device.BusID)
 		if ok && deviceBusID == busID {
-			return k
+			return uuid, device, true
 		}
 	}
-	return ""
+	return "", nvidiadcgm.DeviceInfo{}, false
 }
 
 // normalizePCIBusID returns domain:bus:device with an eight-digit domain.

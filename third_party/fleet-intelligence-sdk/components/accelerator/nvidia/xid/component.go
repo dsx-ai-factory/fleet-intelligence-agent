@@ -258,7 +258,7 @@ func (c *component) Check() components.CheckResult {
 		// from Xid 63/64, while row remmaping pending may self-resolve
 		// after >3 times of system reboots
 		// this is why we here discard Xid 63/64 in favor of row remapping checks
-		if rowRemappingSupported(devices) && (xidErr.Xid == 63 || xidErr.Xid == 64) {
+		if shouldDiscardRowRemappingXID(xidErr, devices) {
 			log.Logger.Warnw("discarding Xid 63/64 in favor of remapped-rows component", "xid", xidErr.Xid, "deviceUUID", xidErr.DeviceUUID)
 			continue
 		}
@@ -450,7 +450,7 @@ func (c *component) start(kmsgCh <-chan kmsg.Message, updatePeriod time.Duration
 			// from Xid 63/64, while row remmaping pending may self-resolve
 			// after >3 times of system reboots
 			// this is why we here discard Xid 63/64 in favor of row remapping checks
-			if rowRemappingSupported(c.currentDevices()) && (xidErr.Xid == 63 || xidErr.Xid == 64) {
+			if shouldDiscardRowRemappingXID(xidErr, c.currentDevices()) {
 				log.Logger.Warnw("discarding Xid 63/64 in favor of remapped-rows component", "xid", xidErr.Xid, "deviceUUID", xidErr.DeviceUUID)
 				continue
 			}
@@ -591,13 +591,19 @@ func (c *component) currentDevices() map[string]nvidiadcgm.DeviceInfo {
 	return devices
 }
 
-func rowRemappingSupported(devices map[string]nvidiadcgm.DeviceInfo) bool {
-	for _, device := range devices {
-		if nvidiaproduct.SupportedMemoryMgmtCapsByGPUProduct(device.Model).RowRemapping {
-			return true
-		}
+func shouldDiscardRowRemappingXID(xidErr *XidError, devices map[string]nvidiadcgm.DeviceInfo) bool {
+	if xidErr == nil || (xidErr.Xid != 63 && xidErr.Xid != 64) {
+		return false
 	}
-	return false
+
+	_, device, ok := deviceByBusID(xidErr.DeviceUUID, devices)
+	if !ok {
+		// Keep the XID when its GPU cannot be identified. Discarding it would
+		// risk hiding a fault that the remapped-rows component cannot report.
+		return false
+	}
+
+	return nvidiaproduct.SupportedMemoryMgmtCapsByGPUProduct(device.Model).RowRemapping
 }
 
 // mergeEvents merges two event slices and returns a time descending sorted new slice
