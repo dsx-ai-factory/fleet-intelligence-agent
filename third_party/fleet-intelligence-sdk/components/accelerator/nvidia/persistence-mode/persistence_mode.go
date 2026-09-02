@@ -42,6 +42,10 @@ func getPersistenceModesFromDCGM(devices []nvidiadcgm.DeviceInfo, fieldCache *nv
 	if err != nil {
 		return nil, err
 	}
+	return persistenceModesFromFieldValues(devices, results), nil
+}
+
+func persistenceModesFromFieldValues(devices []nvidiadcgm.DeviceInfo, results []nvidiadcgm.DeviceFieldValues) []PersistenceMode {
 	valuesByDevice := make(map[uint]dcgm.FieldValue_v1, len(results))
 	for _, result := range results {
 		for _, value := range result.Values {
@@ -53,11 +57,11 @@ func getPersistenceModesFromDCGM(devices []nvidiadcgm.DeviceInfo, fieldCache *nv
 	modes := make([]PersistenceMode, 0, len(devices))
 	for _, device := range devices {
 		mode := PersistenceMode{UUID: device.UUID, BusID: device.BusID}
-		if value, ok := valuesByDevice[device.ID]; ok {
+		if value, ok := valuesByDevice[device.ID]; ok && value.Status == dcgm.DCGM_ST_OK {
 			mode.Supported = true
 			mode.Enabled = value.Int64() != 0
 		}
 		modes = append(modes, mode)
 	}
-	return modes, nil
+	return modes
 }
