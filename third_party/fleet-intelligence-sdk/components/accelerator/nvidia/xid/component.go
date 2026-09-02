@@ -439,6 +439,7 @@ func (c *component) start(kmsgCh <-chan kmsg.Message, updatePeriod time.Duration
 				log.Logger.Debugw("not xid event, skip", "kmsg", message)
 				continue
 			}
+			devices := c.currentDevices()
 
 			// row remapping pending/failure (Xid 63/64)
 			// can also be detected by DCGM telemetry (vs. kmsg scanning)
@@ -450,7 +451,7 @@ func (c *component) start(kmsgCh <-chan kmsg.Message, updatePeriod time.Duration
 			// from Xid 63/64, while row remmaping pending may self-resolve
 			// after >3 times of system reboots
 			// this is why we here discard Xid 63/64 in favor of row remapping checks
-			if shouldDiscardRowRemappingXID(xidErr, c.currentDevices()) {
+			if shouldDiscardRowRemappingXID(xidErr, devices) {
 				log.Logger.Warnw("discarding Xid 63/64 in favor of remapped-rows component", "xid", xidErr.Xid, "deviceUUID", xidErr.DeviceUUID)
 				continue
 			}
@@ -537,7 +538,7 @@ func (c *component) start(kmsgCh <-chan kmsg.Message, updatePeriod time.Duration
 			}
 			logger.Infow("inserted the event successfully")
 			metricXIDErrs.With(prometheus.Labels{
-				"uuid": convertBusIDToUUID(xidErr.DeviceUUID, c.currentDevices()),
+				"uuid": convertBusIDToUUID(xidErr.DeviceUUID, devices),
 				"xid":  strconv.Itoa(xidErr.Xid),
 			}).Inc()
 			if err = c.updateCurrentState(); err != nil {
@@ -581,11 +582,12 @@ func (c *component) updateCurrentState() error {
 }
 
 func (c *component) currentDevices() map[string]nvidiadcgm.DeviceInfo {
-	devices := make(map[string]nvidiadcgm.DeviceInfo)
 	if c == nil || c.gpuProvider == nil {
-		return devices
+		return map[string]nvidiadcgm.DeviceInfo{}
 	}
-	for _, device := range c.gpuProvider.GPUDevices() {
+	gpuDevices := c.gpuProvider.GPUDevices()
+	devices := make(map[string]nvidiadcgm.DeviceInfo, len(gpuDevices))
+	for _, device := range gpuDevices {
 		devices[device.UUID] = device
 	}
 	return devices
