@@ -17,6 +17,7 @@ package dcgm
 
 import (
 	"context"
+	"encoding/binary"
 	"testing"
 	"time"
 
@@ -111,9 +112,43 @@ func TestFieldValueCache_ResetAfterReconnectCallback(t *testing.T) {
 	assert.Empty(t, fc.values, "callback should clear cached values")
 }
 
+func TestGetResultPreservingFieldErrorsRetainsSentinelPayload(t *testing.T) {
+	const deviceID = uint(7)
+	fieldValue := dcgm.FieldValue_v1{
+		FieldID:   dcgm.DCGM_FI_DEV_PERSISTENCE_MODE,
+		FieldType: dcgm.DCGM_FT_INT64,
+		Status:    dcgm.DCGM_ST_GPU_IS_LOST,
+	}
+	// Failed DCGM fields commonly carry a sentinel payload. The regular result
+	// path must keep filtering it, while the opt-in compatibility path retains
+	// the status without requiring callers to decode this payload.
+	sentinel := int64(dcgm.DCGM_FT_INT64_BLANK)
+	binary.LittleEndian.PutUint64(fieldValue.Value[:8], uint64(sentinel))
+
+	mockInstance := &mockDCGMInstance{
+		dcgmExists: true,
+		devices:    []DeviceInfo{{ID: deviceID, UUID: "GPU-7"}},
+	}
+	fc := NewFieldValueCache(context.Background(), mockInstance, time.Second)
+	fc.values[deviceID] = map[dcgm.Short]dcgm.FieldValue_v1{
+		dcgm.DCGM_FI_DEV_PERSISTENCE_MODE: fieldValue,
+	}
+
+	regular, err := fc.GetResult([]dcgm.Short{dcgm.DCGM_FI_DEV_PERSISTENCE_MODE})
+	assert.NoError(t, err)
+	assert.Empty(t, regular)
+
+	preserved, err := fc.GetResultPreservingFieldErrors([]dcgm.Short{dcgm.DCGM_FI_DEV_PERSISTENCE_MODE})
+	assert.NoError(t, err)
+	if assert.Len(t, preserved, 1) && assert.Len(t, preserved[0].Values, 1) {
+		assert.Equal(t, dcgm.DCGM_ST_GPU_IS_LOST, preserved[0].Values[0].Status)
+	}
+}
+
 // mockDCGMInstance is a minimal mock for testing field cache behavior
 type mockDCGMInstance struct {
 	dcgmExists bool
+	devices    []DeviceInfo
 }
 
 func (m *mockDCGMInstance) DCGMExists() bool {
@@ -158,7 +193,7 @@ func (m *mockDCGMInstance) GetGroupHandle() dcgm.GroupHandle {
 }
 
 func (m *mockDCGMInstance) GetDevices() []DeviceInfo {
-	return nil
+	return m.devices
 }
 
 func (m *mockDCGMInstance) Shutdown() error {

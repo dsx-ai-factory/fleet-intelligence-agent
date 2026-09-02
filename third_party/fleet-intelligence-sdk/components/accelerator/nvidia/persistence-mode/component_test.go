@@ -71,16 +71,19 @@ func TestCheckDCGMError(t *testing.T) {
 func TestCheckDCGMUnhealthyErrors(t *testing.T) {
 	devices := []nvidiadcgm.DeviceInfo{{ID: 0, UUID: "GPU-1"}}
 	tests := []struct {
-		name string
-		code int32
+		name   string
+		code   int32
+		reason string
 	}{
 		{
-			name: "GPU lost",
-			code: dcgm.DCGM_ST_GPU_IS_LOST,
+			name:   "GPU lost",
+			code:   dcgm.DCGM_ST_GPU_IS_LOST,
+			reason: gpuLostReason,
 		},
 		{
-			name: "reset required",
-			code: dcgm.DCGM_ST_RESET_REQUIRED,
+			name:   "reset required",
+			code:   dcgm.DCGM_ST_RESET_REQUIRED,
+			reason: gpuRequiresResetReason,
 		},
 	}
 
@@ -90,8 +93,8 @@ func TestCheckDCGMUnhealthyErrors(t *testing.T) {
 			result := newTestComponent(devices, nil, err).Check().(*checkResult)
 
 			assert.Equal(t, apiv1.HealthStateTypeUnhealthy, result.health)
-			assert.Equal(t, "failed to get DCGM persistence-mode field", result.reason)
-			assert.Nil(t, result.suggestedActions)
+			assert.Equal(t, tt.reason, result.reason)
+			assert.Equal(t, rebootSuggestedActions(tt.reason), result.suggestedActions)
 		})
 	}
 }

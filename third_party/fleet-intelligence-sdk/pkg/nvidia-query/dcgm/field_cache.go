@@ -296,6 +296,22 @@ type DeviceFieldValues struct {
 
 // GetResult returns field values for all devices. Primary API for components.
 func (fc *FieldValueCache) GetResult(fields []dcgm.Short) ([]DeviceFieldValues, error) {
+	return fc.getResult(fields, false)
+}
+
+// GetResultPreservingFieldErrors returns requested fields even when DCGM set a
+// non-success field status. GetResult normally removes sentinel payloads, and
+// failed fields commonly use those sentinels. Persistence-mode compatibility
+// needs the status to distinguish GPU-lost/reset-required from an unsupported
+// field, so it opts into retaining these entries.
+//
+// A failed field's payload may be a sentinel and must not be decoded. Callers
+// must check FieldValue_v1.Status before reading its value.
+func (fc *FieldValueCache) GetResultPreservingFieldErrors(fields []dcgm.Short) ([]DeviceFieldValues, error) {
+	return fc.getResult(fields, true)
+}
+
+func (fc *FieldValueCache) getResult(fields []dcgm.Short, preserveFieldErrors bool) ([]DeviceFieldValues, error) {
 	fc.mu.RLock()
 	defer fc.mu.RUnlock()
 
@@ -320,6 +336,10 @@ func (fc *FieldValueCache) GetResult(fields []dcgm.Short) ([]DeviceFieldValues, 
 		fieldValues := make([]dcgm.FieldValue_v1, 0, len(fields))
 		for _, fieldID := range fields {
 			if fieldValue, exists := deviceValues[fieldID]; exists {
+				if preserveFieldErrors && fieldValue.Status != dcgm.DCGM_ST_OK {
+					fieldValues = append(fieldValues, fieldValue)
+					continue
+				}
 				if isSentinel := CheckSentinel(fieldValue,
 					"deviceID", device.ID,
 					"uuid", device.UUID,

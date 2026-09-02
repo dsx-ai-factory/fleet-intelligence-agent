@@ -217,6 +217,22 @@ func IsUnhealthyAPIError(err error) bool {
 	}
 }
 
+// IsGPULostError reports whether err carries DCGM's GPU-lost status. Components
+// that historically exposed recovery guidance use this in addition to the
+// broader IsUnhealthyAPIError classification.
+func IsGPULostError(err error) bool {
+	code, ok := dcgmErrorCode(err)
+	return ok && code == dcgm.DCGM_ST_GPU_IS_LOST
+}
+
+// IsResetRequiredError reports whether err carries DCGM's reset-required
+// status. It is intentionally separate from IsUnhealthyAPIError so callers can
+// preserve status-specific recovery guidance without changing common policy.
+func IsResetRequiredError(err error) bool {
+	code, ok := dcgmErrorCode(err)
+	return ok && code == dcgm.DCGM_ST_RESET_REQUIRED
+}
+
 // IsTransientError returns true for transient DCGM errors (e.g., warmup).
 func IsTransientError(err error) bool {
 	code, ok := dcgmErrorCode(err)

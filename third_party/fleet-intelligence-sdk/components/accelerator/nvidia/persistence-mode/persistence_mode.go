@@ -5,6 +5,7 @@ package persistencemode
 
 import (
 	"errors"
+	"fmt"
 
 	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
 
@@ -38,20 +39,32 @@ func getPersistenceModesFromDCGM(devices []nvidiadcgm.DeviceInfo, fieldCache *nv
 	if fieldCache == nil {
 		return nil, errors.New("DCGM field cache is not configured")
 	}
-	results, err := fieldCache.GetResult([]dcgm.Short{dcgm.DCGM_FI_DEV_PERSISTENCE_MODE})
+	// Unlike metric components, persistence mode historically attached recovery
+	// guidance to per-device GPU-lost/reset-required query failures. Retain the
+	// DCGM field statuses so we can preserve that behavior without reading their
+	// potentially sentinel-valued payloads.
+	results, err := fieldCache.GetResultPreservingFieldErrors([]dcgm.Short{dcgm.DCGM_FI_DEV_PERSISTENCE_MODE})
 	if err != nil {
 		return nil, err
 	}
-	return persistenceModesFromFieldValues(devices, results), nil
+	return persistenceModesFromFieldValues(devices, results)
 }
 
-func persistenceModesFromFieldValues(devices []nvidiadcgm.DeviceInfo, results []nvidiadcgm.DeviceFieldValues) []PersistenceMode {
+func persistenceModesFromFieldValues(devices []nvidiadcgm.DeviceInfo, results []nvidiadcgm.DeviceFieldValues) ([]PersistenceMode, error) {
 	valuesByDevice := make(map[uint]dcgm.FieldValue_v1, len(results))
 	for _, result := range results {
 		for _, value := range result.Values {
-			if value.FieldID == dcgm.DCGM_FI_DEV_PERSISTENCE_MODE {
-				valuesByDevice[result.DeviceID] = value
+			if value.FieldID != dcgm.DCGM_FI_DEV_PERSISTENCE_MODE {
+				continue
 			}
+			switch value.Status {
+			case dcgm.DCGM_ST_GPU_IS_LOST, dcgm.DCGM_ST_RESET_REQUIRED:
+				// Include the numeric code because the pinned go-dcgm API does not
+				// expose a constructor for its typed error. The shared DCGM error
+				// classifier supports this representation.
+				return nil, fmt.Errorf("DCGM persistence-mode field failed for device %d (%s): error code %d", result.DeviceID, result.UUID, value.Status)
+			}
+			valuesByDevice[result.DeviceID] = value
 		}
 	}
 	modes := make([]PersistenceMode, 0, len(devices))
@@ -63,5 +76,5 @@ func persistenceModesFromFieldValues(devices []nvidiadcgm.DeviceInfo, results []
 		}
 		modes = append(modes, mode)
 	}
-	return modes
+	return modes, nil
 }

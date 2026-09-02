@@ -28,6 +28,8 @@ const Name = "accelerator-nvidia-persistence-mode"
 
 const (
 	defaultHealthCheckInterval = 30 * time.Second
+	gpuLostReason              = "GPU lost"
+	gpuRequiresResetReason     = "GPU requires reset"
 )
 
 var _ components.Component = &component{}
@@ -173,15 +175,23 @@ func (c *component) Check() components.CheckResult {
 	cr.PersistenceModes, err = c.getPersistenceModesFunc()
 	if err != nil {
 		cr.err = err
-		// The legacy NVML implementation queried persistence mode per GPU and
-		// attached reboot advice to GPU-lost/reset errors here. The shared DCGM
-		// cache polls all registered fields together, so those failures are
-		// device-wide rather than persistence-mode-specific. Keep this aligned
-		// with the common DCGM field-component error policy.
-		if nvidiadcgm.IsUnhealthyAPIError(err) {
+		// Preserve the legacy persistence-mode contract for GPU-lost/reset:
+		// unhealthy status, the established reason, and reboot advice. DCGM
+		// reports these as field statuses as well as top-level API errors, so the
+		// persistence reader deliberately retains failed field entries.
+		switch {
+		case nvidiadcgm.IsResetRequiredError(err):
+			cr.health = apiv1.HealthStateTypeUnhealthy
+			cr.reason = gpuRequiresResetReason
+			cr.suggestedActions = rebootSuggestedActions(gpuRequiresResetReason)
+		case nvidiadcgm.IsGPULostError(err):
+			cr.health = apiv1.HealthStateTypeUnhealthy
+			cr.reason = gpuLostReason
+			cr.suggestedActions = rebootSuggestedActions(gpuLostReason)
+		case nvidiadcgm.IsUnhealthyAPIError(err):
 			cr.health = apiv1.HealthStateTypeUnhealthy
 			cr.reason = nvidiadcgm.AppendDCGMErrorType("failed to get DCGM persistence-mode field", err)
-		} else {
+		default:
 			cr.health = apiv1.HealthStateTypeDegraded
 			cr.reason = fmt.Sprintf("failed to get DCGM persistence-mode field: %v", err)
 		}
@@ -212,6 +222,15 @@ func (c *component) Check() components.CheckResult {
 	}
 
 	return cr
+}
+
+func rebootSuggestedActions(reason string) *apiv1.SuggestedActions {
+	return &apiv1.SuggestedActions{
+		Description: reason,
+		RepairActions: []apiv1.RepairActionType{
+			apiv1.RepairActionTypeRebootSystem,
+		},
+	}
 }
 
 var _ components.CheckResult = &checkResult{}
