@@ -430,6 +430,8 @@ func getMachineGPUInfo(dcgmInstance nvidiadcgm.Instance, fieldReader machineInfo
 			chassisSN = strings.TrimSpace(value.String())
 		}
 
+		// BoardID remains unset because DCGM does not expose
+		// nvmlDeviceGetBoardId semantics.
 		info.GPUs = append(info.GPUs, apiv1.MachineGPUInstance{
 			UUID:         dev.UUID,
 			GPUIndex:     strconv.FormatUint(uint64(dev.ID), 10),
@@ -438,7 +440,6 @@ func getMachineGPUInfo(dcgmInstance nvidiadcgm.Instance, fieldReader machineInfo
 			CliqueID:     cliqueID,
 			SN:           strings.TrimSpace(dev.Serial),
 			MinorID:      minorID,
-			BoardID:      0, // DCGM does not expose nvmlDeviceGetBoardId semantics.
 			BusID:        strings.TrimSpace(dev.BusID),
 			VBIOSVersion: strings.TrimSpace(dev.VBIOSVersion),
 			ChassisSN:    chassisSN,
