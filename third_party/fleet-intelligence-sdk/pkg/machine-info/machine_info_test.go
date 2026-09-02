@@ -225,6 +225,46 @@ func TestGetMachineGPUInfoFromDCGM(t *testing.T) {
 	assert.Zero(t, info.GPUs[0].BoardID)
 }
 
+func TestGetMachineGPUInfoIgnoresFailedDCGMFields(t *testing.T) {
+	device := nvidiadcgm.DeviceInfo{
+		ID:            3,
+		UUID:          "GPU-123",
+		Model:         "NVIDIA H100 80GB HBM3",
+		DriverVersion: "570.86.15",
+	}
+	instance := &staticDeviceInstance{
+		Instance: nvidiadcgm.NewNoOp(),
+		devices:  []nvidiadcgm.DeviceInfo{device},
+	}
+	values := []dcgm.FieldValue_v1{
+		int64Field(dcgm.DCGM_FI_CUDA_DRIVER_VERSION, 12080),
+		int64Field(dcgm.DCGM_FI_DEV_MINOR_NUMBER, 7),
+		int64Field(dcgm.DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY, (9 << 16)),
+		stringField(dcgm.DCGM_FI_DEV_FABRIC_CLUSTER_UUID, "cluster-123"),
+		int64Field(dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID, 9),
+		stringField(dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER, "chassis-123"),
+	}
+	for i := range values {
+		values[i].Status = dcgm.DCGM_ST_NVML_ERROR
+	}
+	reader := staticFieldReader{results: []nvidiadcgm.DeviceFieldValues{{
+		DeviceID: device.ID,
+		UUID:     device.UUID,
+		Values:   values,
+	}}}
+
+	info, driverVersion, cudaVersion, err := getMachineGPUInfo(instance, reader)
+	require.NoError(t, err)
+	assert.Equal(t, "570.86.15", driverVersion)
+	assert.Empty(t, cudaVersion)
+	assert.Empty(t, info.Architecture)
+	require.Len(t, info.GPUs, 1)
+	assert.Equal(t, "-1", info.GPUs[0].MinorID)
+	assert.Empty(t, info.GPUs[0].ClusterUUID)
+	assert.Nil(t, info.GPUs[0].CliqueID)
+	assert.Empty(t, info.GPUs[0].ChassisSN)
+}
+
 type staticDeviceInstance struct {
 	nvidiadcgm.Instance
 	devices []nvidiadcgm.DeviceInfo

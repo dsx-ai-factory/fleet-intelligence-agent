@@ -372,6 +372,9 @@ func getMachineGPUInfo(dcgmInstance nvidiadcgm.Instance, fieldReader machineInfo
 			for _, result := range results {
 				values := make(map[dcgm.Short]dcgm.FieldValue_v1, len(result.Values))
 				for _, value := range result.Values {
+					if value.Status != dcgm.DCGM_ST_OK {
+						continue
+					}
 					values[value.FieldID] = value
 				}
 				fieldsByDevice[result.DeviceID] = values
