@@ -52,6 +52,11 @@ func TestTags(t *testing.T) {
 	assert.Equal(t, expectedTags, tags)
 }
 
+func TestDefaultNVIDIALibraries(t *testing.T) {
+	assert.Equal(t, []string{"libnvidia-ml.so.1"}, defaultNVIDIALibraries["libnvidia-ml.so"])
+	assert.Equal(t, []string{"libcuda.so.1"}, defaultNVIDIALibraries["libcuda.so"])
+}
+
 func TestCheck(t *testing.T) {
 	// Mock component with custom findLibrary function
 	comp := createTestComponent()

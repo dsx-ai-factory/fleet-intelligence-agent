@@ -32,6 +32,12 @@ const (
 
 var (
 	defaultNVIDIALibraries = map[string][]string{
+		// NVML runtime library used by NVIDIA management and monitoring tools.
+		// Checking for it does not load or initialize NVML in the agent.
+		"libnvidia-ml.so": {
+			"libnvidia-ml.so.1",
+		},
+
 		// core library for CUDA support
 		// typically symlinked to "libcuda.so.1" or "libcuda.so.535.183.06"
 		"libcuda.so": {
@@ -56,6 +62,7 @@ var (
 		"/lib/aarch64-linux-gnu/nvidia/current",
 
 		// e.g.,
+		// /cm/local/apps/cuda/libs/current/lib64/libnvidia-ml.so.1
 		// /cm/local/apps/cuda/libs/current/lib64/libcuda.so.1
 		"/cm/local/apps/cuda/libs/current/lib64/",
 
