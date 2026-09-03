@@ -16,6 +16,7 @@
 package dcgm
 
 import (
+	"errors"
 	"fmt"
 
 	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
@@ -65,15 +66,23 @@ var deviceInventoryFields = []dcgm.Short{
 var getSupportedDevicesForInventory = dcgm.GetSupportedDevices
 var getLatestInventoryValues = dcgm.EntitiesGetLatestValues
 
+var errDeviceEnumeration = errors.New("enumerate supported DCGM devices")
+
 // queryDeviceInventory enumerates supported GPUs and reads all inventory
 // fields in one request. No DCGM group, field group, or watch is required.
-func queryDeviceInventory() ([]DeviceInfo, error) {
+func queryDeviceInventory() ([]DeviceInfo, bool, error) {
 	deviceIDs, err := getSupportedDevicesForInventory()
 	if err != nil {
-		return nil, fmt.Errorf("get supported DCGM devices: %w", err)
+		return nil, false, fmt.Errorf("%w: %w", errDeviceEnumeration, err)
 	}
+	return queryDeviceInventoryFields(deviceIDs)
+}
+
+// queryDeviceInventoryFields enriches a fixed set of enumerated device IDs.
+// It does not discover devices or change the established inventory membership.
+func queryDeviceInventoryFields(deviceIDs []uint) ([]DeviceInfo, bool, error) {
 	if len(deviceIDs) == 0 {
-		return nil, nil
+		return nil, true, nil
 	}
 
 	entities := make([]dcgm.GroupEntityPair, 0, len(deviceIDs))
@@ -86,12 +95,16 @@ func queryDeviceInventory() ([]DeviceInfo, error) {
 
 	values, err := getLatestInventoryValues(entities, deviceInventoryFields, dcgm.DCGM_FV_FLAG_LIVE_DATA)
 	if err != nil {
-		return nil, fmt.Errorf("get live DCGM inventory fields: %w", err)
+		// GetSupportedDevices already established GPU presence. Preserve those
+		// entities even when the batched query cannot enrich their inventory.
+		devices, _ := deviceInventoryFromFieldValues(deviceIDs, nil)
+		return devices, false, fmt.Errorf("get live DCGM inventory fields: %w", err)
 	}
-	return deviceInventoryFromFieldValues(deviceIDs, values), nil
+	devices, complete := deviceInventoryFromFieldValues(deviceIDs, values)
+	return devices, complete, nil
 }
 
-func deviceInventoryFromFieldValues(deviceIDs []uint, values []dcgm.FieldValue_v2) []DeviceInfo {
+func deviceInventoryFromFieldValues(deviceIDs []uint, values []dcgm.FieldValue_v2) ([]DeviceInfo, bool) {
 	devices := make([]DeviceInfo, len(deviceIDs))
 	deviceIndex := make(map[uint]int, len(deviceIDs))
 	for index, deviceID := range deviceIDs {
@@ -100,6 +113,7 @@ func deviceInventoryFromFieldValues(deviceIDs []uint, values []dcgm.FieldValue_v
 		deviceIndex[deviceID] = index
 	}
 
+	complete := true
 	for valueIndex := range values {
 		value := &values[valueIndex]
 		if value.EntityGroupId != dcgm.FE_GPU {
@@ -115,6 +129,11 @@ func deviceInventoryFromFieldValues(deviceIDs []uint, values []dcgm.FieldValue_v
 				"fieldID", value.FieldID,
 				"status", value.Status,
 			)
+			if value.Status == dcgm.DCGM_ST_NOT_SUPPORTED {
+				// This field is permanently unavailable, so retrying cannot enrich it.
+				continue
+			}
+			complete = false
 			continue
 		}
 		if CheckSentinelV2(*value, "deviceID", value.EntityID) {
@@ -159,7 +178,7 @@ func deviceInventoryFromFieldValues(deviceIDs []uint, values []dcgm.FieldValue_v
 		}
 	}
 
-	return devices
+	return devices, complete
 }
 
 func inventoryString(value *dcgm.FieldValue_v2) string {

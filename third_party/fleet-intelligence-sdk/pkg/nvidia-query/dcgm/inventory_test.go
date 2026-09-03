@@ -70,9 +70,12 @@ func TestQueryDeviceInventoryUsesOneLiveBatch(t *testing.T) {
 		}, nil
 	}
 
-	devices, err := queryDeviceInventory()
+	devices, complete, err := queryDeviceInventory()
 	if err != nil {
 		t.Fatalf("queryDeviceInventory() error = %v", err)
+	}
+	if !complete {
+		t.Fatal("queryDeviceInventory() complete = false, want true")
 	}
 	if queryCount != 1 {
 		t.Fatalf("live inventory query count = %d, want 1", queryCount)
@@ -115,18 +118,29 @@ func TestQueryDeviceInventoryErrors(t *testing.T) {
 	getSupportedDevicesForInventory = func() ([]uint, error) {
 		return nil, expected
 	}
-	if _, err := queryDeviceInventory(); !errors.Is(err, expected) {
+	if _, _, err := queryDeviceInventory(); !errors.Is(err, expected) {
 		t.Fatalf("queryDeviceInventory() error = %v, want %v", err, expected)
 	}
 
 	getSupportedDevicesForInventory = func() ([]uint, error) {
-		return []uint{0}, nil
+		return []uint{3, 7}, nil
 	}
 	getLatestInventoryValues = func([]dcgm.GroupEntityPair, []dcgm.Short, uint) ([]dcgm.FieldValue_v2, error) {
 		return nil, expected
 	}
-	if _, err := queryDeviceInventory(); !errors.Is(err, expected) {
+	devices, complete, err := queryDeviceInventory()
+	if !errors.Is(err, expected) {
 		t.Fatalf("queryDeviceInventory() error = %v, want %v", err, expected)
+	}
+	if complete {
+		t.Fatal("queryDeviceInventory() complete = true, want false")
+	}
+	want := []DeviceInfo{
+		{ID: 3, MinorNumber: -1},
+		{ID: 7, MinorNumber: -1},
+	}
+	if !slices.Equal(devices, want) {
+		t.Fatalf("queryDeviceInventory() devices = %+v, want %+v", devices, want)
 	}
 }
 
@@ -146,9 +160,12 @@ func TestQueryDeviceInventoryDoesNotQueryFieldsWithoutDevices(t *testing.T) {
 		return nil, nil
 	}
 
-	devices, err := queryDeviceInventory()
+	devices, complete, err := queryDeviceInventory()
 	if err != nil {
 		t.Fatalf("queryDeviceInventory() error = %v", err)
+	}
+	if !complete {
+		t.Fatal("queryDeviceInventory() complete = false, want true")
 	}
 	if len(devices) != 0 {
 		t.Fatalf("devices = %+v, want none", devices)
@@ -160,11 +177,14 @@ func TestDeviceInventorySkipsUnavailableFieldsWithoutDroppingGPU(t *testing.T) {
 	nonOK.Status = dcgm.DCGM_ST_NOT_SUPPORTED
 	blankMemory := int64Field(1, dcgm.DCGM_FI_DEV_FB_TOTAL, dcgm.DCGM_FT_INT64_BLANK)
 
-	devices := deviceInventoryFromFieldValues([]uint{1}, []dcgm.FieldValue_v2{
+	devices, complete := deviceInventoryFromFieldValues([]uint{1}, []dcgm.FieldValue_v2{
 		stringField(1, dcgm.DCGM_FI_DEV_UUID, "GPU-1"),
 		nonOK,
 		blankMemory,
 	})
+	if !complete {
+		t.Fatal("deviceInventoryFromFieldValues() complete = false for permanently unsupported field")
+	}
 	want := []DeviceInfo{{ID: 1, UUID: "GPU-1", MinorNumber: -1}}
 	if !slices.Equal(devices, want) {
 		t.Fatalf("devices = %+v, want %+v", devices, want)
