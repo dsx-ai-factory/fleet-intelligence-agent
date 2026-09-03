@@ -1,0 +1,198 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package dcgm
+
+import (
+	"fmt"
+
+	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
+
+	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
+)
+
+// DeviceInfo stores cached GPU identity and inventory information.
+// A connected instance populates it with one batched live field query and
+// refreshes it whenever the reconnecting instance establishes a new session.
+type DeviceInfo struct {
+	ID                     uint
+	UUID                   string
+	BusID                  string
+	Brand                  string
+	Model                  string
+	Serial                 string
+	VBIOSVersion           string
+	DriverVersion          string
+	CUDADriverVersion      int64
+	MinorNumber            int64
+	ComputeCapability      int64
+	FabricClusterUUID      string
+	FabricCliqueID         uint32
+	FabricCliqueIDValid    bool
+	ChassisSerial          string
+	FramebufferMemoryBytes uint64
+}
+
+var deviceInventoryFields = []dcgm.Short{
+	dcgm.DCGM_FI_DEV_UUID,
+	dcgm.DCGM_FI_DEV_PCI_BUSID,
+	dcgm.DCGM_FI_DEV_BRAND,
+	dcgm.DCGM_FI_DEV_NAME,
+	dcgm.DCGM_FI_DEV_SERIAL,
+	dcgm.DCGM_FI_DEV_VBIOS_VERSION,
+	dcgm.DCGM_FI_DRIVER_VERSION,
+	dcgm.DCGM_FI_CUDA_DRIVER_VERSION,
+	dcgm.DCGM_FI_DEV_MINOR_NUMBER,
+	dcgm.DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY,
+	dcgm.DCGM_FI_DEV_FABRIC_CLUSTER_UUID,
+	dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID,
+	dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER,
+	dcgm.DCGM_FI_DEV_FB_TOTAL,
+}
+
+var getSupportedDevicesForInventory = dcgm.GetSupportedDevices
+var getLatestInventoryValues = dcgm.EntitiesGetLatestValues
+
+// queryDeviceInventory enumerates supported GPUs and reads all inventory
+// fields in one request. No DCGM group, field group, or watch is required.
+func queryDeviceInventory() ([]DeviceInfo, error) {
+	deviceIDs, err := getSupportedDevicesForInventory()
+	if err != nil {
+		return nil, fmt.Errorf("get supported DCGM devices: %w", err)
+	}
+	if len(deviceIDs) == 0 {
+		return nil, nil
+	}
+
+	entities := make([]dcgm.GroupEntityPair, 0, len(deviceIDs))
+	for _, deviceID := range deviceIDs {
+		entities = append(entities, dcgm.GroupEntityPair{
+			EntityGroupId: dcgm.FE_GPU,
+			EntityId:      deviceID,
+		})
+	}
+
+	values, err := getLatestInventoryValues(entities, deviceInventoryFields, dcgm.DCGM_FV_FLAG_LIVE_DATA)
+	if err != nil {
+		return nil, fmt.Errorf("get live DCGM inventory fields: %w", err)
+	}
+	return deviceInventoryFromFieldValues(deviceIDs, values), nil
+}
+
+func deviceInventoryFromFieldValues(deviceIDs []uint, values []dcgm.FieldValue_v2) []DeviceInfo {
+	devices := make([]DeviceInfo, len(deviceIDs))
+	deviceIndex := make(map[uint]int, len(deviceIDs))
+	for index, deviceID := range deviceIDs {
+		devices[index].ID = deviceID
+		devices[index].MinorNumber = -1
+		deviceIndex[deviceID] = index
+	}
+
+	for valueIndex := range values {
+		value := &values[valueIndex]
+		if value.EntityGroupId != dcgm.FE_GPU {
+			continue
+		}
+		index, exists := deviceIndex[value.EntityID]
+		if !exists {
+			continue
+		}
+		if value.Status != dcgm.DCGM_ST_OK {
+			log.Logger.Debugw("DCGM inventory field unavailable",
+				"deviceID", value.EntityID,
+				"fieldID", value.FieldID,
+				"status", value.Status,
+			)
+			continue
+		}
+		if CheckSentinelV2(*value, "deviceID", value.EntityID) {
+			continue
+		}
+
+		device := &devices[index]
+		switch value.FieldID {
+		case dcgm.DCGM_FI_DEV_UUID:
+			device.UUID = inventoryString(value)
+		case dcgm.DCGM_FI_DEV_PCI_BUSID:
+			device.BusID = inventoryString(value)
+		case dcgm.DCGM_FI_DEV_BRAND:
+			device.Brand = inventoryString(value)
+		case dcgm.DCGM_FI_DEV_NAME:
+			device.Model = inventoryString(value)
+		case dcgm.DCGM_FI_DEV_SERIAL:
+			device.Serial = inventoryString(value)
+		case dcgm.DCGM_FI_DEV_VBIOS_VERSION:
+			device.VBIOSVersion = inventoryString(value)
+		case dcgm.DCGM_FI_DRIVER_VERSION:
+			device.DriverVersion = inventoryString(value)
+		case dcgm.DCGM_FI_CUDA_DRIVER_VERSION:
+			device.CUDADriverVersion = positiveInventoryInt64(value)
+		case dcgm.DCGM_FI_DEV_MINOR_NUMBER:
+			if minorNumber := inventoryInt64(value); minorNumber >= 0 {
+				device.MinorNumber = minorNumber
+			}
+		case dcgm.DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY:
+			device.ComputeCapability = positiveInventoryInt64(value)
+		case dcgm.DCGM_FI_DEV_FABRIC_CLUSTER_UUID:
+			device.FabricClusterUUID = inventoryString(value)
+		case dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID:
+			if cliqueID := inventoryInt64(value); cliqueID >= 0 && uint64(cliqueID) <= uint64(^uint32(0)) {
+				device.FabricCliqueID = uint32(cliqueID)
+				device.FabricCliqueIDValid = true
+			}
+		case dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER:
+			device.ChassisSerial = inventoryString(value)
+		case dcgm.DCGM_FI_DEV_FB_TOTAL:
+			device.FramebufferMemoryBytes = framebufferMemoryBytes(inventoryInt64(value))
+		}
+	}
+
+	return devices
+}
+
+func inventoryString(value *dcgm.FieldValue_v2) string {
+	if value.FieldType != dcgm.DCGM_FT_STRING {
+		return ""
+	}
+	return value.String()
+}
+
+func inventoryInt64(value *dcgm.FieldValue_v2) int64 {
+	if value.FieldType != dcgm.DCGM_FT_INT64 {
+		return 0
+	}
+	return value.Int64()
+}
+
+func positiveInventoryInt64(value *dcgm.FieldValue_v2) int64 {
+	result := inventoryInt64(value)
+	if result <= 0 {
+		return 0
+	}
+	return result
+}
+
+func framebufferMemoryBytes(totalMiB int64) uint64 {
+	const bytesPerMiB uint64 = 1024 * 1024
+
+	if totalMiB <= 0 {
+		return 0
+	}
+	value := uint64(totalMiB)
+	if value > ^uint64(0)/bytesPerMiB {
+		return 0
+	}
+	return value * bytesPerMiB
+}

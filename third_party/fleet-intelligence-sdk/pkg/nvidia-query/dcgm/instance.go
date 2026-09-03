@@ -116,34 +116,6 @@ var allHealthSystems = []dcgm.HealthSystem{
 	dcgm.DCGM_HEALTH_WATCH_NVSWITCH_FATAL,
 }
 
-// DeviceInfo stores cached device identity and static inventory information.
-// Values are populated from dcgmGetDeviceAttributes when the connection is
-// established and refreshed whenever the reconnecting instance reconnects.
-type DeviceInfo struct {
-	ID                     uint
-	UUID                   string
-	BusID                  string
-	Brand                  string
-	Model                  string
-	Serial                 string
-	VBIOSVersion           string
-	DriverVersion          string
-	FramebufferMemoryBytes uint64
-}
-
-func framebufferMemoryBytes(totalMiB uint) uint64 {
-	const bytesPerMiB uint64 = 1024 * 1024
-
-	value := uint64(totalMiB)
-	if value == 0 || value >= uint64(dcgm.DCGM_FT_INT64_BLANK) {
-		return 0
-	}
-	if value > ^uint64(0)/bytesPerMiB {
-		return 0
-	}
-	return value * bytesPerMiB
-}
-
 // Instance is the DCGM library connector interface.
 type Instance interface {
 	// DCGMExists returns true if DCGM is available.
@@ -326,36 +298,15 @@ func newConnectedInstance(groupName string) (Instance, error) {
 
 	log.Logger.Infow("created custom DCGM group for isolated health monitoring", "groupName", groupName)
 
-	// Fetch and cache device information once during initialization
-	deviceIDs, err := dcgm.GetSupportedDevices()
+	// Fetch the inventory in one live field query. This avoids go-dcgm's
+	// GetDeviceInfo helper, which performs unused topology, affinity, and PCI
+	// bandwidth work for every GPU.
+	devices, err := queryDeviceInventory()
 	if err != nil {
-		log.Logger.Warnw("failed to get supported devices", "error", err)
-		deviceIDs = nil
+		log.Logger.Warnw("failed to query DCGM device inventory", "error", err)
+		devices = nil
 	}
-
-	var devices []DeviceInfo
-	if deviceIDs != nil {
-		devices = make([]DeviceInfo, 0, len(deviceIDs))
-		for _, deviceID := range deviceIDs {
-			deviceInfo, err := dcgm.GetDeviceInfo(deviceID)
-			if err != nil {
-				log.Logger.Warnw("failed to get device info, skipping device", "deviceID", deviceID, "error", err)
-				continue
-			}
-			devices = append(devices, DeviceInfo{
-				ID:                     deviceID,
-				UUID:                   deviceInfo.UUID,
-				BusID:                  deviceInfo.PCI.BusID,
-				Brand:                  deviceInfo.Identifiers.Brand,
-				Model:                  deviceInfo.Identifiers.Model,
-				Serial:                 deviceInfo.Identifiers.Serial,
-				VBIOSVersion:           deviceInfo.Identifiers.Vbios,
-				DriverVersion:          deviceInfo.Identifiers.DriverVersion,
-				FramebufferMemoryBytes: framebufferMemoryBytes(deviceInfo.PCI.FBTotal),
-			})
-		}
-		log.Logger.Infow("cached device information", "numDevices", len(devices))
-	}
+	log.Logger.Infow("cached device information", "numDevices", len(devices))
 
 	connectedInst := &instance{
 		dcgmExists:  true,
