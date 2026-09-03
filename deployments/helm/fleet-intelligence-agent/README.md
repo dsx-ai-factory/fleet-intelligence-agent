@@ -47,7 +47,7 @@ Common values (defaults from `values.yaml`):
 | `enroll.enabled` | `false` | Enable enrollment init container. |
 | `enroll.unenroll` | `false` | Run explicit unenroll init container (cleanup persisted enrollment metadata). |
 | `enroll.force` | `false` | Append `--force` to the enrollment command. |
-| `enroll.endpoint` | `""` | Enrollment endpoint. |
+| `enroll.endpoint` | `""` | Enrollment endpoint. (Default: https://data.fleet-intelligence.nvidia.com) |
 | `enroll.tokenSecretName` | `""` | Secret name for enrollment token. |
 | `enroll.tokenSecretKey` | `token` | Secret key for enrollment token. |
 | `enroll.tokenValue` | `""` | Inline token value (optional). |
