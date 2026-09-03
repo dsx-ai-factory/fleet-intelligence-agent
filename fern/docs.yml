@@ -19,6 +19,9 @@ metadata:
 # it is entirely CI-managed. Update this navigation: block when pages are added
 # or removed from docs/.
 navigation:
+  - page: Overview
+    path: ../README.md
+    slug: overview
   - page: Architecture
     path: ../docs/architecture.md
     slug: architecture
@@ -40,6 +43,9 @@ navigation:
   - page: Development
     path: ../docs/development.md
     slug: development
+  - page: Contributing
+    path: ../CONTRIBUTING.md
+    slug: contributing
 
 redirects:
   - source: "/fleet-intel/agent/index.html"

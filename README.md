@@ -53,10 +53,10 @@ For the broader Fleet Intelligence platform documentation, see [docs.nvidia.com/
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+See [CONTRIBUTING.md](https://github.com/dsx-ai-factory/fleet-intelligence-agent/blob/main/CONTRIBUTING.md) for development setup and guidelines.
 
 Related: [leptonai/gpud](https://github.com/leptonai/gpud) (upstream dependency)
 
 ## License
 
-Apache License 2.0 - see [LICENSE](LICENSE) for details.
+Apache License 2.0 - see [LICENSE](https://github.com/dsx-ai-factory/fleet-intelligence-agent/blob/main/LICENSE) for details.

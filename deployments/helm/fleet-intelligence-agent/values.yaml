@@ -123,7 +123,7 @@ otelGateway:
   # The gateway is the only component that holds these; agents never see them.
   enroll:
     # endpoint is the backend enrollment URL.
-    # Example: https://backend/api/v1/agent/enroll
+    # Example: https://data.fleet-intelligence.nvidia.com
     endpoint: ""
     # sakToken is the Service API Key used to authenticate with the API gateway
     # on enrollment. Stored in a Kubernetes Secret; never put in plain values files.
