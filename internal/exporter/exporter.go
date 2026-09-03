@@ -83,7 +83,7 @@ func New(ctx context.Context, opts ...ExporterOption) (Exporter, error) {
 		options.eventStore,
 		options.componentsRegistry,
 		options.machineID,
-		collector.WithDCGM(options.dcgmInstance, options.dcgmFieldCache),
+		collector.WithDCGM(options.dcgmInstance),
 	)
 
 	otlpConverter := converter.NewOTLPConverter()

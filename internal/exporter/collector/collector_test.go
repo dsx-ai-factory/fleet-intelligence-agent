@@ -164,13 +164,13 @@ func TestCachedMachineInfoProvider_DeduplicatesConcurrentRefresh(t *testing.T) {
 
 	var calls atomic.Int32
 	blocker := make(chan struct{})
-	getMachineInfo = func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*machineinfo.MachineInfo, error) {
+	getMachineInfo = func([]nvidiadcgm.DeviceInfo) (*machineinfo.MachineInfo, error) {
 		calls.Add(1)
 		<-blocker
 		return &machineinfo.MachineInfo{Hostname: "refreshed"}, nil
 	}
 
-	provider := newCachedMachineInfoProvider(nvidiadcgm.NewNoOp(), nil, time.Minute).(*cachedMachineInfoProvider)
+	provider := newCachedMachineInfoProvider(nvidiadcgm.NewNoOp(), time.Minute).(*cachedMachineInfoProvider)
 	ctx := context.Background()
 
 	for range 3 {
@@ -190,7 +190,7 @@ func TestCachedMachineInfoProvider_DeduplicatesConcurrentRefresh(t *testing.T) {
 }
 
 func TestCachedMachineInfoProvider_WaitForInitialRefreshReturnsAfterCompletion(t *testing.T) {
-	provider := newCachedMachineInfoProvider(nvidiadcgm.NewNoOp(), nil, time.Minute).(*cachedMachineInfoProvider)
+	provider := newCachedMachineInfoProvider(nvidiadcgm.NewNoOp(), time.Minute).(*cachedMachineInfoProvider)
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -206,7 +206,7 @@ func TestCachedMachineInfoProvider_WaitForInitialRefreshReturnsAfterCompletion(t
 }
 
 func TestCachedMachineInfoProvider_WaitForInitialRefreshTimesOut(t *testing.T) {
-	provider := newCachedMachineInfoProvider(nvidiadcgm.NewNoOp(), nil, time.Minute).(*cachedMachineInfoProvider)
+	provider := newCachedMachineInfoProvider(nvidiadcgm.NewNoOp(), time.Minute).(*cachedMachineInfoProvider)
 
 	start := time.Now()
 	provider.WaitForInitialRefresh(context.Background(), 100*time.Millisecond)

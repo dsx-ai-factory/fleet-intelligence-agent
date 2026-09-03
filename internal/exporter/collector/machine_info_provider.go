@@ -39,9 +39,8 @@ type machineInfoProvider interface {
 }
 
 type cachedMachineInfoProvider struct {
-	dcgmInstance   nvidiadcgm.Instance
-	dcgmFieldCache *nvidiadcgm.FieldValueCache
-	staleAfter     time.Duration
+	dcgmInstance nvidiadcgm.Instance
+	staleAfter   time.Duration
 
 	mu                 sync.RWMutex
 	cached             *machineinfo.MachineInfo
@@ -54,7 +53,6 @@ type cachedMachineInfoProvider struct {
 
 func newCachedMachineInfoProvider(
 	dcgmInstance nvidiadcgm.Instance,
-	dcgmFieldCache *nvidiadcgm.FieldValueCache,
 	staleAfter time.Duration,
 ) machineInfoProvider {
 	if staleAfter <= 0 {
@@ -63,7 +61,6 @@ func newCachedMachineInfoProvider(
 
 	return &cachedMachineInfoProvider{
 		dcgmInstance:       dcgmInstance,
-		dcgmFieldCache:     dcgmFieldCache,
 		staleAfter:         staleAfter,
 		initialRefreshDone: make(chan struct{}),
 	}
@@ -101,7 +98,7 @@ func (p *cachedMachineInfoProvider) RefreshAsync(parent context.Context) {
 			p.markInitialRefreshDone()
 		}()
 
-		info, err := getMachineInfo(p.dcgmInstance, p.dcgmFieldCache)
+		info, err := getMachineInfo(p.dcgmInstance.GetDevices())
 		if err != nil {
 			log.Logger.Warnw("Machine info refresh failed", "error", err)
 			return

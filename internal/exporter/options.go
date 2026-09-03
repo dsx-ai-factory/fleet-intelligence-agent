@@ -42,7 +42,6 @@ type exporterOptions struct {
 	eventStore         eventstore.Store
 	componentsRegistry components.Registry
 	dcgmInstance       nvidiadcgm.Instance
-	dcgmFieldCache     *nvidiadcgm.FieldValueCache
 	httpClient         *http.Client
 	timeout            time.Duration
 	dbRW               *sql.DB // Read-write database connection
@@ -86,11 +85,10 @@ func WithComponentsRegistry(registry components.Registry) ExporterOption {
 	}
 }
 
-// WithDCGM sets the DCGM dependencies used for machine identity and inventory.
-func WithDCGM(instance nvidiadcgm.Instance, fieldCache *nvidiadcgm.FieldValueCache) ExporterOption {
+// WithDCGM sets the DCGM inventory used for machine identity and inventory.
+func WithDCGM(instance nvidiadcgm.Instance) ExporterOption {
 	return func(c *exporterOptions) error {
 		c.dcgmInstance = instance
-		c.dcgmFieldCache = fieldCache
 		return nil
 	}
 }

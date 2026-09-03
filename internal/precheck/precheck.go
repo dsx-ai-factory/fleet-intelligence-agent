@@ -19,7 +19,6 @@ package precheck
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"slices"
 	"strconv"
@@ -28,9 +27,9 @@ import (
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
 	pkgmachineinfo "github.com/NVIDIA/fleet-intelligence-sdk/pkg/machine-info"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 	nvidiapci "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/pci"
 
-	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/dcgminventory"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/dcgmversion"
 )
 
@@ -131,13 +130,11 @@ func CollectInput() (Input, error) {
 func collectDCGMGPUInventory() (*apiv1.MachineGPUInfo, string, error) {
 	dcgmCtx, dcgmCancel := context.WithTimeout(context.Background(), time.Minute)
 	defer dcgmCancel()
-	session, err := dcgminventory.Open(dcgmCtx, fmt.Sprintf("precheck-%d", os.Getpid()), time.Minute)
+	devices, err := nvidiadcgm.CollectDeviceInventoryWithContext(dcgmCtx)
 	if err != nil {
 		return nil, "", err
 	}
-	defer func() { _ = session.Close() }()
-
-	gpuInfo, driverVersion, _, err := getMachineGPUInfo(session.Instance, session.FieldCache)
+	gpuInfo, driverVersion, _, err := getMachineGPUInfo(devices)
 	return gpuInfo, driverVersion, err
 }
 

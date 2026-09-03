@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -43,27 +42,8 @@ const diskPartitionsTimeout = 10 * time.Second
 
 var listPCIGPUs = nvidiapci.ListPCIGPUs
 
-// MachineInfoFields are the DCGM fields required to augment static device
-// attributes with the remaining machine inventory values.
-var MachineInfoFields = []dcgm.Short{
-	dcgm.DCGM_FI_CUDA_DRIVER_VERSION,
-	dcgm.DCGM_FI_DEV_MINOR_NUMBER,
-	dcgm.DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY,
-	dcgm.DCGM_FI_DEV_FABRIC_CLUSTER_UUID,
-	dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID,
-	dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER,
-}
-
-// RegisterDCGMFields registers machine-inventory fields before the shared
-// FieldValueCache creates its field group.
-func RegisterDCGMFields(dcgmInstance nvidiadcgm.Instance) error {
-	if dcgmInstance == nil {
-		return nil
-	}
-	return dcgmInstance.AddFieldsToWatch(MachineInfoFields)
-}
-
-func GetMachineInfo(dcgmInstance nvidiadcgm.Instance, fieldCache *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
+// GetMachineInfo collects machine information using a device inventory snapshot.
+func GetMachineInfo(devices []nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error) {
 	hostname, _ := os.Hostname()
 	info := &apiv1.MachineInfo{
 		GPUdVersion: version.Version,
@@ -84,7 +64,7 @@ func GetMachineInfo(dcgmInstance nvidiadcgm.Instance, fieldCache *nvidiadcgm.Fie
 	}
 
 	var err error
-	info.GPUInfo, info.GPUDriverVersion, info.CUDAVersion, err = GetMachineGPUInfo(dcgmInstance, fieldCache)
+	info.GPUInfo, info.GPUDriverVersion, info.CUDAVersion, err = GetMachineGPUInfo(devices)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get machine gpu info: %w", err)
 	}
@@ -321,11 +301,8 @@ func GetMachineLocation() *apiv1.MachineLocation {
 // This is different from the device count in DCGM.
 // ref. "CountDevEntry" in "nvvs/plugin_src/software/Software.cpp"
 // ref. https://github.com/NVIDIA/DCGM/blob/903d745504f50153be8293f8566346f9de3b3c93/nvvs/plugin_src/software/Software.cpp#L220-L249
-func GetSystemResourceGPUCount(dcgmInstance nvidiadcgm.Instance) (string, error) {
-	deviceCount := 0
-	if dcgmInstance != nil {
-		deviceCount = len(dcgmInstance.GetDevices())
-	}
+func GetSystemResourceGPUCount(devices []nvidiadcgm.DeviceInfo) (string, error) {
+	deviceCount := len(devices)
 	if deviceCount == 0 {
 		// Fall back to PCI in case DCGM or the NVIDIA driver is unavailable.
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -345,54 +322,19 @@ func GetSystemResourceGPUCount(dcgmInstance nvidiadcgm.Instance) (string, error)
 	return qty.String(), nil
 }
 
-type machineInfoFieldReader interface {
-	GetResult([]dcgm.Short) ([]nvidiadcgm.DeviceFieldValues, error)
-}
-
-func GetMachineGPUInfo(dcgmInstance nvidiadcgm.Instance, fieldCache *nvidiadcgm.FieldValueCache) (*apiv1.MachineGPUInfo, string, string, error) {
-	var fieldReader machineInfoFieldReader
-	if fieldCache != nil {
-		fieldReader = fieldCache
-	}
-	return getMachineGPUInfo(dcgmInstance, fieldReader)
-}
-
-func getMachineGPUInfo(dcgmInstance nvidiadcgm.Instance, fieldReader machineInfoFieldReader) (*apiv1.MachineGPUInfo, string, string, error) {
+// GetMachineGPUInfo converts a device inventory snapshot into the machine GPU
+// API representation.
+func GetMachineGPUInfo(devices []nvidiadcgm.DeviceInfo) (*apiv1.MachineGPUInfo, string, string, error) {
 	info := &apiv1.MachineGPUInfo{}
-	if dcgmInstance == nil {
-		return info, "", "", nil
-	}
-
-	fieldsByDevice := make(map[uint]map[dcgm.Short]dcgm.FieldValue_v1)
-	if fieldReader != nil {
-		results, err := fieldReader.GetResult(MachineInfoFields)
-		if err != nil {
-			log.Logger.Debugw("DCGM machine inventory fields unavailable", "error", err)
-		} else {
-			for _, result := range results {
-				values := make(map[dcgm.Short]dcgm.FieldValue_v1, len(result.Values))
-				for _, value := range result.Values {
-					if value.Status != dcgm.DCGM_ST_OK {
-						continue
-					}
-					values[value.FieldID] = value
-				}
-				fieldsByDevice[result.DeviceID] = values
-			}
-		}
-	}
 
 	driverVersion := ""
 	cudaVersion := ""
-	for _, dev := range dcgmInstance.GetDevices() {
-		values := fieldsByDevice[dev.ID]
+	for _, dev := range devices {
 		if driverVersion == "" {
 			driverVersion = strings.TrimSpace(dev.DriverVersion)
 		}
-		if cudaVersion == "" {
-			if value, ok := values[dcgm.DCGM_FI_CUDA_DRIVER_VERSION]; ok {
-				cudaVersion = formatCUDADriverVersion(value.Int64())
-			}
+		if cudaVersion == "" && dev.CUDADriverVersion > 0 {
+			cudaVersion = formatCUDADriverVersion(dev.CUDADriverVersion)
 		}
 
 		if info.Product == "" {
@@ -407,27 +349,16 @@ func getMachineGPUInfo(dcgmInstance nvidiadcgm.Instance, fieldReader machineInfo
 					info.Memory = qty.String()
 				}
 			}
-			if value, ok := values[dcgm.DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY]; ok {
-				info.Architecture = architectureFromComputeCapability(value.Int64())
+			if dev.ComputeCapability > 0 {
+				info.Architecture = architectureFromComputeCapability(dev.ComputeCapability)
 			}
 		}
 
-		minorID := "-1"
-		if value, ok := values[dcgm.DCGM_FI_DEV_MINOR_NUMBER]; ok {
-			minorID = strconv.FormatInt(value.Int64(), 10)
-		}
-		clusterUUID := ""
-		if value, ok := values[dcgm.DCGM_FI_DEV_FABRIC_CLUSTER_UUID]; ok {
-			clusterUUID = strings.TrimSpace(value.String())
-		}
+		minorID := strconv.FormatInt(dev.MinorNumber, 10)
 		var cliqueID *uint32
-		if value, ok := values[dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID]; ok {
-			id := uint32(value.Int64())
+		if dev.FabricCliqueIDValid {
+			id := dev.FabricCliqueID
 			cliqueID = &id
-		}
-		chassisSN := ""
-		if value, ok := values[dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER]; ok {
-			chassisSN = strings.TrimSpace(value.String())
 		}
 
 		// BoardID remains unset because DCGM does not expose
@@ -436,13 +367,13 @@ func getMachineGPUInfo(dcgmInstance nvidiadcgm.Instance, fieldReader machineInfo
 			UUID:         dev.UUID,
 			GPUIndex:     strconv.FormatUint(uint64(dev.ID), 10),
 			ModelName:    strings.TrimSpace(dev.Model),
-			ClusterUUID:  clusterUUID,
+			ClusterUUID:  strings.TrimSpace(dev.FabricClusterUUID),
 			CliqueID:     cliqueID,
 			SN:           strings.TrimSpace(dev.Serial),
 			MinorID:      minorID,
 			BusID:        strings.TrimSpace(dev.BusID),
 			VBIOSVersion: strings.TrimSpace(dev.VBIOSVersion),
-			ChassisSN:    chassisSN,
+			ChassisSN:    strings.TrimSpace(dev.ChassisSerial),
 		})
 	}
 

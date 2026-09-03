@@ -17,18 +17,18 @@ import (
 func TestCreateGossipRequestMocked(t *testing.T) {
 	// Setup
 	machineID := "test-machine-id"
-	gpuProvider := nvidiadcgm.NewNoOp()
+	var devices []nvidiadcgm.DeviceInfo
 
 	// Test cases for the private function
 	tests := []struct {
 		name               string
-		getMachineInfoFunc func(gpuProvider nvidiadcgm.Instance, fieldCache *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error)
+		getMachineInfoFunc func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error)
 		wantError          bool
 		expectedErrorMsg   string
 	}{
 		{
 			name: "successful request creation",
-			getMachineInfoFunc: func(gpuProvider nvidiadcgm.Instance, fieldCache *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
+			getMachineInfoFunc: func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error) {
 				return &apiv1.MachineInfo{
 					Hostname: "test-host",
 					CPUInfo: &apiv1.MachineCPUInfo{
@@ -40,7 +40,7 @@ func TestCreateGossipRequestMocked(t *testing.T) {
 		},
 		{
 			name: "getMachineInfo returns error",
-			getMachineInfoFunc: func(gpuProvider nvidiadcgm.Instance, fieldCache *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
+			getMachineInfoFunc: func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error) {
 				return nil, errors.New("machine info error")
 			},
 			wantError:        true,
@@ -51,7 +51,7 @@ func TestCreateGossipRequestMocked(t *testing.T) {
 	// Run all test cases
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req, err := createGossipRequest(machineID, gpuProvider, nil, tc.getMachineInfoFunc)
+			req, err := createGossipRequest(machineID, devices, tc.getMachineInfoFunc)
 
 			if tc.wantError {
 				assert.Error(t, err)

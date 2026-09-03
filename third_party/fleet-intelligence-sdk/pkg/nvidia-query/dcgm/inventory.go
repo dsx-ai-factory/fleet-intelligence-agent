@@ -16,6 +16,7 @@
 package dcgm
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -67,6 +68,42 @@ var getSupportedDevicesForInventory = dcgm.GetSupportedDevices
 var getLatestInventoryValues = dcgm.EntitiesGetLatestValues
 
 var errDeviceEnumeration = errors.New("enumerate supported DCGM devices")
+
+type deviceInventoryResult struct {
+	devices []DeviceInfo
+	err     error
+}
+
+// CollectDeviceInventoryWithContext initializes a short-lived DCGM connection,
+// collects one live device inventory snapshot, and releases the connection. It
+// does not create a DCGM group, field group, or watch.
+//
+// A context deadline bounds how long the caller waits, but it cannot interrupt
+// a native DCGM call already in progress. If the caller stops waiting, the
+// goroutine still releases the DCGM connection when that call returns.
+func CollectDeviceInventoryWithContext(ctx context.Context) ([]DeviceInfo, error) {
+	resultCh := make(chan deviceInventoryResult, 1)
+	go func() {
+		cleanup, err := dcgmInitFunc(resolveInitFromEnv())
+		if err != nil {
+			resultCh <- deviceInventoryResult{err: fmt.Errorf("initialize DCGM for device inventory: %w", err)}
+			return
+		}
+
+		devices, err := queryDeviceInventory()
+		if cleanup != nil {
+			cleanup()
+		}
+		resultCh <- deviceInventoryResult{devices: devices, err: err}
+	}()
+
+	select {
+	case result := <-resultCh:
+		return result.devices, result.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 // queryDeviceInventory enumerates supported GPUs and reads all inventory
 // fields in one request. No DCGM group, field group, or watch is required.

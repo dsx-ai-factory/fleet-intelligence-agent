@@ -78,15 +78,9 @@ type MachineInfo struct {
 	NICInfo *apiv1.MachineNICInfo `json:"nicInfo,omitempty"`
 }
 
-// RegisterDCGMFields registers the DCGM fields used by machine inventory.
-func RegisterDCGMFields(dcgmInstance nvidiadcgm.Instance) error {
-	return pkgmachineinfo.RegisterDCGMFields(dcgmInstance)
-}
-
 // GetMachineInfo retrieves machine info and customizes it for Fleet Intelligence.
-func GetMachineInfo(dcgmInstance nvidiadcgm.Instance, fieldCache *nvidiadcgm.FieldValueCache) (*MachineInfo, error) {
-	// Get the original machine info from gpud
-	gpudInfo, err := pkgmachineinfo.GetMachineInfo(dcgmInstance, fieldCache)
+func GetMachineInfo(devices []nvidiadcgm.DeviceInfo) (*MachineInfo, error) {
+	gpudInfo, err := pkgmachineinfo.GetMachineInfo(devices)
 	if err != nil {
 		return nil, err
 	}

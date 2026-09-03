@@ -142,10 +142,6 @@ func Scan(ctx context.Context, opts ...Option) error {
 	// Field watching will be set up after components register their fields
 	// Note: CPU component manages its own field watching separately
 	dcgmFieldValueCache = nvidiadcgm.NewFieldValueCache(ctx, dcgmInstance, time.Minute)
-	if err := machineinfo.RegisterDCGMFields(dcgmInstance); err != nil {
-		return fmt.Errorf("failed to register machine inventory DCGM fields: %w", err)
-	}
-
 	if devices := dcgmInstance.GetDevices(); len(devices) > 0 {
 		product := nvidiaproduct.SanitizeProductName(devices[0].Model)
 		if threshold, err := nvidiainfiniband.SupportsInfinibandPortRate(product); err == nil {
@@ -204,7 +200,7 @@ func Scan(ctx context.Context, opts ...Option) error {
 		log.Logger.Warnw("DCGM field value poll failed", "error", err)
 	}
 
-	mi, err := machineinfo.GetMachineInfo(dcgmInstance, dcgmFieldValueCache)
+	mi, err := machineinfo.GetMachineInfo(dcgmInstance.GetDevices())
 	if err != nil {
 		return err
 	}

@@ -23,7 +23,6 @@ import (
 	"time"
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
-	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/providers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -64,9 +63,7 @@ func TestGetMachineInfo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Use the no-op DCGM instance for testing
-			dcgmInstance := nvidiadcgm.NewNoOp()
-			info, err := GetMachineInfo(dcgmInstance, nil)
+			info, err := GetMachineInfo(nil)
 			if tt.wantErr {
 				assert.Error(t, err)
 				assert.Nil(t, info)
@@ -498,7 +495,7 @@ func TestGetMachineInfo_DCGMVersionBestEffort(t *testing.T) {
 		return "", assert.AnError
 	}
 
-	info, err := GetMachineInfo(nvidiadcgm.NewNoOp(), nil)
+	info, err := GetMachineInfo(nil)
 	require.NoError(t, err)
 	assert.Empty(t, info.DCGMVersion)
 }

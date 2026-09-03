@@ -48,10 +48,10 @@ func TestCreateLoginRequest_Basic(t *testing.T) {
 		gpuCount                             string
 		getPublicIPFunc                      func() (string, error)
 		getMachineLocationFunc               func() *apiv1.MachineLocation
-		getMachineInfoFunc                   func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error)
+		getMachineInfoFunc                   func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error)
 		getProviderFunc                      func(string) *providers.Info
 		getSystemResourceRootVolumeTotalFunc func() (string, error)
-		getSystemResourceGPUCountFunc        func(nvidiadcgm.Instance) (string, error)
+		getSystemResourceGPUCountFunc        func([]nvidiadcgm.DeviceInfo) (string, error)
 		wantErr                              bool
 		validate                             func(*testing.T, *apiv1.LoginRequest)
 		skip                                 bool
@@ -70,7 +70,7 @@ func TestCreateLoginRequest_Basic(t *testing.T) {
 					Zone:   "us-east-1a",
 				}
 			},
-			getMachineInfoFunc: func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
+			getMachineInfoFunc: func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error) {
 				return &apiv1.MachineInfo{
 					CPUInfo: &apiv1.MachineCPUInfo{
 						LogicalCores: 4,
@@ -91,7 +91,7 @@ func TestCreateLoginRequest_Basic(t *testing.T) {
 			getSystemResourceRootVolumeTotalFunc: func() (string, error) {
 				return "100Gi", nil
 			},
-			getSystemResourceGPUCountFunc: func(nvidiadcgm.Instance) (string, error) {
+			getSystemResourceGPUCountFunc: func([]nvidiadcgm.DeviceInfo) (string, error) {
 				return "2", nil
 			},
 			wantErr: false,
@@ -125,7 +125,7 @@ func TestCreateLoginRequest_Basic(t *testing.T) {
 			getMachineLocationFunc: func() *apiv1.MachineLocation {
 				return &apiv1.MachineLocation{}
 			},
-			getMachineInfoFunc: func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
+			getMachineInfoFunc: func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error) {
 				return &apiv1.MachineInfo{
 					CPUInfo: &apiv1.MachineCPUInfo{
 						LogicalCores: 8,
@@ -144,7 +144,7 @@ func TestCreateLoginRequest_Basic(t *testing.T) {
 			getSystemResourceRootVolumeTotalFunc: func() (string, error) {
 				return "200Gi", nil
 			},
-			getSystemResourceGPUCountFunc: func(nvidiadcgm.Instance) (string, error) {
+			getSystemResourceGPUCountFunc: func([]nvidiadcgm.DeviceInfo) (string, error) {
 				return "0", nil // This should be ignored since gpuCount is set explicitly
 			},
 			wantErr: false,
@@ -171,7 +171,7 @@ func TestCreateLoginRequest_Basic(t *testing.T) {
 			getMachineLocationFunc: func() *apiv1.MachineLocation {
 				return &apiv1.MachineLocation{}
 			},
-			getMachineInfoFunc: func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
+			getMachineInfoFunc: func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error) {
 				return &apiv1.MachineInfo{
 					CPUInfo: &apiv1.MachineCPUInfo{
 						LogicalCores: 2,
@@ -190,7 +190,7 @@ func TestCreateLoginRequest_Basic(t *testing.T) {
 			getSystemResourceRootVolumeTotalFunc: func() (string, error) {
 				return "50Gi", nil
 			},
-			getSystemResourceGPUCountFunc: func(nvidiadcgm.Instance) (string, error) {
+			getSystemResourceGPUCountFunc: func([]nvidiadcgm.DeviceInfo) (string, error) {
 				return "0", nil
 			},
 			wantErr: false,
@@ -218,7 +218,7 @@ func TestCreateLoginRequest_Basic(t *testing.T) {
 			getMachineLocationFunc: func() *apiv1.MachineLocation {
 				return &apiv1.MachineLocation{}
 			},
-			getMachineInfoFunc: func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
+			getMachineInfoFunc: func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error) {
 				return nil, errors.New("machine info error")
 			},
 			getProviderFunc: func(ip string) *providers.Info {
@@ -227,7 +227,7 @@ func TestCreateLoginRequest_Basic(t *testing.T) {
 			getSystemResourceRootVolumeTotalFunc: func() (string, error) {
 				return "", nil
 			},
-			getSystemResourceGPUCountFunc: func(nvidiadcgm.Instance) (string, error) {
+			getSystemResourceGPUCountFunc: func([]nvidiadcgm.DeviceInfo) (string, error) {
 				return "", nil
 			},
 			wantErr: true,
@@ -244,7 +244,7 @@ func TestCreateLoginRequest_Basic(t *testing.T) {
 			getMachineLocationFunc: func() *apiv1.MachineLocation {
 				return &apiv1.MachineLocation{}
 			},
-			getMachineInfoFunc: func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
+			getMachineInfoFunc: func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error) {
 				return &apiv1.MachineInfo{
 					CPUInfo: &apiv1.MachineCPUInfo{
 						LogicalCores: 4,
@@ -260,7 +260,7 @@ func TestCreateLoginRequest_Basic(t *testing.T) {
 			getSystemResourceRootVolumeTotalFunc: func() (string, error) {
 				return "", errors.New("root volume total error")
 			},
-			getSystemResourceGPUCountFunc: func(nvidiadcgm.Instance) (string, error) {
+			getSystemResourceGPUCountFunc: func([]nvidiadcgm.DeviceInfo) (string, error) {
 				return "", nil
 			},
 			wantErr: true,
@@ -277,7 +277,7 @@ func TestCreateLoginRequest_Basic(t *testing.T) {
 			getMachineLocationFunc: func() *apiv1.MachineLocation {
 				return &apiv1.MachineLocation{}
 			},
-			getMachineInfoFunc: func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
+			getMachineInfoFunc: func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error) {
 				return &apiv1.MachineInfo{
 					CPUInfo: &apiv1.MachineCPUInfo{
 						LogicalCores: 4,
@@ -293,7 +293,7 @@ func TestCreateLoginRequest_Basic(t *testing.T) {
 			getSystemResourceRootVolumeTotalFunc: func() (string, error) {
 				return "100Gi", nil
 			},
-			getSystemResourceGPUCountFunc: func(nvidiadcgm.Instance) (string, error) {
+			getSystemResourceGPUCountFunc: func([]nvidiadcgm.DeviceInfo) (string, error) {
 				return "", errors.New("gpu count error")
 			},
 			wantErr: true,
@@ -310,7 +310,7 @@ func TestCreateLoginRequest_Basic(t *testing.T) {
 			getMachineLocationFunc: func() *apiv1.MachineLocation {
 				return &apiv1.MachineLocation{}
 			},
-			getMachineInfoFunc: func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
+			getMachineInfoFunc: func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error) {
 				return &apiv1.MachineInfo{
 					CPUInfo: &apiv1.MachineCPUInfo{
 						LogicalCores: 4,
@@ -326,7 +326,7 @@ func TestCreateLoginRequest_Basic(t *testing.T) {
 			getSystemResourceRootVolumeTotalFunc: func() (string, error) {
 				return "100Gi", nil
 			},
-			getSystemResourceGPUCountFunc: func(nvidiadcgm.Instance) (string, error) {
+			getSystemResourceGPUCountFunc: func([]nvidiadcgm.DeviceInfo) (string, error) {
 				return "1", nil
 			},
 			wantErr: false, // Public IP error is logged but doesn't fail the request
@@ -350,7 +350,6 @@ func TestCreateLoginRequest_Basic(t *testing.T) {
 				tt.machineID,
 				"",
 				tt.gpuCount,
-				nvidiadcgm.NewNoOp(),
 				nil,
 				tt.getPublicIPFunc,
 				tt.getMachineLocationFunc,
@@ -388,7 +387,7 @@ func TestCreateLoginRequest_NetworkBasics(t *testing.T) {
 		},
 	}
 
-	getMachineInfoFunc := func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
+	getMachineInfoFunc := func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error) {
 		return &apiv1.MachineInfo{
 			CPUInfo: &apiv1.MachineCPUInfo{
 				LogicalCores: 4,
@@ -407,7 +406,6 @@ func TestCreateLoginRequest_NetworkBasics(t *testing.T) {
 		"machine-id",
 		"",
 		"1",
-		nvidiadcgm.NewNoOp(),
 		nil,
 		func() (string, error) { return "1.2.3.4", nil },
 		func() *apiv1.MachineLocation { return &apiv1.MachineLocation{} },
@@ -416,7 +414,7 @@ func TestCreateLoginRequest_NetworkBasics(t *testing.T) {
 			return &providers.Info{Provider: fmt.Sprintf("provider-%s", ip), PublicIP: ip}
 		},
 		func() (string, error) { return "100Gi", nil },
-		func(nvidiadcgm.Instance) (string, error) { return "1", nil },
+		func([]nvidiadcgm.DeviceInfo) (string, error) { return "1", nil },
 	)
 
 	assert.NoError(t, err)
@@ -483,7 +481,7 @@ func TestCreateLoginRequest_PrivateIPDetection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			getMachineInfoFunc := func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
+			getMachineInfoFunc := func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error) {
 				return &apiv1.MachineInfo{
 					CPUInfo: &apiv1.MachineCPUInfo{
 						LogicalCores: 4,
@@ -502,14 +500,13 @@ func TestCreateLoginRequest_PrivateIPDetection(t *testing.T) {
 				"machine-id",
 				"",
 				"1",
-				nvidiadcgm.NewNoOp(),
 				nil,
 				func() (string, error) { return "1.2.3.4", nil },
 				func() *apiv1.MachineLocation { return &apiv1.MachineLocation{} },
 				getMachineInfoFunc,
 				func(ip string) *providers.Info { return &providers.Info{Provider: "provider"} },
 				func() (string, error) { return "100Gi", nil },
-				func(nvidiadcgm.Instance) (string, error) { return "1", nil },
+				func([]nvidiadcgm.DeviceInfo) (string, error) { return "1", nil },
 			)
 
 			assert.NoError(t, err, tt.description)
@@ -553,7 +550,7 @@ func TestCreateLoginRequest_ResourceCalculation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			getMachineInfoFunc := func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
+			getMachineInfoFunc := func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error) {
 				return &apiv1.MachineInfo{
 					CPUInfo: &apiv1.MachineCPUInfo{
 						LogicalCores: tt.cpuCores,
@@ -569,14 +566,13 @@ func TestCreateLoginRequest_ResourceCalculation(t *testing.T) {
 				"machine-id",
 				"",
 				"0",
-				nvidiadcgm.NewNoOp(),
 				nil,
 				func() (string, error) { return "", nil },
 				func() *apiv1.MachineLocation { return &apiv1.MachineLocation{} },
 				getMachineInfoFunc,
 				func(ip string) *providers.Info { return &providers.Info{Provider: ""} },
 				func() (string, error) { return "100Gi", nil },
-				func(nvidiadcgm.Instance) (string, error) { return "0", nil },
+				func([]nvidiadcgm.DeviceInfo) (string, error) { return "0", nil },
 			)
 
 			assert.NoError(t, err)
@@ -696,7 +692,7 @@ func TestCreateLoginRequest_ProviderPrivateIPFallback(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			getMachineInfoFunc := func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
+			getMachineInfoFunc := func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error) {
 				machineInfo := &apiv1.MachineInfo{
 					CPUInfo: &apiv1.MachineCPUInfo{
 						LogicalCores: 4,
@@ -729,14 +725,13 @@ func TestCreateLoginRequest_ProviderPrivateIPFallback(t *testing.T) {
 				"machine-id",
 				"",
 				"1",
-				nvidiadcgm.NewNoOp(),
 				nil,
 				func() (string, error) { return "1.2.3.4", nil },
 				func() *apiv1.MachineLocation { return &apiv1.MachineLocation{} },
 				getMachineInfoFunc,
 				getProviderFunc,
 				func() (string, error) { return "100Gi", nil },
-				func(nvidiadcgm.Instance) (string, error) { return "1", nil },
+				func([]nvidiadcgm.DeviceInfo) (string, error) { return "1", nil },
 			)
 
 			assert.NoError(t, err, tt.description)
@@ -815,7 +810,7 @@ func TestCreateLoginRequest_ProviderInfoUsage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			getMachineInfoFunc := func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
+			getMachineInfoFunc := func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error) {
 				interfaces := []apiv1.MachineNetworkInterface{}
 
 				// For the third test case, add a network interface with private IP
@@ -850,14 +845,13 @@ func TestCreateLoginRequest_ProviderInfoUsage(t *testing.T) {
 				"machine-id",
 				"",
 				"1",
-				nvidiadcgm.NewNoOp(),
 				nil,
 				tt.publicIPFunc,
 				func() *apiv1.MachineLocation { return &apiv1.MachineLocation{} },
 				getMachineInfoFunc,
 				getProviderFunc,
 				func() (string, error) { return "100Gi", nil },
-				func(nvidiadcgm.Instance) (string, error) { return "1", nil },
+				func([]nvidiadcgm.DeviceInfo) (string, error) { return "1", nil },
 			)
 
 			assert.NoError(t, err)
@@ -924,7 +918,7 @@ func TestCreateLoginRequest_IMDSPrivateIPPrecedence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			getMachineInfoFunc := func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error) {
+			getMachineInfoFunc := func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error) {
 				return &apiv1.MachineInfo{
 					CPUInfo:    &apiv1.MachineCPUInfo{LogicalCores: 8},
 					MemoryInfo: &apiv1.MachineMemoryInfo{TotalBytes: 32 * 1024 * 1024 * 1024},
@@ -946,14 +940,13 @@ func TestCreateLoginRequest_IMDSPrivateIPPrecedence(t *testing.T) {
 				"machine-id",
 				"",
 				"1",
-				nvidiadcgm.NewNoOp(),
 				nil,
 				func() (string, error) { return "54.123.45.67", nil },
 				func() *apiv1.MachineLocation { return &apiv1.MachineLocation{} },
 				getMachineInfoFunc,
 				getProviderFunc,
 				func() (string, error) { return "500Gi", nil },
-				func(nvidiadcgm.Instance) (string, error) { return "8", nil },
+				func([]nvidiadcgm.DeviceInfo) (string, error) { return "8", nil },
 			)
 
 			assert.NoError(t, err, tt.description)

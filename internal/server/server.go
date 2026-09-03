@@ -307,10 +307,6 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 
 	dcgmFieldValueCache := nvidiadcgm.NewFieldValueCache(ctx, dcgmInstance, healthCheckInterval)
 	log.Logger.Infow("DCGM field value cache created", "healthCheckInterval", healthCheckInterval)
-	if err := machineinfo.RegisterDCGMFields(dcgmInstance); err != nil {
-		return nil, fmt.Errorf("failed to register machine inventory DCGM fields: %w", err)
-	}
-
 	s.gpudInstance = &components.GPUdInstance{
 		RootCtx:              ctx,
 		MachineID:            machineID,
@@ -382,7 +378,7 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 	promRecorder := pkgmetricsrecorder.NewPrometheusRecorder(ctx, 15*time.Minute, dbRO)
 	promRecorder.Start()
 
-	s.startInventoryLoop(loopCtx, config, dcgmInstance, dcgmFieldValueCache)
+	s.startInventoryLoop(loopCtx, config, dcgmInstance)
 	s.startAttestationLoop(loopCtx, config)
 
 	// Create and start health exporter with all dependencies if enabled
@@ -394,7 +390,7 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 			exporter.WithMetricsStore(metricsSQLiteStore),
 			exporter.WithEventStore(eventStore),
 			exporter.WithComponentsRegistry(s.componentsRegistry),
-			exporter.WithDCGM(dcgmInstance, dcgmFieldValueCache),
+			exporter.WithDCGM(dcgmInstance),
 			exporter.WithDatabaseConnections(dbRW, dbRO),
 			exporter.WithMachineID(machineID),
 		)
@@ -418,7 +414,6 @@ func (s *Server) startInventoryLoop(
 	ctx context.Context,
 	cfg *config.Config,
 	dcgmInstance nvidiadcgm.Instance,
-	dcgmFieldValueCache *nvidiadcgm.FieldValueCache,
 ) {
 	interval := getInventorySyncInterval(cfg)
 	if interval <= 0 {
@@ -439,7 +434,7 @@ func (s *Server) startInventoryLoop(
 
 	source := inventorysource.NewMachineInfoSourceWithAgentConfig(
 		inventoryMachineInfoCollectorFunc(func(context.Context) (*machineinfo.MachineInfo, error) {
-			return machineinfo.GetMachineInfo(dcgmInstance, dcgmFieldValueCache)
+			return machineinfo.GetMachineInfo(dcgmInstance.GetDevices())
 		}),
 		&inventory.AgentConfig{
 			TotalComponents:             int64(len(allComponents)),

@@ -16,14 +16,13 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/providers"
 )
 
-func CreateLoginRequest(token string, machineID string, nodeGroup string, gpuCount string, dcgmInstance nvidiadcgm.Instance, fieldCache *nvidiadcgm.FieldValueCache) (*apiv1.LoginRequest, error) {
+func CreateLoginRequest(token string, machineID string, nodeGroup string, gpuCount string, devices []nvidiadcgm.DeviceInfo) (*apiv1.LoginRequest, error) {
 	return createLoginRequest(
 		token,
 		machineID,
 		nodeGroup,
 		gpuCount,
-		dcgmInstance,
-		fieldCache,
+		devices,
 		netutil.PublicIP,
 		GetMachineLocation,
 		GetMachineInfo,
@@ -38,14 +37,13 @@ func createLoginRequest(
 	machineID string,
 	nodeGroup string,
 	gpuCount string,
-	dcgmInstance nvidiadcgm.Instance,
-	fieldCache *nvidiadcgm.FieldValueCache,
+	devices []nvidiadcgm.DeviceInfo,
 	getPublicIPFunc func() (string, error),
 	getMachineLocationFunc func() *apiv1.MachineLocation,
-	getMachineInfoFunc func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error),
+	getMachineInfoFunc func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error),
 	getProviderFunc func(ip string) *providers.Info,
 	getSystemResourceRootVolumeTotalFunc func() (string, error),
-	getSystemResourceGPUCountFunc func(nvidiadcgm.Instance) (string, error),
+	getSystemResourceGPUCountFunc func([]nvidiadcgm.DeviceInfo) (string, error),
 ) (*apiv1.LoginRequest, error) {
 	donec := make(chan struct{})
 	defer close(donec)
@@ -95,7 +93,7 @@ func createLoginRequest(
 		"provider", req.Provider,
 		"providerInstanceID", req.ProviderInstanceID)
 
-	req.MachineInfo, err = getMachineInfoFunc(dcgmInstance, fieldCache)
+	req.MachineInfo, err = getMachineInfoFunc(devices)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get machine info: %w", err)
 	}
@@ -134,7 +132,7 @@ func createLoginRequest(
 
 	gpuCnt := gpuCount
 	if gpuCnt == "" {
-		gpuCnt, err = getSystemResourceGPUCountFunc(dcgmInstance)
+		gpuCnt, err = getSystemResourceGPUCountFunc(devices)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get system resource gpu count: %w", err)
 		}

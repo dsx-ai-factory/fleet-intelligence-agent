@@ -10,22 +10,21 @@ import (
 	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 )
 
-func CreateGossipRequest(machineID string, dcgmInstance nvidiadcgm.Instance, fieldCache *nvidiadcgm.FieldValueCache) (*apiv1.GossipRequest, error) {
-	return createGossipRequest(machineID, dcgmInstance, fieldCache, GetMachineInfo)
+func CreateGossipRequest(machineID string, devices []nvidiadcgm.DeviceInfo) (*apiv1.GossipRequest, error) {
+	return createGossipRequest(machineID, devices, GetMachineInfo)
 }
 
 func createGossipRequest(
 	machineID string,
-	dcgmInstance nvidiadcgm.Instance,
-	fieldCache *nvidiadcgm.FieldValueCache,
-	getMachineInfoFunc func(nvidiadcgm.Instance, *nvidiadcgm.FieldValueCache) (*apiv1.MachineInfo, error),
+	devices []nvidiadcgm.DeviceInfo,
+	getMachineInfoFunc func([]nvidiadcgm.DeviceInfo) (*apiv1.MachineInfo, error),
 ) (*apiv1.GossipRequest, error) {
 	req := &apiv1.GossipRequest{
 		MachineID: machineID,
 	}
 
 	var err error
-	req.MachineInfo, err = getMachineInfoFunc(dcgmInstance, fieldCache)
+	req.MachineInfo, err = getMachineInfoFunc(devices)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get machine info: %w", err)
 	}

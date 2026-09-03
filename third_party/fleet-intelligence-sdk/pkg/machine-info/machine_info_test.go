@@ -5,7 +5,6 @@ package machineinfo
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"math"
 	"os"
@@ -14,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -146,7 +144,7 @@ func TestGetSystemResourceGPUCount_NoGPU(t *testing.T) {
 		return nil, nil
 	}
 
-	count, err := GetSystemResourceGPUCount(nvidiadcgm.NewNoOp())
+	count, err := GetSystemResourceGPUCount(nil)
 	assert.NoError(t, err)
 	assert.Equal(t, "0", count, "GPU count should be 0 when no devices are present")
 }
@@ -185,26 +183,17 @@ func TestGetMachineGPUInfoFromDCGM(t *testing.T) {
 		Serial:                 "serial-123",
 		VBIOSVersion:           "96.00.5E.00.01",
 		DriverVersion:          "570.86.15",
+		CUDADriverVersion:      12080,
+		MinorNumber:            7,
+		ComputeCapability:      9 << 16,
+		FabricClusterUUID:      "cluster-123",
+		FabricCliqueID:         9,
+		FabricCliqueIDValid:    true,
+		ChassisSerial:          "chassis-123",
 		FramebufferMemoryBytes: 80 * 1024 * 1024 * 1024,
 	}
-	instance := &staticDeviceInstance{
-		Instance: nvidiadcgm.NewNoOp(),
-		devices:  []nvidiadcgm.DeviceInfo{device},
-	}
-	reader := staticFieldReader{results: []nvidiadcgm.DeviceFieldValues{{
-		DeviceID: device.ID,
-		UUID:     device.UUID,
-		Values: []dcgm.FieldValue_v1{
-			int64Field(dcgm.DCGM_FI_CUDA_DRIVER_VERSION, 12080),
-			int64Field(dcgm.DCGM_FI_DEV_MINOR_NUMBER, 7),
-			int64Field(dcgm.DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY, (9 << 16)),
-			stringField(dcgm.DCGM_FI_DEV_FABRIC_CLUSTER_UUID, "cluster-123"),
-			int64Field(dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID, 9),
-			stringField(dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER, "chassis-123"),
-		},
-	}}}
 
-	info, driverVersion, cudaVersion, err := getMachineGPUInfo(instance, reader)
+	info, driverVersion, cudaVersion, err := GetMachineGPUInfo([]nvidiadcgm.DeviceInfo{device})
 	require.NoError(t, err)
 	assert.Equal(t, "570.86.15", driverVersion)
 	assert.Equal(t, "12.8", cudaVersion)
@@ -225,35 +214,22 @@ func TestGetMachineGPUInfoFromDCGM(t *testing.T) {
 	assert.Zero(t, info.GPUs[0].BoardID)
 }
 
-func TestGetMachineGPUInfoIgnoresFailedDCGMFields(t *testing.T) {
+func TestGetMachineGPUInfoHandlesUnavailableInventoryFields(t *testing.T) {
 	device := nvidiadcgm.DeviceInfo{
-		ID:            3,
-		UUID:          "GPU-123",
-		Model:         "NVIDIA H100 80GB HBM3",
-		DriverVersion: "570.86.15",
+		ID:                     3,
+		UUID:                   "GPU-123",
+		Model:                  "NVIDIA H100 80GB HBM3",
+		DriverVersion:          "570.86.15",
+		MinorNumber:            -1,
+		FabricCliqueIDValid:    false,
+		CUDADriverVersion:      0,
+		ComputeCapability:      0,
+		FabricClusterUUID:      "",
+		ChassisSerial:          "",
+		FramebufferMemoryBytes: 0,
 	}
-	instance := &staticDeviceInstance{
-		Instance: nvidiadcgm.NewNoOp(),
-		devices:  []nvidiadcgm.DeviceInfo{device},
-	}
-	values := []dcgm.FieldValue_v1{
-		int64Field(dcgm.DCGM_FI_CUDA_DRIVER_VERSION, 12080),
-		int64Field(dcgm.DCGM_FI_DEV_MINOR_NUMBER, 7),
-		int64Field(dcgm.DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY, (9 << 16)),
-		stringField(dcgm.DCGM_FI_DEV_FABRIC_CLUSTER_UUID, "cluster-123"),
-		int64Field(dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID, 9),
-		stringField(dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER, "chassis-123"),
-	}
-	for i := range values {
-		values[i].Status = dcgm.DCGM_ST_NVML_ERROR
-	}
-	reader := staticFieldReader{results: []nvidiadcgm.DeviceFieldValues{{
-		DeviceID: device.ID,
-		UUID:     device.UUID,
-		Values:   values,
-	}}}
 
-	info, driverVersion, cudaVersion, err := getMachineGPUInfo(instance, reader)
+	info, driverVersion, cudaVersion, err := GetMachineGPUInfo([]nvidiadcgm.DeviceInfo{device})
 	require.NoError(t, err)
 	assert.Equal(t, "570.86.15", driverVersion)
 	assert.Empty(t, cudaVersion)
@@ -263,34 +239,6 @@ func TestGetMachineGPUInfoIgnoresFailedDCGMFields(t *testing.T) {
 	assert.Empty(t, info.GPUs[0].ClusterUUID)
 	assert.Nil(t, info.GPUs[0].CliqueID)
 	assert.Empty(t, info.GPUs[0].ChassisSN)
-}
-
-type staticDeviceInstance struct {
-	nvidiadcgm.Instance
-	devices []nvidiadcgm.DeviceInfo
-}
-
-func (i *staticDeviceInstance) GetDevices() []nvidiadcgm.DeviceInfo { return i.devices }
-
-type staticFieldReader struct {
-	results []nvidiadcgm.DeviceFieldValues
-	err     error
-}
-
-func (r staticFieldReader) GetResult([]dcgm.Short) ([]nvidiadcgm.DeviceFieldValues, error) {
-	return r.results, r.err
-}
-
-func int64Field(fieldID dcgm.Short, value int64) dcgm.FieldValue_v1 {
-	field := dcgm.FieldValue_v1{FieldID: fieldID, FieldType: dcgm.DCGM_FT_INT64}
-	binary.NativeEndian.PutUint64(field.Value[:8], uint64(value))
-	return field
-}
-
-func stringField(fieldID dcgm.Short, value string) dcgm.FieldValue_v1 {
-	field := dcgm.FieldValue_v1{FieldID: fieldID, FieldType: dcgm.DCGM_FT_STRING}
-	copy(field.Value[:], value)
-	return field
 }
 
 // TestGetProvider tests provider detection

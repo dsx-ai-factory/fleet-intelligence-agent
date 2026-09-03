@@ -20,18 +20,17 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	pkgmetadata "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metadata"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
-	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/dcgminventory"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/endpoint"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory"
 	inventorysink "github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory/sink"
@@ -208,15 +207,14 @@ func syncInventoryOnce(ctx context.Context, cfg *config.Config) error {
 	inventoryEnabled, inventoryIntervalSeconds := cfg.InventoryLoopAgentConfig()
 	attestationEnabled, attestationIntervalSeconds := cfg.AttestationLoopAgentConfig()
 
-	dcgmSession, err := dcgminventory.Open(ctx, fmt.Sprintf("enroll-%d", os.Getpid()), time.Minute)
+	devices, err := nvidiadcgm.CollectDeviceInventoryWithContext(ctx)
 	if err != nil {
-		return err
+		log.Logger.Warnw("DCGM inventory collection failed; continuing without GPU inventory", "error", err)
 	}
-	defer func() { _ = dcgmSession.Close() }()
 
 	src := inventorysource.NewMachineInfoSourceWithAgentConfig(
 		machineInfoCollectorFunc(func(context.Context) (*machineinfo.MachineInfo, error) {
-			return machineinfo.GetMachineInfo(dcgmSession.Instance, dcgmSession.FieldCache)
+			return machineinfo.GetMachineInfo(devices)
 		}),
 		&inventory.AgentConfig{
 			TotalComponents:             int64(len(allComponents)),

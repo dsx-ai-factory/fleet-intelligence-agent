@@ -81,18 +81,16 @@ type collector struct {
 }
 
 type collectorOptions struct {
-	dcgmInstance   nvidiadcgm.Instance
-	dcgmFieldCache *nvidiadcgm.FieldValueCache
+	dcgmInstance nvidiadcgm.Instance
 }
 
 // Option configures optional collector dependencies.
 type Option func(*collectorOptions)
 
 // WithDCGM enables DCGM-backed machine-info collection for health exports.
-func WithDCGM(instance nvidiadcgm.Instance, fieldCache *nvidiadcgm.FieldValueCache) Option {
+func WithDCGM(instance nvidiadcgm.Instance) Option {
 	return func(o *collectorOptions) {
 		o.dcgmInstance = instance
-		o.dcgmFieldCache = fieldCache
 	}
 }
 
@@ -115,7 +113,7 @@ func New(
 	var provider machineInfoProvider
 	needsIdentity := cfg != nil && (cfg.IncludeMachineInfo || cfg.IncludeMetrics || cfg.IncludeEvents || cfg.IncludeComponentData)
 	if needsIdentity && collectorOpts.dcgmInstance != nil {
-		provider = newCachedMachineInfoProvider(collectorOpts.dcgmInstance, collectorOpts.dcgmFieldCache, 0)
+		provider = newCachedMachineInfoProvider(collectorOpts.dcgmInstance, 0)
 		provider.RefreshAsync(context.Background())
 	}
 

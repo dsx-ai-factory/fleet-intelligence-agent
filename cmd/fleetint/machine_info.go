@@ -24,12 +24,12 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	pkgmetadata "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metadata"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/netutil"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 	"github.com/urfave/cli"
 
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/cmdutil"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
-	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/dcgminventory"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
 )
 
@@ -76,13 +76,11 @@ func machineInfoCommand(cliContext *cli.Context) error {
 
 	dcgmCtx, dcgmCancel := context.WithTimeout(context.Background(), time.Minute)
 	defer dcgmCancel()
-	dcgmSession, err := dcgminventory.Open(dcgmCtx, fmt.Sprintf("machine-info-%d", os.Getpid()), time.Minute)
+	devices, err := nvidiadcgm.CollectDeviceInventoryWithContext(dcgmCtx)
 	if err != nil {
-		return err
+		log.Logger.Warnw("DCGM inventory collection failed; continuing without GPU inventory", "error", err)
 	}
-	defer func() { _ = dcgmSession.Close() }()
-
-	machineInfo, err := machineinfo.GetMachineInfo(dcgmSession.Instance, dcgmSession.FieldCache)
+	machineInfo, err := machineinfo.GetMachineInfo(devices)
 	if err != nil {
 		return err
 	}
