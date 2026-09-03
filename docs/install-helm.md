@@ -23,7 +23,7 @@ DCGM_URL='nvidia-dcgm.gpu-operator.svc:5555'
 #   1. Generate an enrollment token (ENROLL_TOKEN)
 #   2. Get the enrollment endpoint URL (ENROLL_ENDPOINT)
 #      Note: Default is https://data.fleet-intelligence.nvidia.com
-#            Check the 'Add New Node' page for your organiztaion. 
+#            Check the 'Add New Node' page for your organization. 
 ENROLL_ENDPOINT='<enroll-endpoint>'
 ENROLL_TOKEN='<enroll-token>'
 ENROLL_TOKEN_SECRET_NAME='fleet-intelligence-enroll-token'  # Recommended secret name

@@ -15,9 +15,10 @@
 
 # Workflow 1 of 2 for Fern doc previews.
 #
-# Collects the fern/ and docs/ sources plus PR metadata from the PR branch and
-# uploads them as an artifact. Both directories are needed because
-# fern/docs.yml references ../docs/index.yml; omitting docs/ causes
+# Collects the fern/ and docs/ sources, the root README.md and CONTRIBUTING.md,
+# plus PR metadata from the PR branch, and uploads them as an artifact.
+# README.md and CONTRIBUTING.md are needed because fern/docs.yml references
+# ../README.md and ../CONTRIBUTING.md directly; omitting them causes
 # `fern generate --docs` to fail in the companion workflow. No secrets are
 # used here, so this is safe to run on fork PRs via the regular pull_request
 # trigger.
@@ -32,6 +33,8 @@ on:
     paths:
       - 'docs/**'
       - 'fern/**'
+      - 'README.md'
+      - 'CONTRIBUTING.md'
       - '.github/workflows/fern-docs-preview-build.yml'
   ## --- OPTION: NVIDIA copy-PR-bot trigger ---
   ## Replace the pull_request block above with:
@@ -117,5 +120,7 @@ jobs:
           path: |
             fern/
             docs/
+            README.md
+            CONTRIBUTING.md
             preview-metadata/
           retention-days: 1
