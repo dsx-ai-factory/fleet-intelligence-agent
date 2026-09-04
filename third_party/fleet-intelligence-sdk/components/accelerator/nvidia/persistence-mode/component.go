@@ -199,26 +199,36 @@ func (c *component) Check() components.CheckResult {
 		return cr
 	}
 
-	notEnabled := []string{}
+	disabledGPUs := []string{}
+	supportedCount := 0
 	for _, pm := range cr.PersistenceModes {
-		if pm.Supported && !pm.Enabled {
-			notEnabled = append(notEnabled, fmt.Sprintf("%s persistence mode supported but not enabled", pm.UUID))
+		if !pm.Supported {
+			continue
+		}
+		supportedCount++
+		if !pm.Enabled {
+			disabledGPUs = append(disabledGPUs, pm.UUID)
 		}
 	}
 
-	if len(notEnabled) > 0 {
-		// Persistence mode being disabled is a configuration issue that does not
-		// affect running workloads, so it is flagged as a warning (Degraded)
-		// rather than critical (Unhealthy).
-		cr.health = apiv1.HealthStateTypeDegraded
-		if len(notEnabled) == len(cr.PersistenceModes) {
-			cr.reason = fmt.Sprintf("all %d GPU(s) disabled persistence mode", len(devices))
-		} else {
-			cr.reason = strings.Join(notEnabled, ", ")
-		}
-	} else {
+	if len(disabledGPUs) == 0 {
 		cr.health = apiv1.HealthStateTypeHealthy
-		cr.reason = fmt.Sprintf("all %d GPU(s) were checked, no persistence mode issue found", len(devices))
+		if supportedCount == 0 {
+			cr.reason = fmt.Sprintf("persistence mode is unsupported on all %d GPU(s)", len(cr.PersistenceModes))
+		} else {
+			cr.reason = fmt.Sprintf("all %d supported GPU(s) were checked, no persistence mode issue found", supportedCount)
+		}
+		return cr
+	}
+
+	// Persistence mode being disabled is a configuration issue that does not
+	// affect running workloads, so it is flagged as a warning (Degraded)
+	// rather than critical (Unhealthy).
+	cr.health = apiv1.HealthStateTypeDegraded
+	if len(disabledGPUs) == supportedCount {
+		cr.reason = fmt.Sprintf("all %d supported GPU(s) disabled persistence mode", supportedCount)
+	} else {
+		cr.reason = fmt.Sprintf("%s: persistence mode supported but not enabled", strings.Join(disabledGPUs, ", "))
 	}
 
 	return cr

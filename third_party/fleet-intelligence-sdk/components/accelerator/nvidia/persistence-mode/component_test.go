@@ -44,19 +44,38 @@ func TestCheckWithoutGPU(t *testing.T) {
 }
 
 func TestCheckPersistenceModeDisabled(t *testing.T) {
-	devices := []nvidiadcgm.DeviceInfo{{ID: 0, UUID: "GPU-1"}}
-	modes := []PersistenceMode{{UUID: "GPU-1", Supported: true, Enabled: false}}
+	devices := []nvidiadcgm.DeviceInfo{
+		{ID: 0, UUID: "GPU-1"},
+		{ID: 1, UUID: "GPU-2"},
+		{ID: 2, UUID: "GPU-3"},
+	}
+	modes := []PersistenceMode{
+		{UUID: "GPU-1", Supported: true, Enabled: false},
+		{UUID: "GPU-2", Supported: true, Enabled: true},
+		{UUID: "GPU-3", Supported: true, Enabled: false},
+	}
 	result := newTestComponent(devices, modes, nil).Check().(*checkResult)
 	assert.Equal(t, apiv1.HealthStateTypeDegraded, result.health)
-	assert.Contains(t, result.reason, "disabled persistence mode")
+	assert.Equal(t, "GPU-1, GPU-3: persistence mode supported but not enabled", result.reason)
 }
 
 func TestCheckPersistenceModeEnabled(t *testing.T) {
-	devices := []nvidiadcgm.DeviceInfo{{ID: 0, UUID: "GPU-1"}}
-	modes := []PersistenceMode{{UUID: "GPU-1", Supported: true, Enabled: true}}
+	devices := []nvidiadcgm.DeviceInfo{{ID: 0, UUID: "GPU-1"}, {ID: 1, UUID: "GPU-2"}}
+	modes := []PersistenceMode{
+		{UUID: "GPU-1", Supported: true, Enabled: true},
+		{UUID: "GPU-2", Supported: false},
+	}
 	result := newTestComponent(devices, modes, nil).Check().(*checkResult)
 	assert.Equal(t, apiv1.HealthStateTypeHealthy, result.health)
-	assert.Contains(t, result.reason, "no persistence mode issue")
+	assert.Equal(t, "all 1 supported GPU(s) were checked, no persistence mode issue found", result.reason)
+}
+
+func TestCheckPersistenceModeUnsupported(t *testing.T) {
+	devices := []nvidiadcgm.DeviceInfo{{ID: 0, UUID: "GPU-1"}}
+	modes := []PersistenceMode{{UUID: "GPU-1", Supported: false}}
+	result := newTestComponent(devices, modes, nil).Check().(*checkResult)
+	assert.Equal(t, apiv1.HealthStateTypeHealthy, result.health)
+	assert.Equal(t, "persistence mode is unsupported on all 1 GPU(s)", result.reason)
 }
 
 func TestCheckDCGMError(t *testing.T) {

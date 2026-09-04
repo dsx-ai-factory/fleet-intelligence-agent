@@ -22,19 +22,18 @@ func TestPersistenceModesFromFieldValuesRequiresOKStatus(t *testing.T) {
 	disabled := enabled
 	disabled.Value[0] = 0
 
-	failed := enabled
-	failed.Status = dcgm.DCGM_ST_NVML_ERROR
+	unsupported := enabled
+	unsupported.Status = dcgm.DCGM_ST_NOT_SUPPORTED
 
 	devices := []nvidiadcgm.DeviceInfo{
 		{ID: 1, UUID: "GPU-enabled"},
 		{ID: 2, UUID: "GPU-disabled"},
-		{ID: 3, UUID: "GPU-failed"},
-		{ID: 4, UUID: "GPU-missing"},
+		{ID: 3, UUID: "GPU-unsupported"},
 	}
 	results := []nvidiadcgm.DeviceFieldValues{
 		{DeviceID: 1, Values: []dcgm.FieldValue_v1{enabled}},
 		{DeviceID: 2, Values: []dcgm.FieldValue_v1{disabled}},
-		{DeviceID: 3, Values: []dcgm.FieldValue_v1{failed}},
+		{DeviceID: 3, Values: []dcgm.FieldValue_v1{unsupported}},
 	}
 
 	modes, err := persistenceModesFromFieldValues(devices, results)
@@ -42,9 +41,33 @@ func TestPersistenceModesFromFieldValuesRequiresOKStatus(t *testing.T) {
 	assert.Equal(t, []PersistenceMode{
 		{UUID: "GPU-enabled", Supported: true, Enabled: true},
 		{UUID: "GPU-disabled", Supported: true, Enabled: false},
-		{UUID: "GPU-failed", Supported: false, Enabled: false},
-		{UUID: "GPU-missing", Supported: false, Enabled: false},
+		{UUID: "GPU-unsupported", Supported: false, Enabled: false},
 	}, modes)
+}
+
+func TestPersistenceModesFromFieldValuesReturnsMissingFieldError(t *testing.T) {
+	devices := []nvidiadcgm.DeviceInfo{{ID: 4, UUID: "GPU-missing"}}
+
+	_, err := persistenceModesFromFieldValues(devices, nil)
+
+	assert.EqualError(t, err, "DCGM persistence-mode field missing for device 4 (GPU-missing)")
+}
+
+func TestPersistenceModesFromFieldValuesReturnsOtherFieldErrors(t *testing.T) {
+	value := dcgm.FieldValue_v1{
+		FieldID: dcgm.DCGM_FI_DEV_PERSISTENCE_MODE,
+		Status:  dcgm.DCGM_ST_NVML_ERROR,
+	}
+	devices := []nvidiadcgm.DeviceInfo{{ID: 3, UUID: "GPU-3"}}
+	_, err := persistenceModesFromFieldValues(devices, []nvidiadcgm.DeviceFieldValues{{
+		DeviceID: 3,
+		UUID:     "GPU-3",
+		Values:   []dcgm.FieldValue_v1{value},
+	}})
+
+	assert.Error(t, err)
+	assert.True(t, nvidiadcgm.IsUnhealthyAPIError(err))
+	assert.Contains(t, err.Error(), "GPU-3")
 }
 
 func TestPersistenceModesFromFieldValuesPreservesRecoveryStatuses(t *testing.T) {
@@ -63,7 +86,8 @@ func TestPersistenceModesFromFieldValuesPreservesRecoveryStatuses(t *testing.T) 
 				FieldID: dcgm.DCGM_FI_DEV_PERSISTENCE_MODE,
 				Status:  tt.status,
 			}
-			_, err := persistenceModesFromFieldValues(nil, []nvidiadcgm.DeviceFieldValues{{
+			devices := []nvidiadcgm.DeviceInfo{{ID: 3, UUID: "GPU-3"}}
+			_, err := persistenceModesFromFieldValues(devices, []nvidiadcgm.DeviceFieldValues{{
 				DeviceID: 3,
 				UUID:     "GPU-3",
 				Values:   []dcgm.FieldValue_v1{value},

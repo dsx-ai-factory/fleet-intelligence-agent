@@ -54,25 +54,30 @@ func persistenceModesFromFieldValues(devices []nvidiadcgm.DeviceInfo, results []
 	valuesByDevice := make(map[uint]dcgm.FieldValue_v1, len(results))
 	for _, result := range results {
 		for _, value := range result.Values {
-			if value.FieldID != dcgm.DCGM_FI_DEV_PERSISTENCE_MODE {
-				continue
+			if value.FieldID == dcgm.DCGM_FI_DEV_PERSISTENCE_MODE {
+				valuesByDevice[result.DeviceID] = value
 			}
-			switch value.Status {
-			case dcgm.DCGM_ST_GPU_IS_LOST, dcgm.DCGM_ST_RESET_REQUIRED:
-				// Include the numeric code because the pinned go-dcgm API does not
-				// expose a constructor for its typed error. The shared DCGM error
-				// classifier supports this representation.
-				return nil, fmt.Errorf("DCGM persistence-mode field failed for device %d (%s): error code %d", result.DeviceID, result.UUID, value.Status)
-			}
-			valuesByDevice[result.DeviceID] = value
 		}
 	}
+
 	modes := make([]PersistenceMode, 0, len(devices))
 	for _, device := range devices {
 		mode := PersistenceMode{UUID: device.UUID, BusID: device.BusID}
-		if value, ok := valuesByDevice[device.ID]; ok && value.Status == dcgm.DCGM_ST_OK {
+		value, ok := valuesByDevice[device.ID]
+		if !ok {
+			return nil, fmt.Errorf("DCGM persistence-mode field missing for device %d (%s)", device.ID, device.UUID)
+		}
+		switch value.Status {
+		case dcgm.DCGM_ST_OK:
 			mode.Supported = true
 			mode.Enabled = value.Int64() != 0
+		case dcgm.DCGM_ST_NOT_SUPPORTED:
+			// The query succeeded, but this GPU does not support persistence mode.
+		default:
+			// Include the numeric code because the pinned go-dcgm API does not
+			// expose a constructor for its typed error. The shared DCGM error
+			// classifier supports this representation.
+			return nil, fmt.Errorf("DCGM persistence-mode field failed for device %d (%s): error code %d", device.ID, device.UUID, value.Status)
 		}
 		modes = append(modes, mode)
 	}
