@@ -90,7 +90,9 @@ func CollectDeviceInventoryWithContext(ctx context.Context) ([]DeviceInfo, error
 			return
 		}
 
-		devices, err := queryDeviceInventory()
+		// One-shot callers retain partial inventory when individual fields are
+		// unavailable; only long-lived instances use completeness to retry.
+		devices, _, err := queryDeviceInventory()
 		if cleanup != nil {
 			cleanup()
 		}
