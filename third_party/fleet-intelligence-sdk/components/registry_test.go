@@ -17,12 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type staticGPUProvider struct {
-	devices []nvidiadcgm.DeviceInfo
-}
-
-func (p staticGPUProvider) GPUDevices() []nvidiadcgm.DeviceInfo { return p.devices }
-
 type staticDCGMInstance struct {
 	nvidiadcgm.Instance
 	devices []nvidiadcgm.DeviceInfo
@@ -43,18 +37,6 @@ func TestGPUdInstanceGPUDevices(t *testing.T) {
 			devices:  devices,
 		}}
 		assert.Equal(t, devices, instance.GPUDevices())
-	})
-
-	t.Run("override takes precedence", func(t *testing.T) {
-		override := []nvidiadcgm.DeviceInfo{{ID: 1, UUID: "GPU-override"}}
-		instance := &GPUdInstance{
-			DCGMInstance: staticDCGMInstance{
-				Instance: nvidiadcgm.NewNoOp(),
-				devices:  []nvidiadcgm.DeviceInfo{{ID: 0, UUID: "GPU-dcgm"}},
-			},
-			GPUProvider: staticGPUProvider{devices: override},
-		}
-		assert.Equal(t, override, instance.GPUDevices())
 	})
 }
 

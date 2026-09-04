@@ -40,7 +40,6 @@ type GPUdInstance struct {
 	DCGMFieldValueCache  *nvidiadcgm.FieldValueCache // Shared cache for DCGM field values (GPU devices only)
 	DCGMGroupNames       DCGMGroupNames
 	NVMLInstance         nvidianvml.Instance
-	GPUProvider          GPUDeviceProvider // Optional inventory override for tests.
 	NVIDIAToolOverwrites nvidiacommon.ToolOverwrites
 
 	DBRW *sql.DB
@@ -64,17 +63,9 @@ type GPUDeviceProvider interface {
 	GPUDevices() []nvidiadcgm.DeviceInfo
 }
 
-// GPUDevices returns the override inventory when configured, otherwise the
-// current inventory exposed by the DCGM instance.
+// GPUDevices returns the current inventory exposed by the DCGM instance.
 func (i *GPUdInstance) GPUDevices() []nvidiadcgm.DeviceInfo {
-	if i == nil {
-		return nil
-	}
-	// Tests can inject a deterministic inventory without constructing a DCGM instance.
-	if i.GPUProvider != nil {
-		return i.GPUProvider.GPUDevices()
-	}
-	if i.DCGMInstance == nil {
+	if i == nil || i.DCGMInstance == nil {
 		return nil
 	}
 	return i.DCGMInstance.GetDevices()
