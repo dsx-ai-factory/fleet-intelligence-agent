@@ -21,6 +21,7 @@ import (
 
 // mockGPUProvider supplies a minimal GPU inventory for tests.
 type mockGPUProvider struct {
+	nvidiadcgm.Instance
 	exists bool
 }
 
@@ -29,6 +30,10 @@ func (m *mockGPUProvider) GPUDevices() []nvidiadcgm.DeviceInfo {
 		return nil
 	}
 	return []nvidiadcgm.DeviceInfo{{ID: 0, UUID: "GPU-test", Model: "test"}}
+}
+
+func (m *mockGPUProvider) GetDevices() []nvidiadcgm.DeviceInfo {
+	return m.GPUDevices()
 }
 
 // mockEventBucket implements eventstore.Bucket
@@ -175,8 +180,7 @@ func TestComponentName(t *testing.T) {
 func TestNewComponent(t *testing.T) {
 	// Test creating a component with nil NVML instance
 	gpudInstance := &components.GPUdInstance{
-		RootCtx:     context.Background(),
-		GPUProvider: nil,
+		RootCtx: context.Background(),
 	}
 
 	comp, err := New(gpudInstance)
@@ -185,8 +189,8 @@ func TestNewComponent(t *testing.T) {
 
 	// Test creating a component with NVML instance
 	gpudInstance = &components.GPUdInstance{
-		RootCtx:     context.Background(),
-		GPUProvider: &mockGPUProvider{exists: true},
+		RootCtx:      context.Background(),
+		DCGMInstance: &mockGPUProvider{exists: true},
 	}
 
 	comp, err = New(gpudInstance)
@@ -197,9 +201,9 @@ func TestNewComponent(t *testing.T) {
 func TestNewComponentError(t *testing.T) {
 	// Test creating a component when event store fails to create bucket
 	gpudInstance := &components.GPUdInstance{
-		RootCtx:     context.Background(),
-		GPUProvider: &mockGPUProvider{exists: true},
-		EventStore:  &mockErrorEventStore{},
+		RootCtx:      context.Background(),
+		DCGMInstance: &mockGPUProvider{exists: true},
+		EventStore:   &mockErrorEventStore{},
 	}
 
 	comp, err := New(gpudInstance)

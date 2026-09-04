@@ -456,9 +456,8 @@ func TestNewWithDifferentConfigurations(t *testing.T) {
 
 	t.Run("with nil event store", func(t *testing.T) {
 		gpudInstance := &components.GPUdInstance{
-			RootCtx:     ctx,
-			EventStore:  nil,
-			GPUProvider: nil,
+			RootCtx:    ctx,
+			EventStore: nil,
 		}
 
 		comp, err := New(gpudInstance)
@@ -496,8 +495,7 @@ func TestCheck(t *testing.T) {
 
 	t.Run("with no NVML instance", func(t *testing.T) {
 		gpudInstance := &components.GPUdInstance{
-			RootCtx:     ctx,
-			GPUProvider: nil,
+			RootCtx: ctx,
 		}
 
 		comp, err := New(gpudInstance)
@@ -512,8 +510,8 @@ func TestCheck(t *testing.T) {
 		// Using a properly implemented mock
 		mockedNVML := createMockGPUProvider()
 		gpudInstance := &components.GPUdInstance{
-			RootCtx:     ctx,
-			GPUProvider: mockedNVML,
+			RootCtx:      ctx,
+			DCGMInstance: mockedNVML,
 		}
 
 		comp, err := New(gpudInstance)
@@ -531,8 +529,8 @@ func TestCheck(t *testing.T) {
 		// Using a properly implemented mock
 		mockedNVML := createMockGPUProvider()
 		gpudInstance := &components.GPUdInstance{
-			RootCtx:     ctx,
-			GPUProvider: mockedNVML,
+			RootCtx:      ctx,
+			DCGMInstance: mockedNVML,
 		}
 
 		comp, err := New(gpudInstance)
@@ -552,8 +550,8 @@ func TestCheck(t *testing.T) {
 		// Using a properly implemented mock
 		mockedNVML := createMockGPUProvider()
 		gpudInstance := &components.GPUdInstance{
-			RootCtx:     ctx,
-			GPUProvider: mockedNVML,
+			RootCtx:      ctx,
+			DCGMInstance: mockedNVML,
 		}
 
 		comp, err := New(gpudInstance)
@@ -581,8 +579,8 @@ func TestCheck(t *testing.T) {
 		// Using a properly implemented mock with row remapping support
 		mockedNVML := createMockGPUProviderWithRowRemapping()
 		gpudInstance := &components.GPUdInstance{
-			RootCtx:     ctx,
-			GPUProvider: mockedNVML,
+			RootCtx:      ctx,
+			DCGMInstance: mockedNVML,
 		}
 
 		comp, err := New(gpudInstance)
@@ -629,8 +627,8 @@ func TestCheck(t *testing.T) {
 		// Using a properly implemented mock with row remapping support
 		mockedNVML := createMockGPUProviderWithRowRemapping()
 		gpudInstance := &components.GPUdInstance{
-			RootCtx:     ctx,
-			GPUProvider: mockedNVML,
+			RootCtx:      ctx,
+			DCGMInstance: mockedNVML,
 		}
 
 		comp, err := New(gpudInstance)
@@ -663,8 +661,8 @@ func TestCheck(t *testing.T) {
 		// Using a mock without row remapping support
 		mockedNVML := createMockGPUProvider()
 		gpudInstance := &components.GPUdInstance{
-			RootCtx:     ctx,
-			GPUProvider: mockedNVML,
+			RootCtx:      ctx,
+			DCGMInstance: mockedNVML,
 		}
 
 		comp, err := New(gpudInstance)
@@ -709,8 +707,8 @@ func TestCheck(t *testing.T) {
 		// Using a mock with row remapping support
 		mockedNVML := createMockGPUProviderWithRowRemapping()
 		gpudInstance := &components.GPUdInstance{
-			RootCtx:     ctx,
-			GPUProvider: mockedNVML,
+			RootCtx:      ctx,
+			DCGMInstance: mockedNVML,
 		}
 
 		comp, err := New(gpudInstance)
@@ -942,6 +940,7 @@ func createMockGPUProviderWithRowRemapping() *mockGPUProvider {
 // mockGPUProvider includes each PCI bus used by the XID component tests so
 // row-remapping support can be evaluated for the GPU that emitted the event.
 type mockGPUProvider struct {
+	nvidiadcgm.Instance
 	rowRemappingSupported bool
 }
 
@@ -961,6 +960,10 @@ func (m *mockGPUProvider) GPUDevices() []nvidiadcgm.DeviceInfo {
 		})
 	}
 	return devices
+}
+
+func (m *mockGPUProvider) GetDevices() []nvidiadcgm.DeviceInfo {
+	return m.GPUDevices()
 }
 
 func TestShouldDiscardRowRemappingXIDUsesEventGPU(t *testing.T) {
@@ -1235,7 +1238,7 @@ func TestHandleEventChannel(t *testing.T) {
 		RootCtx:          ctx,
 		EventStore:       store,
 		RebootEventStore: rebootEventStore,
-		GPUProvider:      mockedNVML,
+		DCGMInstance:     mockedNVML,
 	}
 
 	comp, err := New(gpudInstance)
@@ -1353,7 +1356,7 @@ func TestStartWithXID63And64Skipping(t *testing.T) {
 		RootCtx:          ctx,
 		EventStore:       store,
 		RebootEventStore: rebootEventStore,
-		GPUProvider:      mockedNVML,
+		DCGMInstance:     mockedNVML,
 	}
 
 	comp, err := New(gpudInstance)
@@ -1463,7 +1466,7 @@ func TestStartWithXID63And64NotSkippedWhenNoRowRemapping(t *testing.T) {
 		RootCtx:          ctx,
 		EventStore:       store,
 		RebootEventStore: rebootEventStore,
-		GPUProvider:      mockedNVML,
+		DCGMInstance:     mockedNVML,
 	}
 
 	comp, err := New(gpudInstance)

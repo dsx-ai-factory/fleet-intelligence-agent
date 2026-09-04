@@ -534,9 +534,8 @@ func TestNew(t *testing.T) {
 
 	t.Run("nil event store", func(t *testing.T) {
 		instance := &components.GPUdInstance{
-			RootCtx:     context.Background(),
-			GPUProvider: nil,
-			EventStore:  nil,
+			RootCtx:    context.Background(),
+			EventStore: nil,
 		}
 		comp, err := New(instance)
 		assert.NoError(t, err)
@@ -560,9 +559,8 @@ func TestNew(t *testing.T) {
 		mockStore.On("Bucket", Name).Return(nil, fmt.Errorf("test bucket error"))
 
 		instance := &components.GPUdInstance{
-			RootCtx:     context.Background(),
-			GPUProvider: nil,
-			EventStore:  mockStore,
+			RootCtx:    context.Background(),
+			EventStore: mockStore,
 		}
 
 		// Call New - should return an error
@@ -589,9 +587,8 @@ func TestNew(t *testing.T) {
 		mockBucket.On("Close").Maybe().Return()
 
 		instance := &components.GPUdInstance{
-			RootCtx:     context.Background(),
-			GPUProvider: nil,
-			EventStore:  mockStore,
+			RootCtx:    context.Background(),
+			EventStore: mockStore,
 		}
 
 		// This may create a kmsg.Syncer depending on runtime conditions
