@@ -18,6 +18,7 @@ package dcgm
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -62,9 +63,11 @@ func TestResolveInitFromEnv(t *testing.T) {
 func TestNewConnectedInstanceCleansUpWhenGroupCreationFails(t *testing.T) {
 	originalDCGMInitFunc := dcgmInitFunc
 	originalDCGMNewDefaultGroupFunc := dcgmNewDefaultGroupFunc
+	originalGetSupportedDevices := getSupportedDevicesForInventory
 	defer func() {
 		dcgmInitFunc = originalDCGMInitFunc
 		dcgmNewDefaultGroupFunc = originalDCGMNewDefaultGroupFunc
+		getSupportedDevicesForInventory = originalGetSupportedDevices
 	}()
 
 	cleanupCalled := false
@@ -72,6 +75,9 @@ func TestNewConnectedInstanceCleansUpWhenGroupCreationFails(t *testing.T) {
 		return func() {
 			cleanupCalled = true
 		}, nil
+	}
+	getSupportedDevicesForInventory = func() ([]uint, error) {
+		return nil, nil
 	}
 
 	expectedErr := errors.New("invalid group name")
@@ -91,6 +97,166 @@ func TestNewConnectedInstanceCleansUpWhenGroupCreationFails(t *testing.T) {
 	}
 	if !cleanupCalled {
 		t.Fatalf("expected DCGM cleanup to be called when group creation fails")
+	}
+}
+
+func TestNewConnectedInstanceFailsWhenDeviceEnumerationFails(t *testing.T) {
+	originalDCGMInitFunc := dcgmInitFunc
+	originalDCGMNewDefaultGroupFunc := dcgmNewDefaultGroupFunc
+	originalGetSupportedDevices := getSupportedDevicesForInventory
+	t.Cleanup(func() {
+		dcgmInitFunc = originalDCGMInitFunc
+		dcgmNewDefaultGroupFunc = originalDCGMNewDefaultGroupFunc
+		getSupportedDevicesForInventory = originalGetSupportedDevices
+	})
+
+	cleanupCalled := false
+	dcgmInitFunc = func(_ dcgmInitParams) (func(), error) {
+		return func() {
+			cleanupCalled = true
+		}, nil
+	}
+	expectedErr := errors.New("enumeration failed")
+	getSupportedDevicesForInventory = func() ([]uint, error) {
+		return nil, expectedErr
+	}
+	dcgmNewDefaultGroupFunc = func(string) (dcgm.GroupHandle, error) {
+		t.Fatal("DCGM group created before device enumeration succeeded")
+		return dcgm.GroupHandle{}, nil
+	}
+
+	inst, err := newConnectedInstance("inventory-enumeration-failure")
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("newConnectedInstance() error = %v, want %v", err, expectedErr)
+	}
+	if inst != nil {
+		t.Fatalf("newConnectedInstance() = %v, want nil", inst)
+	}
+	if !cleanupCalled {
+		t.Fatal("expected DCGM cleanup after device enumeration failure")
+	}
+}
+
+func TestNewInitializedInstanceReturnsNoOpOnDeviceEnumerationFailure(t *testing.T) {
+	originalNewConnectedInstanceFunc := newConnectedInstanceFunc
+	t.Cleanup(func() {
+		newConnectedInstanceFunc = originalNewConnectedInstanceFunc
+	})
+
+	expectedErr := errors.New("enumeration failed")
+	newConnectedInstanceFunc = func() (Instance, error) {
+		return nil, errors.Join(errDeviceEnumeration, expectedErr)
+	}
+
+	inst, err := newInitializedInstance()
+	if err != nil {
+		t.Fatalf("newInitializedInstance() error = %v, want nil", err)
+	}
+	if inst == nil || inst.DCGMExists() {
+		t.Fatalf("newInitializedInstance() = %v, want no-op instance", inst)
+	}
+}
+
+func TestNewInitializedInstanceWithGroupNameReturnsNoOpOnDeviceEnumerationFailure(t *testing.T) {
+	originalNewConnectedInstanceWithGroupNameFunc := newConnectedInstanceWithGroupNameFunc
+	t.Cleanup(func() {
+		newConnectedInstanceWithGroupNameFunc = originalNewConnectedInstanceWithGroupNameFunc
+	})
+
+	expectedErr := errors.New("enumeration failed")
+	newConnectedInstanceWithGroupNameFunc = func(string) (Instance, error) {
+		return nil, errors.Join(errDeviceEnumeration, expectedErr)
+	}
+
+	inst, err := newInitializedInstanceWithGroupName("inventory-enumeration-failure")
+	if err != nil {
+		t.Fatalf("newInitializedInstanceWithGroupName() error = %v, want nil", err)
+	}
+	if inst == nil || inst.DCGMExists() {
+		t.Fatalf("newInitializedInstanceWithGroupName() = %v, want no-op instance", inst)
+	}
+}
+
+func TestInstanceRetriesOnlyIncompleteDeviceInventory(t *testing.T) {
+	originalGetSupportedDevices := getSupportedDevicesForInventory
+	originalGetLatestValues := getLatestInventoryValues
+	t.Cleanup(func() {
+		getSupportedDevicesForInventory = originalGetSupportedDevices
+		getLatestInventoryValues = originalGetLatestValues
+	})
+
+	queryCount := 0
+	getSupportedDevicesForInventory = func() ([]uint, error) {
+		return []uint{3}, nil
+	}
+	getLatestInventoryValues = func([]dcgm.GroupEntityPair, []dcgm.Short, uint) ([]dcgm.FieldValue_v2, error) {
+		queryCount++
+		uuid := stringField(3, dcgm.DCGM_FI_DEV_UUID, "GPU-refreshed")
+		if queryCount == 1 {
+			uuid.Status = dcgm.DCGM_ST_NO_DATA
+		}
+		return []dcgm.FieldValue_v2{
+			uuid,
+		}, nil
+	}
+
+	devices, complete, err := queryDeviceInventory()
+	if err != nil {
+		t.Fatalf("queryDeviceInventory() error = %v", err)
+	}
+	if complete {
+		t.Fatal("queryDeviceInventory() complete = true after DCGM_ST_NO_DATA, want false")
+	}
+	getSupportedDevicesForInventory = func() ([]uint, error) {
+		t.Fatal("inventory enrichment retry re-enumerated devices")
+		return nil, nil
+	}
+
+	inst := &instance{
+		dcgmExists:        true,
+		devices:           devices,
+		inventoryEnriched: complete,
+	}
+	if err := inst.retryDeviceInventoryEnrichment(); err != nil {
+		t.Fatalf("first retryDeviceInventoryEnrichment() error = %v", err)
+	}
+	if err := inst.retryDeviceInventoryEnrichment(); err != nil {
+		t.Fatalf("second retryDeviceInventoryEnrichment() error = %v", err)
+	}
+	if queryCount != 2 {
+		t.Fatalf("inventory query count = %d, want 2", queryCount)
+	}
+
+	want := []DeviceInfo{{ID: 3, UUID: "GPU-refreshed", MinorNumber: -1}}
+	if got := inst.GetDevices(); !slices.Equal(got, want) {
+		t.Fatalf("GetDevices() = %+v, want %+v", got, want)
+	}
+}
+
+func TestInstanceRetainsPartialInventoryWhenRetryFails(t *testing.T) {
+	originalGetSupportedDevices := getSupportedDevicesForInventory
+	originalGetLatestValues := getLatestInventoryValues
+	t.Cleanup(func() {
+		getSupportedDevicesForInventory = originalGetSupportedDevices
+		getLatestInventoryValues = originalGetLatestValues
+	})
+
+	expectedErr := errors.New("field query failed")
+	getSupportedDevicesForInventory = func() ([]uint, error) {
+		t.Fatal("inventory enrichment retry re-enumerated devices")
+		return nil, nil
+	}
+	getLatestInventoryValues = func([]dcgm.GroupEntityPair, []dcgm.Short, uint) ([]dcgm.FieldValue_v2, error) {
+		return nil, expectedErr
+	}
+
+	want := []DeviceInfo{{ID: 3, MinorNumber: -1}}
+	inst := &instance{dcgmExists: true, devices: slices.Clone(want)}
+	if err := inst.retryDeviceInventoryEnrichment(); !errors.Is(err, expectedErr) {
+		t.Fatalf("retryDeviceInventoryEnrichment() error = %v, want %v", err, expectedErr)
+	}
+	if got := inst.GetDevices(); !slices.Equal(got, want) {
+		t.Fatalf("GetDevices() = %+v, want retained inventory %+v", got, want)
 	}
 }
 
@@ -244,6 +410,52 @@ func TestReconnectingInstanceReplaysDeferredState(t *testing.T) {
 		if _, ok := mock.watchedFields[field]; !ok {
 			t.Fatalf("expected watched field %d to be replayed", field)
 		}
+	}
+}
+
+func TestReconnectingInstanceRetriesDeviceEnumerationFailure(t *testing.T) {
+	originalNewConnectedInstanceFunc := newConnectedInstanceFunc
+	t.Cleanup(func() {
+		newConnectedInstanceFunc = originalNewConnectedInstanceFunc
+	})
+
+	expectedErr := errors.New("enumeration failed")
+	wantDevices := []DeviceInfo{{ID: 3, UUID: "GPU-reconnected"}}
+	connected := newMockTrackingInstance()
+	connected.devices = wantDevices
+	attempts := 0
+	newConnectedInstanceFunc = func() (Instance, error) {
+		attempts++
+		if attempts == 1 {
+			return nil, errors.Join(errDeviceEnumeration, expectedErr)
+		}
+		return connected, nil
+	}
+
+	inst := &reconnectingInstance{
+		current:           NewNoOp(),
+		watchedFields:     make(map[dcgm.Short]struct{}),
+		groupEntities:     make(map[uint]struct{}),
+		reconnectInterval: time.Hour,
+		stopCh:            make(chan struct{}),
+	}
+	defer inst.Shutdown()
+
+	if err := inst.reconnectNow(); !errors.Is(err, expectedErr) {
+		t.Fatalf("first reconnectNow() error = %v, want %v", err, expectedErr)
+	}
+	if inst.DCGMExists() {
+		t.Fatal("failed reconnect replaced the no-op instance")
+	}
+
+	if err := inst.reconnectNow(); err != nil {
+		t.Fatalf("second reconnectNow() error = %v, want nil", err)
+	}
+	if !inst.DCGMExists() {
+		t.Fatal("successful reconnect did not install the connected instance")
+	}
+	if got := inst.GetDevices(); !slices.Equal(got, wantDevices) {
+		t.Fatalf("GetDevices() = %+v, want %+v", got, wantDevices)
 	}
 }
 
@@ -696,6 +908,7 @@ type mockTrackingInstance struct {
 	watchedSystems dcgm.HealthSystem
 	watchedFields  map[dcgm.Short]struct{}
 	entities       map[uint]struct{}
+	devices        []DeviceInfo
 }
 
 func newMockTrackingInstance() *mockTrackingInstance {
@@ -744,7 +957,7 @@ func (m *mockTrackingInstance) GetLatestValuesForFields(deviceID uint, fields []
 	return nil, nil
 }
 func (m *mockTrackingInstance) GetGroupHandle() dcgm.GroupHandle { return dcgm.GroupHandle{} }
-func (m *mockTrackingInstance) GetDevices() []DeviceInfo         { return nil }
+func (m *mockTrackingInstance) GetDevices() []DeviceInfo         { return slices.Clone(m.devices) }
 func (m *mockTrackingInstance) Shutdown() error                  { return nil }
 
 type blockingReplayMockInstance struct {

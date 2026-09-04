@@ -12,9 +12,33 @@ import (
 	"time"
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type staticDCGMInstance struct {
+	nvidiadcgm.Instance
+	devices []nvidiadcgm.DeviceInfo
+}
+
+func (i staticDCGMInstance) GetDevices() []nvidiadcgm.DeviceInfo { return i.devices }
+
+func TestGPUdInstanceGPUDevices(t *testing.T) {
+	t.Run("nil instance", func(t *testing.T) {
+		var instance *GPUdInstance
+		assert.Nil(t, instance.GPUDevices())
+	})
+
+	t.Run("DCGM inventory", func(t *testing.T) {
+		devices := []nvidiadcgm.DeviceInfo{{ID: 0, UUID: "GPU-dcgm"}}
+		instance := &GPUdInstance{DCGMInstance: staticDCGMInstance{
+			Instance: nvidiadcgm.NewNoOp(),
+			devices:  devices,
+		}}
+		assert.Equal(t, devices, instance.GPUDevices())
+	})
+}
 
 // mockComponent implements the Component interface for testing
 type mockComponent struct {

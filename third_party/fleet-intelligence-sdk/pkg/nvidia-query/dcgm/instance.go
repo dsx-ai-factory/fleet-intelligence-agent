@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -116,12 +117,6 @@ var allHealthSystems = []dcgm.HealthSystem{
 	dcgm.DCGM_HEALTH_WATCH_NVSWITCH_FATAL,
 }
 
-// DeviceInfo stores cached device information
-type DeviceInfo struct {
-	ID   uint
-	UUID string
-}
-
 // Instance is the DCGM library connector interface.
 type Instance interface {
 	// DCGMExists returns true if DCGM is available.
@@ -166,21 +161,27 @@ type reconnectCallbackRegistrar interface {
 	RegisterReconnectCallback(callback func())
 }
 
+type deviceInventoryEnrichmentRetrier interface {
+	retryDeviceInventoryEnrichment() error
+}
+
 var newInstanceFunc = newInitializedInstance
 
-// New creates a DCGM instance. Returns no-op instance if DCGM is unavailable.
+// New creates a DCGM instance. It returns a no-op instance when a complete
+// DCGM session cannot be initialized.
 func New() (Instance, error) {
 	return newInitializedInstance()
 }
 
 // NewWithGroupName creates a DCGM instance with a caller-owned DCGM group name.
+// It has the same initialization behavior as New.
 func NewWithGroupName(groupName string) (Instance, error) {
 	return newInitializedInstanceWithGroupName(groupName)
 }
 
-// NewWithContext creates a DCGM instance with a bounded wait. If initialization
-// exceeds the context deadline, it returns a no-op instance so callers can
-// continue startup without blocking on slow DCGM device enumeration.
+// NewWithContext creates a reconnecting DCGM instance with a bounded initial
+// wait. If a complete session cannot be initialized, it starts with a no-op
+// instance so callers can continue while initialization is retried.
 func NewWithContext(ctx context.Context) (Instance, error) {
 	return NewWithContextAndGroupName(ctx, defaultDCGMGroupName)
 }
@@ -215,7 +216,7 @@ func NewWithContextAndGroupName(ctx context.Context, groupName string) (Instance
 		}
 		if res.inst == nil || !res.inst.DCGMExists() {
 			log.Logger.Warnw(
-				"DCGM not available at startup; continuing with no-op instance and retrying in background until DCGM is up",
+				"DCGM session unavailable at startup; continuing with no-op instance and retrying complete initialization in background",
 				"retryInterval", dcgmReconnectInterval.String(),
 			)
 		}
@@ -223,7 +224,7 @@ func NewWithContextAndGroupName(ctx context.Context, groupName string) (Instance
 	case <-ctx.Done():
 		close(abandonCh)
 		log.Logger.Warnw(
-			"DCGM initialization timed out; continuing with no-op instance and retrying in background until DCGM is up",
+			"DCGM initialization timed out; continuing with no-op instance and retrying complete initialization in background",
 			"error", ctx.Err(),
 			"retryInterval", dcgmReconnectInterval.String(),
 		)
@@ -293,6 +294,18 @@ func newConnectedInstance(groupName string) (Instance, error) {
 
 	log.Logger.Debugw("DCGM initialized successfully")
 
+	// Build the initial inventory before creating session resources. An
+	// enumeration error invalidates this candidate session so a reconnecting
+	// caller can retry the complete initialization instead of publishing an
+	// empty, but apparently connected, inventory.
+	devices, inventoryComplete, inventoryErr := queryDeviceInventory()
+	if errors.Is(inventoryErr, errDeviceEnumeration) {
+		if cleanup != nil {
+			cleanup()
+		}
+		return nil, inventoryErr
+	}
+
 	// Create group with GPUs. Components add their own entities (e.g., NVSwitch).
 	groupHandle, err := dcgmNewDefaultGroupFunc(groupName)
 	if err != nil {
@@ -304,35 +317,21 @@ func newConnectedInstance(groupName string) (Instance, error) {
 
 	log.Logger.Infow("created custom DCGM group for isolated health monitoring", "groupName", groupName)
 
-	// Fetch and cache device information once during initialization
-	deviceIDs, err := dcgm.GetSupportedDevices()
-	if err != nil {
-		log.Logger.Warnw("failed to get supported devices", "error", err)
-		deviceIDs = nil
+	if inventoryErr != nil {
+		// Enumeration succeeded, so retain the ID-only devices for presence
+		// checks and retry inventory enrichment in the background.
+		log.Logger.Warnw("DCGM device inventory is incomplete; will retry", "error", inventoryErr)
+	} else if !inventoryComplete {
+		log.Logger.Warnw("DCGM device inventory has retryable field failures; will retry")
 	}
-
-	var devices []DeviceInfo
-	if deviceIDs != nil {
-		devices = make([]DeviceInfo, 0, len(deviceIDs))
-		for _, deviceID := range deviceIDs {
-			deviceInfo, err := dcgm.GetDeviceInfo(deviceID)
-			if err != nil {
-				log.Logger.Warnw("failed to get device info, skipping device", "deviceID", deviceID, "error", err)
-				continue
-			}
-			devices = append(devices, DeviceInfo{
-				ID:   deviceID,
-				UUID: deviceInfo.UUID,
-			})
-		}
-		log.Logger.Infow("cached device information", "numDevices", len(devices))
-	}
+	log.Logger.Infow("cached device information", "numDevices", len(devices))
 
 	connectedInst := &instance{
-		dcgmExists:  true,
-		groupHandle: groupHandle,
-		cleanup:     cleanup,
-		devices:     devices,
+		dcgmExists:        true,
+		groupHandle:       groupHandle,
+		cleanup:           cleanup,
+		devices:           devices,
+		inventoryEnriched: inventoryComplete,
 	}
 
 	return connectedInst, nil
@@ -351,8 +350,9 @@ type instance struct {
 	groupHandle dcgm.GroupHandle
 	cleanup     func()
 
-	// devices stores cached device information fetched once at initialization
-	devices []DeviceInfo
+	devicesMu         sync.RWMutex
+	devices           []DeviceInfo
+	inventoryEnriched bool
 
 	// Health watch tracking
 	watchedSystemsMu sync.Mutex
@@ -379,7 +379,40 @@ func (inst *instance) GetGroupHandle() dcgm.GroupHandle {
 }
 
 func (inst *instance) GetDevices() []DeviceInfo {
-	return inst.devices
+	inst.devicesMu.RLock()
+	defer inst.devicesMu.RUnlock()
+	return slices.Clone(inst.devices)
+}
+
+// retryDeviceInventoryEnrichment retries identity fields for the device IDs
+// established at initialization. It never re-enumerates or changes membership.
+func (inst *instance) retryDeviceInventoryEnrichment() error {
+	inst.devicesMu.RLock()
+	if inst.inventoryEnriched {
+		inst.devicesMu.RUnlock()
+		return nil
+	}
+	deviceIDs := make([]uint, 0, len(inst.devices))
+	for _, device := range inst.devices {
+		deviceIDs = append(deviceIDs, device.ID)
+	}
+	inst.devicesMu.RUnlock()
+
+	devices, complete, err := queryDeviceInventoryFields(deviceIDs)
+	if err != nil {
+		return err
+	}
+	if !complete {
+		return nil
+	}
+
+	inst.devicesMu.Lock()
+	if !inst.inventoryEnriched {
+		inst.devices = slices.Clone(devices)
+		inst.inventoryEnriched = true
+	}
+	inst.devicesMu.Unlock()
+	return nil
 }
 
 func (inst *instance) AddHealthWatch(system dcgm.HealthSystem) error {
@@ -623,6 +656,9 @@ func (inst *reconnectingInstance) reconnectLoop() {
 			return
 		case <-ticker.C:
 			if inst.DCGMExists() {
+				if err := inst.retryDeviceInventoryEnrichment(); err != nil {
+					log.Logger.Warnw("DCGM device inventory enrichment retry failed", "error", err)
+				}
 				continue
 			}
 			if err := inst.reconnectNow(); err != nil {
@@ -641,6 +677,20 @@ func (inst *reconnectingInstance) reconnectLoop() {
 			retryAttempt = 0
 		}
 	}
+}
+
+func (inst *reconnectingInstance) retryDeviceInventoryEnrichment() error {
+	inst.currentMu.RLock()
+	defer inst.currentMu.RUnlock()
+
+	currentInst := inst.current
+	if currentInst == nil || !currentInst.DCGMExists() {
+		return nil
+	}
+	if retrier, ok := currentInst.(deviceInventoryEnrichmentRetrier); ok {
+		return retrier.retryDeviceInventoryEnrichment()
+	}
+	return nil
 }
 
 func (inst *reconnectingInstance) reconnectNow() error {
