@@ -26,11 +26,14 @@ NVML-backed components treat an unavailable NVML instance or missing product
 name as no detected GPU. The DCGM replacement preserves that behavior: when
 DCGM is unavailable or initialization times out, its reconnecting no-op
 instance exposes an empty inventory, so GPU-gated components report Healthy as
-unsupported while connection attempts continue in the background. A completed
-`GetSupportedDevices` error instead fails initialization, and failures that
-occur only while enriching successfully enumerated device IDs retain those IDs
-for presence checks. Adding independent PCI/sysfs GPU detection would be a
-separate reliability improvement rather than part of NVML compatibility.
+unsupported while connection attempts continue in the background. A
+`GetSupportedDevices` error also invalidates that candidate DCGM session: the
+agent keeps the reconnecting no-op instance and retries the complete session
+initialization instead of publishing an apparently connected instance with an
+empty inventory. Failures that occur only while enriching successfully
+enumerated device IDs retain those IDs for presence checks. Adding independent
+PCI/sysfs GPU detection would be a separate reliability improvement rather
+than part of NVML compatibility.
 
 The pinned DCGM API already exposes:
 

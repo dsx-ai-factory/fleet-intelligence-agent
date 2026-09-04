@@ -137,7 +137,7 @@ func TestNewConnectedInstanceFailsWhenDeviceEnumerationFails(t *testing.T) {
 	}
 }
 
-func TestNewInitializedInstancePropagatesDeviceEnumerationFailure(t *testing.T) {
+func TestNewInitializedInstanceReturnsNoOpOnDeviceEnumerationFailure(t *testing.T) {
 	originalNewConnectedInstanceFunc := newConnectedInstanceFunc
 	t.Cleanup(func() {
 		newConnectedInstanceFunc = originalNewConnectedInstanceFunc
@@ -149,15 +149,15 @@ func TestNewInitializedInstancePropagatesDeviceEnumerationFailure(t *testing.T) 
 	}
 
 	inst, err := newInitializedInstance()
-	if !errors.Is(err, expectedErr) {
-		t.Fatalf("newInitializedInstance() error = %v, want %v", err, expectedErr)
+	if err != nil {
+		t.Fatalf("newInitializedInstance() error = %v, want nil", err)
 	}
-	if inst != nil {
-		t.Fatalf("newInitializedInstance() = %v, want nil", inst)
+	if inst == nil || inst.DCGMExists() {
+		t.Fatalf("newInitializedInstance() = %v, want no-op instance", inst)
 	}
 }
 
-func TestNewInitializedInstanceWithGroupNamePropagatesDeviceEnumerationFailure(t *testing.T) {
+func TestNewInitializedInstanceWithGroupNameReturnsNoOpOnDeviceEnumerationFailure(t *testing.T) {
 	originalNewConnectedInstanceWithGroupNameFunc := newConnectedInstanceWithGroupNameFunc
 	t.Cleanup(func() {
 		newConnectedInstanceWithGroupNameFunc = originalNewConnectedInstanceWithGroupNameFunc
@@ -169,11 +169,11 @@ func TestNewInitializedInstanceWithGroupNamePropagatesDeviceEnumerationFailure(t
 	}
 
 	inst, err := newInitializedInstanceWithGroupName("inventory-enumeration-failure")
-	if !errors.Is(err, expectedErr) {
-		t.Fatalf("newInitializedInstanceWithGroupName() error = %v, want %v", err, expectedErr)
+	if err != nil {
+		t.Fatalf("newInitializedInstanceWithGroupName() error = %v, want nil", err)
 	}
-	if inst != nil {
-		t.Fatalf("newInitializedInstanceWithGroupName() = %v, want nil", inst)
+	if inst == nil || inst.DCGMExists() {
+		t.Fatalf("newInitializedInstanceWithGroupName() = %v, want no-op instance", inst)
 	}
 }
 
@@ -410,6 +410,52 @@ func TestReconnectingInstanceReplaysDeferredState(t *testing.T) {
 		if _, ok := mock.watchedFields[field]; !ok {
 			t.Fatalf("expected watched field %d to be replayed", field)
 		}
+	}
+}
+
+func TestReconnectingInstanceRetriesDeviceEnumerationFailure(t *testing.T) {
+	originalNewConnectedInstanceFunc := newConnectedInstanceFunc
+	t.Cleanup(func() {
+		newConnectedInstanceFunc = originalNewConnectedInstanceFunc
+	})
+
+	expectedErr := errors.New("enumeration failed")
+	wantDevices := []DeviceInfo{{ID: 3, UUID: "GPU-reconnected"}}
+	connected := newMockTrackingInstance()
+	connected.devices = wantDevices
+	attempts := 0
+	newConnectedInstanceFunc = func() (Instance, error) {
+		attempts++
+		if attempts == 1 {
+			return nil, errors.Join(errDeviceEnumeration, expectedErr)
+		}
+		return connected, nil
+	}
+
+	inst := &reconnectingInstance{
+		current:           NewNoOp(),
+		watchedFields:     make(map[dcgm.Short]struct{}),
+		groupEntities:     make(map[uint]struct{}),
+		reconnectInterval: time.Hour,
+		stopCh:            make(chan struct{}),
+	}
+	defer inst.Shutdown()
+
+	if err := inst.reconnectNow(); !errors.Is(err, expectedErr) {
+		t.Fatalf("first reconnectNow() error = %v, want %v", err, expectedErr)
+	}
+	if inst.DCGMExists() {
+		t.Fatal("failed reconnect replaced the no-op instance")
+	}
+
+	if err := inst.reconnectNow(); err != nil {
+		t.Fatalf("second reconnectNow() error = %v, want nil", err)
+	}
+	if !inst.DCGMExists() {
+		t.Fatal("successful reconnect did not install the connected instance")
+	}
+	if got := inst.GetDevices(); !slices.Equal(got, wantDevices) {
+		t.Fatalf("GetDevices() = %+v, want %+v", got, wantDevices)
 	}
 }
 
@@ -862,6 +908,7 @@ type mockTrackingInstance struct {
 	watchedSystems dcgm.HealthSystem
 	watchedFields  map[dcgm.Short]struct{}
 	entities       map[uint]struct{}
+	devices        []DeviceInfo
 }
 
 func newMockTrackingInstance() *mockTrackingInstance {
@@ -910,7 +957,7 @@ func (m *mockTrackingInstance) GetLatestValuesForFields(deviceID uint, fields []
 	return nil, nil
 }
 func (m *mockTrackingInstance) GetGroupHandle() dcgm.GroupHandle { return dcgm.GroupHandle{} }
-func (m *mockTrackingInstance) GetDevices() []DeviceInfo         { return nil }
+func (m *mockTrackingInstance) GetDevices() []DeviceInfo         { return slices.Clone(m.devices) }
 func (m *mockTrackingInstance) Shutdown() error                  { return nil }
 
 type blockingReplayMockInstance struct {

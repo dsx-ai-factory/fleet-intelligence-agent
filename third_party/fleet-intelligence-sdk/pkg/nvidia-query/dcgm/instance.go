@@ -167,28 +167,27 @@ type deviceInventoryEnrichmentRetrier interface {
 
 var newInstanceFunc = newInitializedInstance
 
-// New creates a DCGM instance. It returns a no-op instance if DCGM is
-// unavailable, but returns an error if DCGM connects and GPU enumeration fails.
+// New creates a DCGM instance. It returns a no-op instance when a complete
+// DCGM session cannot be initialized.
 func New() (Instance, error) {
 	return newInitializedInstance()
 }
 
 // NewWithGroupName creates a DCGM instance with a caller-owned DCGM group name.
-// It has the same availability and device-enumeration behavior as New.
+// It has the same initialization behavior as New.
 func NewWithGroupName(groupName string) (Instance, error) {
 	return newInitializedInstanceWithGroupName(groupName)
 }
 
-// NewWithContext creates a DCGM instance with a bounded wait. If initialization
-// exceeds the context deadline, it returns a no-op instance so callers can
-// continue startup without blocking on slow DCGM device enumeration.
+// NewWithContext creates a reconnecting DCGM instance with a bounded initial
+// wait. If a complete session cannot be initialized, it starts with a no-op
+// instance so callers can continue while initialization is retried.
 func NewWithContext(ctx context.Context) (Instance, error) {
 	return NewWithContextAndGroupName(ctx, defaultDCGMGroupName)
 }
 
 // NewWithContextAndGroupName creates a DCGM instance with a bounded wait and
-// caller-owned DCGM group name. Device-enumeration errors are returned rather
-// than converted to an empty no-op inventory.
+// caller-owned DCGM group name.
 func NewWithContextAndGroupName(ctx context.Context, groupName string) (Instance, error) {
 	type result struct {
 		inst Instance
@@ -217,7 +216,7 @@ func NewWithContextAndGroupName(ctx context.Context, groupName string) (Instance
 		}
 		if res.inst == nil || !res.inst.DCGMExists() {
 			log.Logger.Warnw(
-				"DCGM not available at startup; continuing with no-op instance and retrying in background until DCGM is up",
+				"DCGM session unavailable at startup; continuing with no-op instance and retrying complete initialization in background",
 				"retryInterval", dcgmReconnectInterval.String(),
 			)
 		}
@@ -225,7 +224,7 @@ func NewWithContextAndGroupName(ctx context.Context, groupName string) (Instance
 	case <-ctx.Done():
 		close(abandonCh)
 		log.Logger.Warnw(
-			"DCGM initialization timed out; continuing with no-op instance and retrying in background until DCGM is up",
+			"DCGM initialization timed out; continuing with no-op instance and retrying complete initialization in background",
 			"error", ctx.Err(),
 			"retryInterval", dcgmReconnectInterval.String(),
 		)
@@ -257,9 +256,6 @@ var dcgmNewDefaultGroupFunc = dcgm.NewDefaultGroup
 func newInitializedInstance() (Instance, error) {
 	connectedInst, err := newConnectedInstanceFunc()
 	if err != nil {
-		if errors.Is(err, errDeviceEnumeration) {
-			return nil, err
-		}
 		log.Logger.Warnw("DCGM initialization failed, returning no-op instance", "error", err)
 		return NewNoOp(), nil
 	}
@@ -272,9 +268,6 @@ func newInitializedInstanceWithGroupName(groupName string) (Instance, error) {
 	}
 	connectedInst, err := connectWithGroupName(groupName)
 	if err != nil {
-		if errors.Is(err, errDeviceEnumeration) {
-			return nil, err
-		}
 		log.Logger.Warnw("DCGM initialization failed, returning no-op instance", "error", err)
 		return NewNoOp(), nil
 	}
@@ -302,8 +295,9 @@ func newConnectedInstance(groupName string) (Instance, error) {
 	log.Logger.Debugw("DCGM initialized successfully")
 
 	// Build the initial inventory before creating session resources. An
-	// enumeration error must fail initialization: otherwise GPU-gated
-	// components would misinterpret unknown inventory as a GPU-free host.
+	// enumeration error invalidates this candidate session so a reconnecting
+	// caller can retry the complete initialization instead of publishing an
+	// empty, but apparently connected, inventory.
 	devices, inventoryComplete, inventoryErr := queryDeviceInventory()
 	if errors.Is(inventoryErr, errDeviceEnumeration) {
 		if cleanup != nil {
