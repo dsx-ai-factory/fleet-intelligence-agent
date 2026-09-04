@@ -11,7 +11,7 @@
 | `accelerator-nvidia-persistence-mode`            | Direct `GetPersistenceMode` per GPU ([component](../third_party/fleet-intelligence-sdk/components/accelerator/nvidia/persistence-mode/component.go#L140))                                                                                                     | `DCGM_FI_DEV_PERSISTENCE_MODE`                                                                    |
 | `accelerator-nvidia-nvml`                        | Reports errors encountered during inventory collection                                                                                                                                                                                                        | Replace with a neutral GPU-inventory/DCGM-collection health signal                                |
 | XID                                              | NVML gates the component, maps PCI bus IDs to UUIDs, and decides whether XID 63/64 should be suppressed                                                                                                                                                       | DCGM UUID-to-PCI map plus existing product-capability tables                                      |
-| InfiniBand, NCCL, peermem, and SXID              | NVML is only used to decide whether this is a GPU host                                                                                                                                                                                                        | DCGM device count, with PCI/sysfs fallback                                                        |
+| InfiniBand, NCCL, peermem, and SXID              | NVML is only used to decide whether this is a GPU host                                                                                                                                                                                                        | DCGM device inventory; no PCI/sysfs fallback, matching the existing provider-gating behavior      |
 | `library`                                        | NVML availability decides whether `libnvidia-ml.so` and `libcuda.so` are checked                                                                                                                                                                              | Gate on NVIDIA GPU/driver presence; decide whether the NVML library-presence check itself remains |
 | Precheck                                         | Driver version, architecture, and GPU detail collection ([precheck](../internal/precheck/precheck.go#L106))                                                                                                                                                   | DCGM primary; `/proc/driver/nvidia`, sysfs, and PCI fallback                                      |
 | `scan`, `machine-info`, and enrollment inventory | Explicitly create an NVML instance                                                                                                                                                                                                                            | Pass a neutral inventory provider/DCGM instance                                                   |
@@ -20,6 +20,17 @@
 The daemon owns the full NVML lifecycle today: it initializes NVML, puts it in `GPUdInstance`, passes it into inventory and the exporter, and shuts it down ([server](../internal/server/server.go#L273)). If NVML is initially missing, it polls every five seconds and exits the process when NVML appears so the supervisor can restart it. DCGM already has a reconnecting instance, so that exit/restart mechanism can disappear.
 
 One noteworthy bug: `nvidia_available` is effectively always true during a normal server run because a missing library produces a non-nil no-op NVML instance ([handler](../internal/server/handlers.go#L242)).
+
+Runtime component gating does not independently probe PCI or sysfs. The current
+NVML-backed components treat an unavailable NVML instance or missing product
+name as no detected GPU. The DCGM replacement preserves that behavior: when
+DCGM is unavailable or initialization times out, its reconnecting no-op
+instance exposes an empty inventory, so GPU-gated components report Healthy as
+unsupported while connection attempts continue in the background. A completed
+`GetSupportedDevices` error instead fails initialization, and failures that
+occur only while enriching successfully enumerated device IDs retain those IDs
+for presence checks. Adding independent PCI/sysfs GPU detection would be a
+separate reliability improvement rather than part of NVML compatibility.
 
 The pinned DCGM API already exposes:
 

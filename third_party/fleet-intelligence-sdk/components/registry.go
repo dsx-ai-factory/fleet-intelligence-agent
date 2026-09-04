@@ -57,8 +57,11 @@ type GPUdInstance struct {
 	FailureInjector *FailureInjector
 }
 
-// GPUDeviceProvider supplies a refreshable GPU inventory without
-// exposing a vendor-library-specific query interface to components.
+// GPUDeviceProvider supplies GPU inventory without exposing a
+// vendor-library-specific query interface to components. An empty inventory can
+// mean either that DCGM enumerated no GPUs or that DCGM is temporarily unavailable.
+// Components intentionally preserve the legacy provider-gating behavior and treat both as
+// no detected GPU while the DCGM instance reconnects in the background.
 type GPUDeviceProvider interface {
 	GPUDevices() []nvidiadcgm.DeviceInfo
 }
