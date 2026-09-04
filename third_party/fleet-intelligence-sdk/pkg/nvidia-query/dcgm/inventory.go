@@ -157,24 +157,30 @@ func deviceInventoryFromFieldValues(deviceIDs []uint, values []dcgm.FieldValue_v
 		case dcgm.DCGM_FI_DRIVER_VERSION:
 			device.DriverVersion = inventoryString(value)
 		case dcgm.DCGM_FI_CUDA_DRIVER_VERSION:
-			device.CUDADriverVersion = positiveInventoryInt64(value)
+			if cudaDriverVersion, ok := positiveInventoryInt64(value); ok {
+				device.CUDADriverVersion = cudaDriverVersion
+			}
 		case dcgm.DCGM_FI_DEV_MINOR_NUMBER:
-			if minorNumber := inventoryInt64(value); minorNumber >= 0 {
+			if minorNumber, ok := inventoryInt64(value); ok && minorNumber >= 0 {
 				device.MinorNumber = minorNumber
 			}
 		case dcgm.DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY:
-			device.ComputeCapability = positiveInventoryInt64(value)
+			if computeCapability, ok := positiveInventoryInt64(value); ok {
+				device.ComputeCapability = computeCapability
+			}
 		case dcgm.DCGM_FI_DEV_FABRIC_CLUSTER_UUID:
 			device.FabricClusterUUID = inventoryString(value)
 		case dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID:
-			if cliqueID := inventoryInt64(value); cliqueID >= 0 && uint64(cliqueID) <= uint64(^uint32(0)) {
+			if cliqueID, ok := inventoryInt64(value); ok && cliqueID >= 0 && uint64(cliqueID) <= uint64(^uint32(0)) {
 				device.FabricCliqueID = uint32(cliqueID)
 				device.FabricCliqueIDValid = true
 			}
 		case dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER:
 			device.ChassisSerial = inventoryString(value)
 		case dcgm.DCGM_FI_DEV_FB_TOTAL:
-			device.FramebufferMemoryBytes = framebufferMemoryBytes(inventoryInt64(value))
+			if framebufferTotal, ok := inventoryInt64(value); ok {
+				device.FramebufferMemoryBytes = framebufferMemoryBytes(framebufferTotal)
+			}
 		}
 	}
 
@@ -188,19 +194,19 @@ func inventoryString(value *dcgm.FieldValue_v2) string {
 	return value.String()
 }
 
-func inventoryInt64(value *dcgm.FieldValue_v2) int64 {
+func inventoryInt64(value *dcgm.FieldValue_v2) (int64, bool) {
 	if value.FieldType != dcgm.DCGM_FT_INT64 {
-		return 0
+		return 0, false
 	}
-	return value.Int64()
+	return value.Int64(), true
 }
 
-func positiveInventoryInt64(value *dcgm.FieldValue_v2) int64 {
-	result := inventoryInt64(value)
-	if result <= 0 {
-		return 0
+func positiveInventoryInt64(value *dcgm.FieldValue_v2) (int64, bool) {
+	result, ok := inventoryInt64(value)
+	if !ok || result <= 0 {
+		return 0, false
 	}
-	return result
+	return result, true
 }
 
 func framebufferMemoryBytes(totalMiB int64) uint64 {

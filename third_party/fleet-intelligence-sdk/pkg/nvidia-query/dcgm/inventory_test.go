@@ -191,6 +191,22 @@ func TestDeviceInventorySkipsUnavailableFieldsWithoutDroppingGPU(t *testing.T) {
 	}
 }
 
+func TestDeviceInventoryDistinguishesZeroFromMismatchedNumericFields(t *testing.T) {
+	devices, _ := deviceInventoryFromFieldValues([]uint{1, 2}, []dcgm.FieldValue_v2{
+		stringField(1, dcgm.DCGM_FI_DEV_MINOR_NUMBER, "wrong type"),
+		stringField(1, dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID, "wrong type"),
+		int64Field(2, dcgm.DCGM_FI_DEV_MINOR_NUMBER, 0),
+		int64Field(2, dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID, 0),
+	})
+	want := []DeviceInfo{
+		{ID: 1, MinorNumber: -1},
+		{ID: 2, MinorNumber: 0, FabricCliqueID: 0, FabricCliqueIDValid: true},
+	}
+	if !slices.Equal(devices, want) {
+		t.Fatalf("devices = %+v, want %+v", devices, want)
+	}
+}
+
 func TestFramebufferMemoryBytes(t *testing.T) {
 	tests := []struct {
 		name     string
