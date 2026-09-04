@@ -15,7 +15,7 @@ import (
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/eventstore"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/device"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 )
 
 const (
@@ -56,7 +56,7 @@ func init() {
 
 // evolveHealthyState resolves the state of the XID error component.
 // note: assume events are sorted by time in descending order
-func evolveHealthyState(events eventstore.Events, devices map[string]device.Device, rebootThreshold int) (ret apiv1.HealthState) {
+func evolveHealthyState(events eventstore.Events, devices map[string]nvidiadcgm.DeviceInfo, rebootThreshold int) (ret apiv1.HealthState) {
 	defer func() {
 		log.Logger.Debugf("EvolveHealthyState: %v", ret)
 	}()
@@ -130,7 +130,7 @@ func evolveHealthyState(events eventstore.Events, devices map[string]device.Devi
 	}
 }
 
-func (xidErr *xidErrorEventDetail) buildMessage(devices map[string]device.Device) string {
+func (xidErr *xidErrorEventDetail) buildMessage(devices map[string]nvidiadcgm.DeviceInfo) string {
 	if xidErr == nil {
 		// should never happen
 		log.Logger.Errorw("buildMessage: xidErrorEventDetail is nil; returning unknown")
@@ -166,19 +166,57 @@ func (xidErr *xidErrorEventDetail) buildMessage(devices map[string]device.Device
 	return fmt.Sprintf("%s %s detected on %s", header, desc, gpuID)
 }
 
-func convertBusIDToUUID(busID string, devices map[string]device.Device) string {
-	busID = fmt.Sprintf("%s.", strings.TrimPrefix(busID, "PCI:"))
-	var uuid string
-	for k, v := range devices {
-		if strings.HasPrefix(v.PCIBusID(), busID) {
-			uuid = k
-			break
-		}
+func convertBusIDToUUID(busID string, devices map[string]nvidiadcgm.DeviceInfo) string {
+	uuid, _, ok := deviceByBusID(busID, devices)
+	if !ok {
+		return ""
 	}
 	return uuid
 }
 
-func resolveXIDEvent(event eventstore.Event, devices map[string]device.Device) eventstore.Event {
+func deviceByBusID(busID string, devices map[string]nvidiadcgm.DeviceInfo) (string, nvidiadcgm.DeviceInfo, bool) {
+	busID, ok := normalizePCIBusID(busID)
+	if !ok {
+		return "", nvidiadcgm.DeviceInfo{}, false
+	}
+	for uuid, device := range devices {
+		deviceBusID, ok := normalizePCIBusID(device.BusID)
+		if ok && deviceBusID == busID {
+			return uuid, device, true
+		}
+	}
+	return "", nvidiadcgm.DeviceInfo{}, false
+}
+
+// normalizePCIBusID returns domain:bus:device with an eight-digit domain.
+// The function is intentionally omitted because kernel XID messages do not
+// include it, while DCGM device inventory commonly reports it as ".0".
+func normalizePCIBusID(busID string) (string, bool) {
+	busID = strings.ToLower(strings.TrimSpace(busID))
+	busID = strings.TrimPrefix(busID, "pci:")
+	parts := strings.Split(busID, ":")
+	if len(parts) != 3 {
+		return "", false
+	}
+
+	domain, err := strconv.ParseUint(parts[0], 16, 32)
+	if err != nil {
+		return "", false
+	}
+	bus, err := strconv.ParseUint(parts[1], 16, 8)
+	if err != nil {
+		return "", false
+	}
+	devicePart := strings.SplitN(parts[2], ".", 2)[0]
+	device, err := strconv.ParseUint(devicePart, 16, 8)
+	if err != nil || device > 0x1f {
+		return "", false
+	}
+
+	return fmt.Sprintf("%08x:%02x:%02x", domain, bus, device), true
+}
+
+func resolveXIDEvent(event eventstore.Event, devices map[string]nvidiadcgm.DeviceInfo) eventstore.Event {
 	ret := event
 	if event.ExtraInfo == nil {
 		return ret
@@ -216,7 +254,7 @@ func resolveXIDEvent(event eventstore.Event, devices map[string]device.Device) e
 
 // addEventDetails populates event fields/message from parsed XID detail and
 // rewrites the stored ExtraInfo payload in JSON form for downstream consumers.
-func addEventDetails(ev eventstore.Event, xidErr *xidErrorEventDetail, devices map[string]device.Device) eventstore.Event {
+func addEventDetails(ev eventstore.Event, xidErr *xidErrorEventDetail, devices map[string]nvidiadcgm.DeviceInfo) eventstore.Event {
 	detail, ok := getDetailWithSubCodeAndStatus(int(xidErr.Xid), xidErr.SubCode, xidErr.ErrorStatus)
 	if !ok {
 		detail = nil

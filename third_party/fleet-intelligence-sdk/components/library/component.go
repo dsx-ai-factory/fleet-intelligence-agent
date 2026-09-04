@@ -21,7 +21,6 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/components"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/file"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 )
 
 // Name is the name of the library component.
@@ -33,13 +32,9 @@ const (
 
 var (
 	defaultNVIDIALibraries = map[string][]string{
-		// core library for NVML
-		// typically symlinked to "libnvidia-ml.so.1" or "libnvidia-ml.so.535.183.06" (or other driver versions)
-		// some latest drivers do not have this symlink, only "libnvidia-ml.so.1"
+		// NVML runtime library used by NVIDIA management and monitoring tools.
+		// Checking for it does not load or initialize NVML in the agent.
 		"libnvidia-ml.so": {
-			// core library for NVML
-			// typically symlinked to "libnvidia-ml.so.565.57.01" (or other driver versions)
-			// some latest drivers do not have this "libnvidia-ml.so" symlink, only "libnvidia-ml.so.1"
 			"libnvidia-ml.so.1",
 		},
 
@@ -87,8 +82,7 @@ type component struct {
 	cancel context.CancelFunc
 
 	healthCheckInterval time.Duration
-
-	nvmlInstance nvidianvml.Instance
+	gpuProvider         components.GPUDeviceProvider
 
 	libraries   map[string][]string
 	searchOpts  []file.OpOption
@@ -111,17 +105,15 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 		cancel: ccancel,
 
 		healthCheckInterval: healthCheckInterval,
+		gpuProvider:         gpudInstance,
 
-		nvmlInstance: gpudInstance.NVMLInstance,
-		findLibrary:  file.FindLibrary,
+		libraries:   defaultNVIDIALibraries,
+		findLibrary: file.FindLibrary,
 	}
 
 	searchDirs := make(map[string]any)
-	if c.nvmlInstance != nil && c.nvmlInstance.NVMLExists() {
-		c.libraries = defaultNVIDIALibraries
-		for _, dir := range defaultNVIDIALibrariesSearchDirs {
-			searchDirs[dir] = struct{}{}
-		}
+	for _, dir := range defaultNVIDIALibrariesSearchDirs {
+		searchDirs[dir] = struct{}{}
 	}
 
 	searchOpts := []file.OpOption{}
@@ -205,6 +197,11 @@ func (c *component) Check() components.CheckResult {
 		c.lastCheckResult = cr
 		c.lastMu.Unlock()
 	}()
+	if c.gpuProvider != nil && len(c.gpuProvider.GPUDevices()) == 0 {
+		cr.health = apiv1.HealthStateTypeHealthy
+		cr.reason = "GPU is not detected by DCGM"
+		return cr
+	}
 
 	notFounds := []string{}
 	for lib, alternatives := range c.libraries {

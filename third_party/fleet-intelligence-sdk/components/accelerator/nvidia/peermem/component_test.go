@@ -16,66 +16,24 @@ import (
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
 	"github.com/NVIDIA/fleet-intelligence-sdk/components"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/eventstore"
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/device"
-	nvmllib "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/lib"
-	nvidiaproduct "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/product"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 )
 
-// mockNVMLInstance is a mock implementation of nvidianvml.Instance
-type mockNVMLInstance struct {
+// mockGPUProvider supplies a minimal GPU inventory for tests.
+type mockGPUProvider struct {
+	nvidiadcgm.Instance
 	exists bool
 }
 
-func (m *mockNVMLInstance) NVMLExists() bool {
-	return m.exists
+func (m *mockGPUProvider) GPUDevices() []nvidiadcgm.DeviceInfo {
+	if m == nil || !m.exists {
+		return nil
+	}
+	return []nvidiadcgm.DeviceInfo{{ID: 0, UUID: "GPU-test", Model: "test"}}
 }
 
-func (m *mockNVMLInstance) Library() nvmllib.Library {
-	return nil
-}
-
-func (m *mockNVMLInstance) Devices() map[string]device.Device {
-	return nil
-}
-
-func (m *mockNVMLInstance) ProductName() string {
-	return "test"
-}
-
-func (m *mockNVMLInstance) Architecture() string {
-	return ""
-}
-
-func (m *mockNVMLInstance) Brand() string {
-	return ""
-}
-
-func (m *mockNVMLInstance) DriverVersion() string {
-	return ""
-}
-
-func (m *mockNVMLInstance) DriverMajor() int {
-	return 0
-}
-
-func (m *mockNVMLInstance) CUDAVersion() string {
-	return ""
-}
-
-func (m *mockNVMLInstance) FabricManagerSupported() bool {
-	return true
-}
-
-func (m *mockNVMLInstance) FabricStateSupported() bool {
-	return false
-}
-
-func (m *mockNVMLInstance) GetMemoryErrorManagementCapabilities() nvidiaproduct.MemoryErrorManagementCapabilities {
-	return nvidiaproduct.MemoryErrorManagementCapabilities{}
-}
-
-func (m *mockNVMLInstance) Shutdown() error {
-	return nil
+func (m *mockGPUProvider) GetDevices() []nvidiadcgm.DeviceInfo {
+	return m.GPUDevices()
 }
 
 // mockEventBucket implements eventstore.Bucket
@@ -222,8 +180,7 @@ func TestComponentName(t *testing.T) {
 func TestNewComponent(t *testing.T) {
 	// Test creating a component with nil NVML instance
 	gpudInstance := &components.GPUdInstance{
-		RootCtx:      context.Background(),
-		NVMLInstance: nil,
+		RootCtx: context.Background(),
 	}
 
 	comp, err := New(gpudInstance)
@@ -233,7 +190,7 @@ func TestNewComponent(t *testing.T) {
 	// Test creating a component with NVML instance
 	gpudInstance = &components.GPUdInstance{
 		RootCtx:      context.Background(),
-		NVMLInstance: &mockNVMLInstance{exists: true},
+		DCGMInstance: &mockGPUProvider{exists: true},
 	}
 
 	comp, err = New(gpudInstance)
@@ -245,7 +202,7 @@ func TestNewComponentError(t *testing.T) {
 	// Test creating a component when event store fails to create bucket
 	gpudInstance := &components.GPUdInstance{
 		RootCtx:      context.Background(),
-		NVMLInstance: &mockNVMLInstance{exists: true},
+		DCGMInstance: &mockGPUProvider{exists: true},
 		EventStore:   &mockErrorEventStore{},
 	}
 
@@ -269,7 +226,7 @@ func TestCheckWithNoNVML(t *testing.T) {
 
 	result := c.Check()
 	assert.Equal(t, apiv1.HealthStateTypeHealthy, result.HealthStateType())
-	assert.Contains(t, result.Summary(), "NVIDIA NVML instance is nil")
+	assert.Contains(t, result.Summary(), "GPU is not detected by DCGM")
 }
 
 func TestCheckWithNVML(t *testing.T) {
@@ -285,7 +242,7 @@ func TestCheckWithNVML(t *testing.T) {
 	c := &component{
 		ctx:                         context.Background(),
 		cancel:                      func() {},
-		nvmlInstance:                &mockNVMLInstance{exists: true},
+		gpuProvider:                 &mockGPUProvider{exists: true},
 		checkLsmodPeermemModuleFunc: mockChecker.Check,
 	}
 

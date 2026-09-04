@@ -6,6 +6,7 @@ package xid
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"sync"
@@ -21,9 +22,7 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/eventstore"
 	pkghost "github.com/NVIDIA/fleet-intelligence-sdk/pkg/host"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/kmsg"
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/device"
-	nvmllib "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/lib"
-	nvidiaproduct "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/product"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 )
 
@@ -457,9 +456,8 @@ func TestNewWithDifferentConfigurations(t *testing.T) {
 
 	t.Run("with nil event store", func(t *testing.T) {
 		gpudInstance := &components.GPUdInstance{
-			RootCtx:      ctx,
-			EventStore:   nil,
-			NVMLInstance: nil,
+			RootCtx:    ctx,
+			EventStore: nil,
 		}
 
 		comp, err := New(gpudInstance)
@@ -497,8 +495,7 @@ func TestCheck(t *testing.T) {
 
 	t.Run("with no NVML instance", func(t *testing.T) {
 		gpudInstance := &components.GPUdInstance{
-			RootCtx:      ctx,
-			NVMLInstance: nil,
+			RootCtx: ctx,
 		}
 
 		comp, err := New(gpudInstance)
@@ -506,15 +503,15 @@ func TestCheck(t *testing.T) {
 
 		result := comp.Check()
 		assert.Equal(t, apiv1.HealthStateTypeHealthy, result.HealthStateType())
-		assert.Contains(t, result.Summary(), "NVIDIA NVML instance is nil")
+		assert.Contains(t, result.Summary(), "GPU is not detected by DCGM")
 	})
 
 	t.Run("with no kmsg reader", func(t *testing.T) {
 		// Using a properly implemented mock
-		mockedNVML := createMockNVMLInstance()
+		mockedNVML := createMockGPUProvider()
 		gpudInstance := &components.GPUdInstance{
 			RootCtx:      ctx,
-			NVMLInstance: mockedNVML,
+			DCGMInstance: mockedNVML,
 		}
 
 		comp, err := New(gpudInstance)
@@ -530,10 +527,10 @@ func TestCheck(t *testing.T) {
 
 	t.Run("with kmsg reader error", func(t *testing.T) {
 		// Using a properly implemented mock
-		mockedNVML := createMockNVMLInstance()
+		mockedNVML := createMockGPUProvider()
 		gpudInstance := &components.GPUdInstance{
 			RootCtx:      ctx,
-			NVMLInstance: mockedNVML,
+			DCGMInstance: mockedNVML,
 		}
 
 		comp, err := New(gpudInstance)
@@ -551,10 +548,10 @@ func TestCheck(t *testing.T) {
 
 	t.Run("with XID errors", func(t *testing.T) {
 		// Using a properly implemented mock
-		mockedNVML := createMockNVMLInstance()
+		mockedNVML := createMockGPUProvider()
 		gpudInstance := &components.GPUdInstance{
 			RootCtx:      ctx,
-			NVMLInstance: mockedNVML,
+			DCGMInstance: mockedNVML,
 		}
 
 		comp, err := New(gpudInstance)
@@ -580,10 +577,10 @@ func TestCheck(t *testing.T) {
 
 	t.Run("with XID 63 and 64 errors that should be skipped when row remapping is supported", func(t *testing.T) {
 		// Using a properly implemented mock with row remapping support
-		mockedNVML := createMockNVMLInstanceWithRowRemapping()
+		mockedNVML := createMockGPUProviderWithRowRemapping()
 		gpudInstance := &components.GPUdInstance{
 			RootCtx:      ctx,
-			NVMLInstance: mockedNVML,
+			DCGMInstance: mockedNVML,
 		}
 
 		comp, err := New(gpudInstance)
@@ -628,10 +625,10 @@ func TestCheck(t *testing.T) {
 
 	t.Run("with only XID 63 and 64 errors when row remapping is supported", func(t *testing.T) {
 		// Using a properly implemented mock with row remapping support
-		mockedNVML := createMockNVMLInstanceWithRowRemapping()
+		mockedNVML := createMockGPUProviderWithRowRemapping()
 		gpudInstance := &components.GPUdInstance{
 			RootCtx:      ctx,
-			NVMLInstance: mockedNVML,
+			DCGMInstance: mockedNVML,
 		}
 
 		comp, err := New(gpudInstance)
@@ -662,10 +659,10 @@ func TestCheck(t *testing.T) {
 
 	t.Run("with XID 63 and 64 errors that should NOT be skipped when row remapping is NOT supported", func(t *testing.T) {
 		// Using a mock without row remapping support
-		mockedNVML := createMockNVMLInstance()
+		mockedNVML := createMockGPUProvider()
 		gpudInstance := &components.GPUdInstance{
 			RootCtx:      ctx,
-			NVMLInstance: mockedNVML,
+			DCGMInstance: mockedNVML,
 		}
 
 		comp, err := New(gpudInstance)
@@ -708,10 +705,10 @@ func TestCheck(t *testing.T) {
 
 	t.Run("with mixed XIDs when row remapping supported", func(t *testing.T) {
 		// Using a mock with row remapping support
-		mockedNVML := createMockNVMLInstanceWithRowRemapping()
+		mockedNVML := createMockGPUProviderWithRowRemapping()
 		gpudInstance := &components.GPUdInstance{
 			RootCtx:      ctx,
-			NVMLInstance: mockedNVML,
+			DCGMInstance: mockedNVML,
 		}
 
 		comp, err := New(gpudInstance)
@@ -926,83 +923,99 @@ func TestUpdateCurrentState(t *testing.T) {
 	c.eventBucket = eventBucket
 }
 
-// Helper function to create a mock NVML instance for testing
-func createMockNVMLInstance() *mockNVMLInstance {
-	return &mockNVMLInstance{
-		devices:               make(map[string]device.Device),
+// Helper function to create a mock GPU provider for testing.
+func createMockGPUProvider() *mockGPUProvider {
+	return &mockGPUProvider{
 		rowRemappingSupported: false,
 	}
 }
 
-// Helper function to create a mock NVML instance with row remapping support
-func createMockNVMLInstanceWithRowRemapping() *mockNVMLInstance {
-	return &mockNVMLInstance{
-		devices:               make(map[string]device.Device),
+// Helper function to create a mock GPU provider with row remapping support.
+func createMockGPUProviderWithRowRemapping() *mockGPUProvider {
+	return &mockGPUProvider{
 		rowRemappingSupported: true,
 	}
 }
 
-// Mock NVML implementation for testing
-type mockNVMLInstance struct {
-	devices               map[string]device.Device
+// mockGPUProvider includes each PCI bus used by the XID component tests so
+// row-remapping support can be evaluated for the GPU that emitted the event.
+type mockGPUProvider struct {
+	nvidiadcgm.Instance
 	rowRemappingSupported bool
 }
 
-func (m *mockNVMLInstance) NVMLExists() bool {
-	return true
-}
-
-func (m *mockNVMLInstance) Library() nvmllib.Library {
-	return nil
-}
-
-func (m *mockNVMLInstance) Devices() map[string]device.Device {
-	return m.devices
-}
-
-func (m *mockNVMLInstance) ProductName() string {
-	return "Test GPU"
-}
-
-func (m *mockNVMLInstance) Architecture() string {
-	return "Test Architecture"
-}
-
-func (m *mockNVMLInstance) Brand() string {
-	return "Test Brand"
-}
-
-func (m *mockNVMLInstance) DriverVersion() string {
-	return "test-driver-version"
-}
-
-func (m *mockNVMLInstance) DriverMajor() int {
-	return 0
-}
-
-func (m *mockNVMLInstance) CUDAVersion() string {
-	return "test-cuda-version"
-}
-
-func (m *mockNVMLInstance) FabricManagerSupported() bool {
-	return true
-}
-
-func (m *mockNVMLInstance) FabricStateSupported() bool {
-	return false
-}
-
-func (m *mockNVMLInstance) GetMemoryErrorManagementCapabilities() nvidiaproduct.MemoryErrorManagementCapabilities {
-	return nvidiaproduct.MemoryErrorManagementCapabilities{
-		ErrorContainment:     false,
-		DynamicPageOfflining: false,
-		RowRemapping:         m.rowRemappingSupported,
-		Message:              "",
+func (m *mockGPUProvider) GPUDevices() []nvidiadcgm.DeviceInfo {
+	model := "Test GPU"
+	if m != nil && m.rowRemappingSupported {
+		model = "H100"
 	}
+
+	devices := make([]nvidiadcgm.DeviceInfo, 0, 5)
+	for i := 1; i <= 5; i++ {
+		devices = append(devices, nvidiadcgm.DeviceInfo{
+			ID:    uint(i - 1),
+			UUID:  fmt.Sprintf("GPU-test-%d", i),
+			Model: model,
+			BusID: fmt.Sprintf("00000000:%02x:00.0", i),
+		})
+	}
+	return devices
 }
 
-func (m *mockNVMLInstance) Shutdown() error {
-	return nil
+func (m *mockGPUProvider) GetDevices() []nvidiadcgm.DeviceInfo {
+	return m.GPUDevices()
+}
+
+func TestShouldDiscardRowRemappingXIDUsesEventGPU(t *testing.T) {
+	devices := map[string]nvidiadcgm.DeviceInfo{
+		"GPU-h100": {
+			UUID:  "GPU-h100",
+			Model: "H100",
+			BusID: "00000000:01:00.0",
+		},
+		"GPU-v100": {
+			UUID:  "GPU-v100",
+			Model: "V100",
+			BusID: "00000000:02:00.0",
+		},
+	}
+
+	tests := []struct {
+		name   string
+		xidErr *XidError
+		want   bool
+	}{
+		{
+			name:   "supported event GPU",
+			xidErr: &XidError{Xid: 63, DeviceUUID: "PCI:0000:01:00"},
+			want:   true,
+		},
+		{
+			name:   "unsupported event GPU on mixed-model host",
+			xidErr: &XidError{Xid: 64, DeviceUUID: "PCI:0000:02:00"},
+			want:   false,
+		},
+		{
+			name:   "unresolved event GPU",
+			xidErr: &XidError{Xid: 63, DeviceUUID: "PCI:0000:03:00"},
+			want:   false,
+		},
+		{
+			name:   "other XID on supported GPU",
+			xidErr: &XidError{Xid: 31, DeviceUUID: "PCI:0000:01:00"},
+			want:   false,
+		},
+		{
+			name: "nil XID",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, shouldDiscardRowRemappingXID(tt.xidErr, devices))
+		})
+	}
 }
 
 func TestDataString(t *testing.T) {
@@ -1219,13 +1232,13 @@ func TestHandleEventChannel(t *testing.T) {
 	rebootEventStore := pkghost.NewRebootEventStore(store)
 
 	// Create a mock NVML instance for testing
-	mockedNVML := createMockNVMLInstance()
+	mockedNVML := createMockGPUProvider()
 
 	gpudInstance := &components.GPUdInstance{
 		RootCtx:          ctx,
 		EventStore:       store,
 		RebootEventStore: rebootEventStore,
-		NVMLInstance:     mockedNVML,
+		DCGMInstance:     mockedNVML,
 	}
 
 	comp, err := New(gpudInstance)
@@ -1337,13 +1350,13 @@ func TestStartWithXID63And64Skipping(t *testing.T) {
 	rebootEventStore := pkghost.NewRebootEventStore(store)
 
 	// Create a mock NVML instance with row remapping support
-	mockedNVML := createMockNVMLInstanceWithRowRemapping()
+	mockedNVML := createMockGPUProviderWithRowRemapping()
 
 	gpudInstance := &components.GPUdInstance{
 		RootCtx:          ctx,
 		EventStore:       store,
 		RebootEventStore: rebootEventStore,
-		NVMLInstance:     mockedNVML,
+		DCGMInstance:     mockedNVML,
 	}
 
 	comp, err := New(gpudInstance)
@@ -1447,13 +1460,13 @@ func TestStartWithXID63And64NotSkippedWhenNoRowRemapping(t *testing.T) {
 	rebootEventStore := pkghost.NewRebootEventStore(store)
 
 	// Create a mock NVML instance WITHOUT row remapping support
-	mockedNVML := createMockNVMLInstance()
+	mockedNVML := createMockGPUProvider()
 
 	gpudInstance := &components.GPUdInstance{
 		RootCtx:          ctx,
 		EventStore:       store,
 		RebootEventStore: rebootEventStore,
-		NVMLInstance:     mockedNVML,
+		DCGMInstance:     mockedNVML,
 	}
 
 	comp, err := New(gpudInstance)

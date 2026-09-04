@@ -14,7 +14,14 @@ import (
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/file"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 )
+
+type testGPUProvider struct {
+	devices []nvidiadcgm.DeviceInfo
+}
+
+func (p *testGPUProvider) GPUDevices() []nvidiadcgm.DeviceInfo { return p.devices }
 
 // createTestComponent creates a test component with the given options
 func createTestComponent() *component {
@@ -43,6 +50,11 @@ func TestTags(t *testing.T) {
 
 	tags := c.Tags()
 	assert.Equal(t, expectedTags, tags)
+}
+
+func TestDefaultNVIDIALibraries(t *testing.T) {
+	assert.Equal(t, []string{"libnvidia-ml.so.1"}, defaultNVIDIALibraries["libnvidia-ml.so"])
+	assert.Equal(t, []string{"libcuda.so.1"}, defaultNVIDIALibraries["libcuda.so"])
 }
 
 func TestCheck(t *testing.T) {
@@ -84,6 +96,25 @@ func TestCheck(t *testing.T) {
 	result = comp.Check()
 	assert.Equal(t, apiv1.HealthStateTypeHealthy, result.HealthStateType())
 	assert.Equal(t, "all libraries exist", result.Summary())
+}
+
+func TestCheckStartsCheckingLibrariesAfterDCGMReconnect(t *testing.T) {
+	comp := createTestComponent()
+	provider := &testGPUProvider{}
+	comp.gpuProvider = provider
+	comp.libraries = map[string][]string{"libcuda.so": {"libcuda.so.1"}}
+	comp.findLibrary = func(name string, opts ...file.OpOption) (string, error) {
+		return "", file.ErrLibraryNotFound
+	}
+
+	result := comp.Check()
+	assert.Equal(t, apiv1.HealthStateTypeHealthy, result.HealthStateType())
+	assert.Equal(t, "GPU is not detected by DCGM", result.Summary())
+
+	provider.devices = []nvidiadcgm.DeviceInfo{{ID: 0, UUID: "GPU-0"}}
+	result = comp.Check()
+	assert.Equal(t, apiv1.HealthStateTypeUnhealthy, result.HealthStateType())
+	assert.Contains(t, result.Summary(), "libcuda.so")
 }
 
 func TestEvents(t *testing.T) {

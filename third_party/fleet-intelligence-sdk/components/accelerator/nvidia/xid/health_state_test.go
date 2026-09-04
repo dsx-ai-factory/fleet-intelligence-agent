@@ -9,15 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/eventstore"
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/device"
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/testutil"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 )
 
 func createXidEvent(eventTime time.Time, xid uint64, eventType apiv1.EventType, suggestedAction apiv1.RepairActionType) eventstore.Event {
@@ -62,6 +60,38 @@ func createXidEventWithNilSuggestedActions(eventTime time.Time, xid uint64, even
 	return ret
 }
 
+func TestNormalizePCIBusID(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+		ok    bool
+	}{
+		{name: "kernel XID", input: "PCI:0000:04:00", want: "00000000:04:00", ok: true},
+		{name: "DCGM inventory", input: "00000000:04:00.0", want: "00000000:04:00", ok: true},
+		{name: "nonzero extended domain", input: "00000018:AB:1f.7", want: "00000018:ab:1f", ok: true},
+		{name: "invalid", input: "04:00.0", ok: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := normalizePCIBusID(tt.input)
+			assert.Equal(t, tt.ok, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestConvertBusIDToUUIDNormalizesDCGMDomain(t *testing.T) {
+	devices := map[string]nvidiadcgm.DeviceInfo{
+		"GPU-test-uuid": {BusID: "00000000:04:00.0"},
+	}
+
+	assert.Equal(t, "GPU-test-uuid", convertBusIDToUUID("PCI:0000:04:00", devices))
+	assert.Empty(t, convertBusIDToUUID("PCI:0000:05:00", devices))
+	assert.Empty(t, convertBusIDToUUID("invalid", devices))
+}
+
 func TestStateUpdateBasedOnEvents(t *testing.T) {
 	t.Run("no event found", func(t *testing.T) {
 		state := evolveHealthyState(eventstore.Events{}, nil, DefaultRebootThreshold)
@@ -69,7 +99,7 @@ func TestStateUpdateBasedOnEvents(t *testing.T) {
 		assert.Equal(t, "XIDComponent is healthy", state.Reason)
 	})
 
-	mockDevice := testutil.NewMockDevice(&mock.Device{}, "test-arch", "test-brand", "test-cuda", "0000:9b:00.0")
+	mockDevice := nvidiadcgm.DeviceInfo{BusID: "0000:9b:00.0"}
 
 	t.Run("fatal xid 123", func(t *testing.T) {
 		// XID 123 is EventTypeFatal in the catalog, so we use Fatal here.
@@ -77,7 +107,7 @@ func TestStateUpdateBasedOnEvents(t *testing.T) {
 		events := eventstore.Events{
 			createXidEvent(time.Time{}, 123, apiv1.EventTypeFatal, apiv1.RepairActionTypeRebootSystem),
 		}
-		state := evolveHealthyState(events, map[string]device.Device{"GPU-b850f46d-d5ea-c752-ddf3-c4453e44d3f7": mockDevice}, DefaultRebootThreshold)
+		state := evolveHealthyState(events, map[string]nvidiadcgm.DeviceInfo{"GPU-b850f46d-d5ea-c752-ddf3-c4453e44d3f7": mockDevice}, DefaultRebootThreshold)
 		assert.Equal(t, apiv1.HealthStateTypeUnhealthy, state.Health)
 		// XID 123 (SPI_PMU_RPC_WRITE_FAIL) has mnemonic, expect it in reason
 		assert.Contains(t, state.Reason, "XID 123")
@@ -89,9 +119,9 @@ func TestStateUpdateBasedOnEvents(t *testing.T) {
 			createXidEvent(time.Time{}, 456, apiv1.EventTypeFatal, apiv1.RepairActionTypeRebootSystem),
 		}
 		t.Logf("original type=%s", events[0].Type)
-		resolved := resolveXIDEvent(events[0], map[string]device.Device{"GPU-b850f46d-d5ea-c752-ddf3-c4453e44d3f7": mockDevice})
+		resolved := resolveXIDEvent(events[0], map[string]nvidiadcgm.DeviceInfo{"GPU-b850f46d-d5ea-c752-ddf3-c4453e44d3f7": mockDevice})
 		t.Logf("resolved type=%s msg=%s", resolved.Type, resolved.Message)
-		state := evolveHealthyState(events, map[string]device.Device{"GPU-b850f46d-d5ea-c752-ddf3-c4453e44d3f7": mockDevice}, DefaultRebootThreshold)
+		state := evolveHealthyState(events, map[string]nvidiadcgm.DeviceInfo{"GPU-b850f46d-d5ea-c752-ddf3-c4453e44d3f7": mockDevice}, DefaultRebootThreshold)
 		assert.Equal(t, apiv1.HealthStateTypeUnhealthy, state.Health)
 		// XID 456 is unknown, so the reason should contain the XID number
 		assert.Contains(t, state.Reason, "XID 456")
@@ -557,8 +587,8 @@ func Test_StatusAwareMessages(t *testing.T) {
 // Test_HealthStateReason_NVLinkXIDs verifies the reason field format for NVLink XIDs (144-150)
 // with subcode and error status information.
 func Test_HealthStateReason_NVLinkXIDs(t *testing.T) {
-	mockDevice := testutil.NewMockDevice(&mock.Device{}, "test-arch", "test-brand", "test-cuda", "0000:04:00.0")
-	devices := map[string]device.Device{"GPU-test-uuid": mockDevice}
+	mockDevice := nvidiadcgm.DeviceInfo{BusID: "00000000:04:00.0"}
+	devices := map[string]nvidiadcgm.DeviceInfo{"GPU-test-uuid": mockDevice}
 
 	testCases := []struct {
 		name                string
@@ -686,8 +716,8 @@ func Test_HealthStateReason_NVLinkXIDs(t *testing.T) {
 
 // Test_HealthStateReason_StandardXIDs verifies the reason field format for standard (non-NVLink) XIDs.
 func Test_HealthStateReason_StandardXIDs(t *testing.T) {
-	mockDevice := testutil.NewMockDevice(&mock.Device{}, "test-arch", "test-brand", "test-cuda", "0000:9b:00.0")
-	devices := map[string]device.Device{"GPU-test-uuid": mockDevice}
+	mockDevice := nvidiadcgm.DeviceInfo{BusID: "0000:9b:00.0"}
+	devices := map[string]nvidiadcgm.DeviceInfo{"GPU-test-uuid": mockDevice}
 
 	testCases := []struct {
 		name             string
@@ -796,8 +826,8 @@ func Test_HealthStateReason_StandardXIDs(t *testing.T) {
 // Test_HealthStateReason_evolveHealthyState_Integration tests the full integration
 // of reason generation through evolveHealthyState.
 func Test_HealthStateReason_evolveHealthyState_Integration(t *testing.T) {
-	mockDevice := testutil.NewMockDevice(&mock.Device{}, "test-arch", "test-brand", "test-cuda", "0000:04:00.0")
-	devices := map[string]device.Device{"GPU-test-uuid": mockDevice}
+	mockDevice := nvidiadcgm.DeviceInfo{BusID: "0000:04:00.0"}
+	devices := map[string]nvidiadcgm.DeviceInfo{"GPU-test-uuid": mockDevice}
 
 	testCases := []struct {
 		name             string

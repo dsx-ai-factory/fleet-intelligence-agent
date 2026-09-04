@@ -19,9 +19,7 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/components"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/eventstore"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/kmsg"
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/device"
-	nvmllib "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/lib"
-	nvidiaproduct "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/product"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 )
 
 // mockEventBucket implements a mock for eventstore.Bucket
@@ -82,130 +80,81 @@ func (m *MockEventStore) Bucket(name string, opts ...eventstore.OpOption) (event
 	return args.Get(0).(eventstore.Bucket), args.Error(1)
 }
 
-// Complete implementation of nvidianvml.Instance for testing
-type mockNVMLInstance struct {
+// GPU inventory provider for testing.
+type mockGPUProvider struct {
 	mock.Mock
 }
 
-func (m *mockNVMLInstance) NVMLExists() bool {
+func (m *mockGPUProvider) NVMLExists() bool {
 	args := m.Called()
 	return args.Bool(0)
 }
 
-func (m *mockNVMLInstance) Library() nvmllib.Library {
+func (m *mockGPUProvider) ProductName() string {
 	args := m.Called()
-	if args.Get(0) == nil {
+	return args.String(0)
+}
+
+func (m *mockGPUProvider) GPUDevices() []nvidiadcgm.DeviceInfo {
+	if !m.NVMLExists() {
 		return nil
 	}
-	return args.Get(0).(nvmllib.Library)
-}
-
-func (m *mockNVMLInstance) Devices() map[string]device.Device {
-	args := m.Called()
-	return args.Get(0).(map[string]device.Device)
-}
-
-func (m *mockNVMLInstance) ProductName() string {
-	args := m.Called()
-	return args.String(0)
-}
-
-func (m *mockNVMLInstance) Architecture() string {
-	args := m.Called()
-	return args.String(0)
-}
-
-func (m *mockNVMLInstance) Brand() string {
-	args := m.Called()
-	return args.String(0)
-}
-
-func (m *mockNVMLInstance) DriverVersion() string {
-	args := m.Called()
-	return args.String(0)
-}
-
-func (m *mockNVMLInstance) DriverMajor() int {
-	args := m.Called()
-	return args.Int(0)
-}
-
-func (m *mockNVMLInstance) CUDAVersion() string {
-	args := m.Called()
-	return args.String(0)
-}
-
-func (m *mockNVMLInstance) FabricManagerSupported() bool {
-	args := m.Called()
-	return args.Bool(0)
-}
-
-func (m *mockNVMLInstance) FabricStateSupported() bool {
-	args := m.Called()
-	return args.Bool(0)
-}
-
-func (m *mockNVMLInstance) GetMemoryErrorManagementCapabilities() nvidiaproduct.MemoryErrorManagementCapabilities {
-	args := m.Called()
-	return args.Get(0).(nvidiaproduct.MemoryErrorManagementCapabilities)
-}
-
-func (m *mockNVMLInstance) Shutdown() error {
-	args := m.Called()
-	return args.Error(0)
+	product := m.ProductName()
+	if product == "" {
+		return nil
+	}
+	return []nvidiadcgm.DeviceInfo{{ID: 0, UUID: "GPU-test", Model: product}}
 }
 
 // TestCheck tests the Check method in various scenarios
 func TestCheck(t *testing.T) {
 	t.Parallel()
 
-	t.Run("nil nvmlInstance", func(t *testing.T) {
+	t.Run("nil gpuProvider", func(t *testing.T) {
 		comp := &component{
-			nvmlInstance: nil,
+			gpuProvider: nil,
 		}
 		result := comp.Check()
 		assert.NotNil(t, result)
 		assert.Equal(t, apiv1.HealthStateTypeHealthy, result.HealthStateType())
-		assert.Contains(t, result.Summary(), "NVIDIA NVML instance is nil")
+		assert.Contains(t, result.Summary(), "GPU is not detected by DCGM")
 	})
 
 	t.Run("nvml exists but no product name", func(t *testing.T) {
-		mockNvml := new(mockNVMLInstance)
+		mockNvml := new(mockGPUProvider)
 		mockNvml.On("NVMLExists").Return(true)
 		mockNvml.On("ProductName").Return("")
 
 		comp := &component{
-			nvmlInstance: mockNvml,
+			gpuProvider: mockNvml,
 		}
 		result := comp.Check()
 		assert.NotNil(t, result)
 		assert.Equal(t, apiv1.HealthStateTypeHealthy, result.HealthStateType())
-		assert.Contains(t, result.Summary(), "NVIDIA NVML is loaded but GPU is not detected")
+		assert.Contains(t, result.Summary(), "GPU is not detected by DCGM")
 	})
 
 	t.Run("nvml does not exist", func(t *testing.T) {
-		mockNvml := new(mockNVMLInstance)
+		mockNvml := new(mockGPUProvider)
 		mockNvml.On("NVMLExists").Return(false)
 
 		comp := &component{
-			nvmlInstance: mockNvml,
+			gpuProvider: mockNvml,
 		}
 		result := comp.Check()
 		assert.NotNil(t, result)
 		assert.Equal(t, apiv1.HealthStateTypeHealthy, result.HealthStateType())
-		assert.Contains(t, result.Summary(), "NVIDIA NVML library is not loaded")
+		assert.Contains(t, result.Summary(), "GPU is not detected by DCGM")
 	})
 
 	t.Run("nil readAllKmsg", func(t *testing.T) {
-		mockNvml := new(mockNVMLInstance)
+		mockNvml := new(mockGPUProvider)
 		mockNvml.On("NVMLExists").Return(true)
 		mockNvml.On("ProductName").Return("Test GPU")
-		mockNvml.On("Devices").Return(map[string]device.Device{})
-		mockNvml.On("GetMemoryErrorManagementCapabilities").Return(nvidiaproduct.MemoryErrorManagementCapabilities{})
 
 		comp := &component{
-			nvmlInstance: mockNvml,
-			readAllKmsg:  nil,
+			gpuProvider: mockNvml,
+			readAllKmsg: nil,
 		}
 		result := comp.Check()
 		assert.NotNil(t, result)
@@ -214,20 +163,18 @@ func TestCheck(t *testing.T) {
 	})
 
 	t.Run("readAllKmsg returns error", func(t *testing.T) {
-		mockNvml := new(mockNVMLInstance)
+		mockNvml := new(mockGPUProvider)
 		mockNvml.On("NVMLExists").Return(true)
 		mockNvml.On("ProductName").Return("Test GPU")
-		mockNvml.On("Devices").Return(map[string]device.Device{})
-		mockNvml.On("GetMemoryErrorManagementCapabilities").Return(nvidiaproduct.MemoryErrorManagementCapabilities{})
 
 		mockReadAllKmsg := func(ctx context.Context) ([]kmsg.Message, error) {
 			return nil, assert.AnError
 		}
 
 		comp := &component{
-			ctx:          context.Background(),
-			nvmlInstance: mockNvml,
-			readAllKmsg:  mockReadAllKmsg,
+			ctx:         context.Background(),
+			gpuProvider: mockNvml,
+			readAllKmsg: mockReadAllKmsg,
 		}
 		result := comp.Check()
 		assert.NotNil(t, result)
@@ -236,11 +183,9 @@ func TestCheck(t *testing.T) {
 	})
 
 	t.Run("no matching messages", func(t *testing.T) {
-		mockNvml := new(mockNVMLInstance)
+		mockNvml := new(mockGPUProvider)
 		mockNvml.On("NVMLExists").Return(true)
 		mockNvml.On("ProductName").Return("Test GPU")
-		mockNvml.On("Devices").Return(map[string]device.Device{})
-		mockNvml.On("GetMemoryErrorManagementCapabilities").Return(nvidiaproduct.MemoryErrorManagementCapabilities{})
 
 		mockReadAllKmsg := func(ctx context.Context) ([]kmsg.Message, error) {
 			return []kmsg.Message{
@@ -251,9 +196,9 @@ func TestCheck(t *testing.T) {
 		}
 
 		comp := &component{
-			ctx:          context.Background(),
-			nvmlInstance: mockNvml,
-			readAllKmsg:  mockReadAllKmsg,
+			ctx:         context.Background(),
+			gpuProvider: mockNvml,
+			readAllKmsg: mockReadAllKmsg,
 		}
 		result := comp.Check()
 		assert.NotNil(t, result)
@@ -262,11 +207,9 @@ func TestCheck(t *testing.T) {
 	})
 
 	t.Run("with matching messages", func(t *testing.T) {
-		mockNvml := new(mockNVMLInstance)
+		mockNvml := new(mockGPUProvider)
 		mockNvml.On("NVMLExists").Return(true)
 		mockNvml.On("ProductName").Return("Test GPU")
-		mockNvml.On("Devices").Return(map[string]device.Device{})
-		mockNvml.On("GetMemoryErrorManagementCapabilities").Return(nvidiaproduct.MemoryErrorManagementCapabilities{})
 
 		mockReadAllKmsg := func(ctx context.Context) ([]kmsg.Message, error) {
 			return []kmsg.Message{
@@ -280,9 +223,9 @@ func TestCheck(t *testing.T) {
 		}
 
 		comp := &component{
-			ctx:          context.Background(),
-			nvmlInstance: mockNvml,
-			readAllKmsg:  mockReadAllKmsg,
+			ctx:         context.Background(),
+			gpuProvider: mockNvml,
+			readAllKmsg: mockReadAllKmsg,
 		}
 		result := comp.Check()
 		assert.NotNil(t, result)
@@ -558,32 +501,32 @@ func TestCheckResult_HealthStates(t *testing.T) {
 func TestCheck_NVML_NotExists(t *testing.T) {
 	t.Parallel()
 
-	mockNvml := new(mockNVMLInstance)
+	mockNvml := new(mockGPUProvider)
 	mockNvml.On("NVMLExists").Return(false)
 
 	comp := &component{
-		nvmlInstance: mockNvml,
+		gpuProvider: mockNvml,
 	}
 	result := comp.Check()
 	assert.NotNil(t, result)
 	assert.Equal(t, apiv1.HealthStateTypeHealthy, result.HealthStateType())
-	assert.Contains(t, result.Summary(), "NVIDIA NVML library is not loaded")
+	assert.Contains(t, result.Summary(), "GPU is not detected by DCGM")
 }
 
 func TestCheck_NVML_NoProductName(t *testing.T) {
 	t.Parallel()
 
-	mockNvml := new(mockNVMLInstance)
+	mockNvml := new(mockGPUProvider)
 	mockNvml.On("NVMLExists").Return(true)
 	mockNvml.On("ProductName").Return("")
 
 	comp := &component{
-		nvmlInstance: mockNvml,
+		gpuProvider: mockNvml,
 	}
 	result := comp.Check()
 	assert.NotNil(t, result)
 	assert.Equal(t, apiv1.HealthStateTypeHealthy, result.HealthStateType())
-	assert.Contains(t, result.Summary(), "NVIDIA NVML is loaded but GPU is not detected")
+	assert.Contains(t, result.Summary(), "GPU is not detected by DCGM")
 }
 
 func TestNew(t *testing.T) {
@@ -591,9 +534,8 @@ func TestNew(t *testing.T) {
 
 	t.Run("nil event store", func(t *testing.T) {
 		instance := &components.GPUdInstance{
-			RootCtx:      context.Background(),
-			NVMLInstance: nil,
-			EventStore:   nil,
+			RootCtx:    context.Background(),
+			EventStore: nil,
 		}
 		comp, err := New(instance)
 		assert.NoError(t, err)
@@ -617,9 +559,8 @@ func TestNew(t *testing.T) {
 		mockStore.On("Bucket", Name).Return(nil, fmt.Errorf("test bucket error"))
 
 		instance := &components.GPUdInstance{
-			RootCtx:      context.Background(),
-			NVMLInstance: nil,
-			EventStore:   mockStore,
+			RootCtx:    context.Background(),
+			EventStore: mockStore,
 		}
 
 		// Call New - should return an error
@@ -646,9 +587,8 @@ func TestNew(t *testing.T) {
 		mockBucket.On("Close").Maybe().Return()
 
 		instance := &components.GPUdInstance{
-			RootCtx:      context.Background(),
-			NVMLInstance: nil,
-			EventStore:   mockStore,
+			RootCtx:    context.Background(),
+			EventStore: mockStore,
 		}
 
 		// This may create a kmsg.Syncer depending on runtime conditions
@@ -724,38 +664,38 @@ func TestTags(t *testing.T) {
 func TestIsSupported(t *testing.T) {
 	t.Parallel()
 
-	// Test when nvmlInstance is nil
+	// Test when gpuProvider is nil
 	comp := &component{
-		nvmlInstance: nil,
+		gpuProvider: nil,
 	}
 	assert.False(t, comp.IsSupported())
 
 	// Test when NVMLExists returns false
-	mockNvml := new(mockNVMLInstance)
+	mockNvml := new(mockGPUProvider)
 	mockNvml.On("NVMLExists").Return(false)
 
 	comp = &component{
-		nvmlInstance: mockNvml,
+		gpuProvider: mockNvml,
 	}
 	assert.False(t, comp.IsSupported())
 
 	// Test when ProductName returns empty string
-	mockNvml = new(mockNVMLInstance)
+	mockNvml = new(mockGPUProvider)
 	mockNvml.On("NVMLExists").Return(true)
 	mockNvml.On("ProductName").Return("")
 
 	comp = &component{
-		nvmlInstance: mockNvml,
+		gpuProvider: mockNvml,
 	}
 	assert.False(t, comp.IsSupported())
 
 	// Test when all conditions are met
-	mockNvml = new(mockNVMLInstance)
+	mockNvml = new(mockGPUProvider)
 	mockNvml.On("NVMLExists").Return(true)
 	mockNvml.On("ProductName").Return("Tesla V100")
 
 	comp = &component{
-		nvmlInstance: mockNvml,
+		gpuProvider: mockNvml,
 	}
 	assert.True(t, comp.IsSupported())
 }

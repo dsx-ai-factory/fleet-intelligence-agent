@@ -94,3 +94,16 @@ func TestIsUnhealthyAPIError(t *testing.T) {
 		})
 	}
 }
+
+func TestRecoveryErrorClassifiers(t *testing.T) {
+	gpuLost := fmt.Errorf("field failed with error code %d", dcgm.DCGM_ST_GPU_IS_LOST)
+	resetRequired := fmt.Errorf("field failed with error code %d", dcgm.DCGM_ST_RESET_REQUIRED)
+	other := fmt.Errorf("field failed with error code %d", dcgm.DCGM_ST_TIMEOUT)
+
+	if !IsGPULostError(gpuLost) || IsGPULostError(resetRequired) || IsGPULostError(other) {
+		t.Fatal("IsGPULostError did not distinguish GPU-lost status")
+	}
+	if !IsResetRequiredError(resetRequired) || IsResetRequiredError(gpuLost) || IsResetRequiredError(other) {
+		t.Fatal("IsResetRequiredError did not distinguish reset-required status")
+	}
+}

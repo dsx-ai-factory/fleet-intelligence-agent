@@ -55,7 +55,7 @@ The underlying `go-dcgm.GetDeviceInfo` already returns model, brand, serial, VBI
 
 2. **Architecture:** DCGM has compute capability but no architecture-name field. The migration derives the existing lowercase architecture values from compute capability, including Ampere, Ada, Hopper, Blackwell, and Rubin. The mapping must be extended and tested as new GPU architectures appear.
 
-3. **Persistence error detail:** Enabled, disabled, and unsupported states are preservable. DCGM field status may not distinguish `GPU_IS_LOST` from `GPU_REQUIRES_RESET` as precisely as the current NVML call, so the exact reboot recommendation may need correlation with DCGM health or XID data.
+3. **Persistence error detail:** Enabled, disabled, and unsupported states are preserved. The legacy NVML implementation queried persistence mode per GPU and translated `GPU_IS_LOST` and `GPU_REQUIRES_RESET` into persistence-specific reboot advice. The shared DCGM cache polls all registered fields together and currently exposes one aggregate polling error, so attributing that device-wide failure and repair action specifically to persistence mode would be misleading. Persistence mode now follows the other DCGM field components: unhealthy DCGM errors remain visible, but no persistence-specific reboot action is attached.
 
 4. **Library check:** The `library` component continues checking `libcuda.so` on GPU hosts but intentionally no longer requires `libnvidia-ml.so`; otherwise the agent would still treat NVML as a required runtime surface.
 

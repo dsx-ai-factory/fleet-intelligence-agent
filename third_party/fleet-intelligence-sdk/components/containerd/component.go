@@ -22,7 +22,6 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/components"
 	componentkubelet "github.com/NVIDIA/fleet-intelligence-sdk/components/kubelet"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/systemd"
 )
 
@@ -49,7 +48,7 @@ type component struct {
 
 	healthCheckInterval time.Duration
 
-	nvmlInstance nvidianvml.Instance
+	gpuProvider components.GPUDeviceProvider
 
 	getTimeNowFunc                    func() time.Time
 	containerToolkitCreationThreshold time.Duration
@@ -84,7 +83,7 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 
 		healthCheckInterval: healthCheckInterval,
 
-		nvmlInstance: gpudInstance.NVMLInstance,
+		gpuProvider: gpudInstance,
 
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
@@ -331,9 +330,8 @@ func (c *component) Check() components.CheckResult {
 	}
 	log.Logger.Debugw(cr.reason, "count", len(cr.Pods))
 
-	if c.nvmlInstance != nil &&
-		c.nvmlInstance.NVMLExists() &&
-		c.nvmlInstance.ProductName() != "" &&
+	if c.gpuProvider != nil &&
+		len(c.gpuProvider.GPUDevices()) > 0 &&
 		len(cr.Pods) > 0 &&
 		c.getContainerdConfigFunc != nil {
 

@@ -4,11 +4,12 @@
 package persistencemode
 
 import (
+	"errors"
 	"fmt"
 
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/device"
-	nvmlerrors "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/errors"
-	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
+
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 )
 
 // PersistenceMode is the persistence mode of the device.
@@ -34,30 +35,51 @@ type PersistenceMode struct {
 	Supported bool `json:"supported"`
 }
 
-func GetPersistenceMode(uuid string, dev device.Device) (PersistenceMode, error) {
-	mode := PersistenceMode{
-		UUID:      uuid,
-		BusID:     dev.PCIBusID(),
-		Supported: true,
+func getPersistenceModesFromDCGM(devices []nvidiadcgm.DeviceInfo, fieldCache *nvidiadcgm.FieldValueCache) ([]PersistenceMode, error) {
+	if fieldCache == nil {
+		return nil, errors.New("DCGM field cache is not configured")
+	}
+	// Unlike metric components, persistence mode historically attached recovery
+	// guidance to per-device GPU-lost/reset-required query failures. Retain the
+	// DCGM field statuses so we can preserve that behavior without reading their
+	// potentially sentinel-valued payloads.
+	results, err := fieldCache.GetResultPreservingFieldErrors([]dcgm.Short{dcgm.DCGM_FI_DEV_PERSISTENCE_MODE})
+	if err != nil {
+		return nil, err
+	}
+	return persistenceModesFromFieldValues(devices, results)
+}
+
+func persistenceModesFromFieldValues(devices []nvidiadcgm.DeviceInfo, results []nvidiadcgm.DeviceFieldValues) ([]PersistenceMode, error) {
+	valuesByDevice := make(map[uint]dcgm.FieldValue_v1, len(results))
+	for _, result := range results {
+		for _, value := range result.Values {
+			if value.FieldID == dcgm.DCGM_FI_DEV_PERSISTENCE_MODE {
+				valuesByDevice[result.DeviceID] = value
+			}
+		}
 	}
 
-	// ref. https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceQueries.html#group__nvmlDeviceQueries_1g1224ad7b15d7407bebfff034ec094c6b
-	pm, ret := dev.GetPersistenceMode()
-	if nvmlerrors.IsNotSupportError(ret) {
-		mode.Supported = false
-		return mode, nil
+	modes := make([]PersistenceMode, 0, len(devices))
+	for _, device := range devices {
+		mode := PersistenceMode{UUID: device.UUID, BusID: device.BusID}
+		value, ok := valuesByDevice[device.ID]
+		if !ok {
+			return nil, fmt.Errorf("DCGM persistence-mode field missing for device %d (%s)", device.ID, device.UUID)
+		}
+		switch value.Status {
+		case dcgm.DCGM_ST_OK:
+			mode.Supported = true
+			mode.Enabled = value.Int64() != 0
+		case dcgm.DCGM_ST_NOT_SUPPORTED:
+			// The query succeeded, but this GPU does not support persistence mode.
+		default:
+			// Include the numeric code because the pinned go-dcgm API does not
+			// expose a constructor for its typed error. The shared DCGM error
+			// classifier supports this representation.
+			return nil, fmt.Errorf("DCGM persistence-mode field failed for device %d (%s): error code %d", device.ID, device.UUID, value.Status)
+		}
+		modes = append(modes, mode)
 	}
-	if nvmlerrors.IsGPULostError(ret) {
-		return mode, nvmlerrors.ErrGPULost
-	}
-	if nvmlerrors.IsGPURequiresReset(ret) {
-		return mode, nvmlerrors.ErrGPURequiresReset
-	}
-	// not a "not supported" error, not a success return, thus return an error here
-	if ret != nvml.SUCCESS {
-		return mode, fmt.Errorf("failed to get device persistence mode: %v", nvml.ErrorString(ret))
-	}
-	mode.Enabled = pm == nvml.FEATURE_ENABLED
-
-	return mode, nil
+	return modes, nil
 }

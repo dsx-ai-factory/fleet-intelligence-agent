@@ -20,7 +20,6 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/eventstore"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/kmsg"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 )
 
 const Name = "accelerator-nvidia-nccl"
@@ -31,7 +30,7 @@ type component struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	nvmlInstance nvidianvml.Instance
+	gpuProvider components.GPUDeviceProvider
 
 	eventBucket eventstore.Bucket
 	kmsgSyncer  *kmsg.Syncer
@@ -45,9 +44,9 @@ type component struct {
 func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 	cctx, ccancel := context.WithCancel(gpudInstance.RootCtx)
 	c := &component{
-		ctx:          cctx,
-		cancel:       ccancel,
-		nvmlInstance: gpudInstance.NVMLInstance,
+		ctx:         cctx,
+		cancel:      ccancel,
+		gpuProvider: gpudInstance,
 	}
 
 	if gpudInstance.EventStore != nil {
@@ -115,10 +114,10 @@ func (c *component) Tags() []string {
 }
 
 func (c *component) IsSupported() bool {
-	if c.nvmlInstance == nil {
+	if c.gpuProvider == nil {
 		return false
 	}
-	return c.nvmlInstance.NVMLExists() && c.nvmlInstance.ProductName() != ""
+	return len(c.gpuProvider.GPUDevices()) > 0
 }
 
 func (c *component) Start() error {
@@ -174,19 +173,9 @@ func (c *component) Check() components.CheckResult {
 		c.lastMu.Unlock()
 	}()
 
-	if c.nvmlInstance == nil {
+	if c.gpuProvider == nil || len(c.gpuProvider.GPUDevices()) == 0 {
 		cr.health = apiv1.HealthStateTypeHealthy
-		cr.reason = "NVIDIA NVML instance is nil"
-		return cr
-	}
-	if !c.nvmlInstance.NVMLExists() {
-		cr.health = apiv1.HealthStateTypeHealthy
-		cr.reason = "NVIDIA NVML library is not loaded"
-		return cr
-	}
-	if c.nvmlInstance.ProductName() == "" {
-		cr.health = apiv1.HealthStateTypeHealthy
-		cr.reason = "NVIDIA NVML is loaded but GPU is not detected (missing product name)"
+		cr.reason = "GPU is not detected by DCGM"
 		return cr
 	}
 

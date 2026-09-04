@@ -30,8 +30,8 @@ import (
 	pkghost "github.com/NVIDIA/fleet-intelligence-sdk/pkg/host"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/kmsg"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml/device"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
+	nvidiaproduct "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/product"
 )
 
 // Name is the name of the XID component.
@@ -54,8 +54,7 @@ type component struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	nvmlInstance nvidianvml.Instance
-	devices      map[string]device.Device
+	gpuProvider components.GPUDeviceProvider
 
 	getTimeNowFunc   func() time.Time
 	getThresholdFunc func() RebootThreshold
@@ -77,9 +76,9 @@ type component struct {
 func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 	cctx, ccancel := context.WithCancel(gpudInstance.RootCtx)
 	c := &component{
-		ctx:          cctx,
-		cancel:       ccancel,
-		nvmlInstance: gpudInstance.NVMLInstance,
+		ctx:         cctx,
+		cancel:      ccancel,
+		gpuProvider: gpudInstance,
 
 		getTimeNowFunc: func() time.Time {
 			return time.Now().UTC()
@@ -88,10 +87,6 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 
 		rebootEventStore: gpudInstance.RebootEventStore,
 		extraEventCh:     make(chan *eventstore.Event, 256),
-	}
-
-	if gpudInstance.NVMLInstance != nil {
-		c.devices = gpudInstance.NVMLInstance.Devices()
 	}
 
 	if gpudInstance.EventStore != nil {
@@ -130,10 +125,10 @@ func (c *component) Tags() []string {
 }
 
 func (c *component) IsSupported() bool {
-	if c.nvmlInstance == nil {
+	if c.gpuProvider == nil {
 		return false
 	}
-	return c.nvmlInstance.NVMLExists() && c.nvmlInstance.ProductName() != ""
+	return len(c.gpuProvider.GPUDevices()) > 0
 }
 
 func (c *component) Start() error {
@@ -185,7 +180,7 @@ func (c *component) Events(ctx context.Context, since time.Time) (apiv1.Events, 
 
 	var ret apiv1.Events
 	for _, event := range events {
-		ev := resolveXIDEvent(event, c.devices)
+		ev := resolveXIDEvent(event, c.currentDevices())
 		ret = append(ret, ev.ToEvent())
 	}
 	return ret, nil
@@ -223,19 +218,10 @@ func (c *component) Check() components.CheckResult {
 		c.lastMu.Unlock()
 	}()
 
-	if c.nvmlInstance == nil {
+	devices := c.currentDevices()
+	if len(devices) == 0 {
 		cr.health = apiv1.HealthStateTypeHealthy
-		cr.reason = "NVIDIA NVML instance is nil"
-		return cr
-	}
-	if !c.nvmlInstance.NVMLExists() {
-		cr.health = apiv1.HealthStateTypeHealthy
-		cr.reason = "NVIDIA NVML library is not loaded"
-		return cr
-	}
-	if c.nvmlInstance.ProductName() == "" {
-		cr.health = apiv1.HealthStateTypeHealthy
-		cr.reason = "NVIDIA NVML is loaded but GPU is not detected (missing product name)"
+		cr.reason = "GPU is not detected by DCGM"
 		return cr
 	}
 
@@ -263,7 +249,7 @@ func (c *component) Check() components.CheckResult {
 		}
 
 		// row remapping pending/failure (Xid 63/64)
-		// can also be detected by NVML API (vs. kmsg scanning)
+		// can also be detected by DCGM telemetry (vs. kmsg scanning)
 		// thus we discard Xid 63/64 in favor of row remapping checks
 		// especially, NVIDIA row remapping pending can happen >3 times
 		// which warrants system reboots, before reaching its row remapping
@@ -272,7 +258,7 @@ func (c *component) Check() components.CheckResult {
 		// from Xid 63/64, while row remmaping pending may self-resolve
 		// after >3 times of system reboots
 		// this is why we here discard Xid 63/64 in favor of row remapping checks
-		if c.nvmlInstance.GetMemoryErrorManagementCapabilities().RowRemapping && (xidErr.Xid == 63 || xidErr.Xid == 64) {
+		if shouldDiscardRowRemappingXID(xidErr, devices) {
 			log.Logger.Warnw("discarding Xid 63/64 in favor of remapped-rows component", "xid", xidErr.Xid, "deviceUUID", xidErr.DeviceUUID)
 			continue
 		}
@@ -453,9 +439,10 @@ func (c *component) start(kmsgCh <-chan kmsg.Message, updatePeriod time.Duration
 				log.Logger.Debugw("not xid event, skip", "kmsg", message)
 				continue
 			}
+			devices := c.currentDevices()
 
 			// row remapping pending/failure (Xid 63/64)
-			// can also be detected by NVML API (vs. kmsg scanning)
+			// can also be detected by DCGM telemetry (vs. kmsg scanning)
 			// thus we discard Xid 63/64 in favor of row remapping checks
 			// especially, NVIDIA row remapping pending can happen >3 times
 			// which warrants system reboots, before reaching its row remapping
@@ -464,7 +451,7 @@ func (c *component) start(kmsgCh <-chan kmsg.Message, updatePeriod time.Duration
 			// from Xid 63/64, while row remmaping pending may self-resolve
 			// after >3 times of system reboots
 			// this is why we here discard Xid 63/64 in favor of row remapping checks
-			if c.nvmlInstance.GetMemoryErrorManagementCapabilities().RowRemapping && (xidErr.Xid == 63 || xidErr.Xid == 64) {
+			if shouldDiscardRowRemappingXID(xidErr, devices) {
 				log.Logger.Warnw("discarding Xid 63/64 in favor of remapped-rows component", "xid", xidErr.Xid, "deviceUUID", xidErr.DeviceUUID)
 				continue
 			}
@@ -551,7 +538,7 @@ func (c *component) start(kmsgCh <-chan kmsg.Message, updatePeriod time.Duration
 			}
 			logger.Infow("inserted the event successfully")
 			metricXIDErrs.With(prometheus.Labels{
-				"uuid": convertBusIDToUUID(xidErr.DeviceUUID, c.devices),
+				"uuid": convertBusIDToUUID(xidErr.DeviceUUID, devices),
 				"xid":  strconv.Itoa(xidErr.Xid),
 			}).Inc()
 			if err = c.updateCurrentState(); err != nil {
@@ -585,13 +572,40 @@ func (c *component) updateCurrentState() error {
 	events := mergeEvents(rebootEvents, localEvents)
 
 	c.mu.Lock()
-	c.currState = evolveHealthyState(events, c.devices, rebootThreshold.Threshold)
+	c.currState = evolveHealthyState(events, c.currentDevices(), rebootThreshold.Threshold)
 	if rebootErr != "" {
 		c.currState.Error = fmt.Sprintf("%s\n%s", rebootErr, c.currState.Error)
 	}
 	c.mu.Unlock()
 
 	return nil
+}
+
+func (c *component) currentDevices() map[string]nvidiadcgm.DeviceInfo {
+	if c == nil || c.gpuProvider == nil {
+		return map[string]nvidiadcgm.DeviceInfo{}
+	}
+	gpuDevices := c.gpuProvider.GPUDevices()
+	devices := make(map[string]nvidiadcgm.DeviceInfo, len(gpuDevices))
+	for _, device := range gpuDevices {
+		devices[device.UUID] = device
+	}
+	return devices
+}
+
+func shouldDiscardRowRemappingXID(xidErr *XidError, devices map[string]nvidiadcgm.DeviceInfo) bool {
+	if xidErr == nil || (xidErr.Xid != 63 && xidErr.Xid != 64) {
+		return false
+	}
+
+	_, device, ok := deviceByBusID(xidErr.DeviceUUID, devices)
+	if !ok {
+		// Keep the XID when its GPU cannot be identified. Discarding it would
+		// risk hiding a fault that the remapped-rows component cannot report.
+		return false
+	}
+
+	return nvidiaproduct.SupportedMemoryMgmtCapsByGPUProduct(device.Model).RowRemapping
 }
 
 // mergeEvents merges two event slices and returns a time descending sorted new slice
