@@ -16,7 +16,6 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/eventstore"
 	pkghost "github.com/NVIDIA/fleet-intelligence-sdk/pkg/host"
 	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 )
 
 var (
@@ -39,7 +38,6 @@ type GPUdInstance struct {
 	DCGMHealthCache      *nvidiadcgm.HealthCache     // Shared cache for DCGM health check results
 	DCGMFieldValueCache  *nvidiadcgm.FieldValueCache // Shared cache for DCGM field values (GPU devices only)
 	DCGMGroupNames       DCGMGroupNames
-	NVMLInstance         nvidianvml.Instance
 	NVIDIAToolOverwrites nvidiacommon.ToolOverwrites
 
 	DBRW *sql.DB
