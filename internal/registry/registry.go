@@ -32,7 +32,6 @@ import (
 	componentsdcgmutilization "github.com/NVIDIA/fleet-intelligence-sdk/components/accelerator/nvidia/dcgm/utilization"
 	componentsinfiniband "github.com/NVIDIA/fleet-intelligence-sdk/components/accelerator/nvidia/infiniband"
 	componentsnccl "github.com/NVIDIA/fleet-intelligence-sdk/components/accelerator/nvidia/nccl"
-	componentsnvml "github.com/NVIDIA/fleet-intelligence-sdk/components/accelerator/nvidia/nvml"
 	componentspeermem "github.com/NVIDIA/fleet-intelligence-sdk/components/accelerator/nvidia/peermem"
 	componentspersistencemode "github.com/NVIDIA/fleet-intelligence-sdk/components/accelerator/nvidia/persistence-mode"
 	componentssxid "github.com/NVIDIA/fleet-intelligence-sdk/components/accelerator/nvidia/sxid"
@@ -75,11 +74,6 @@ func All() []Component {
 		{
 			Name:             componentspersistencemode.Name,
 			InitFunc:         componentspersistencemode.New,
-			EnabledByDefault: true,
-		},
-		{
-			Name:             componentsnvml.Name,
-			InitFunc:         componentsnvml.New,
 			EnabledByDefault: true,
 		},
 		{

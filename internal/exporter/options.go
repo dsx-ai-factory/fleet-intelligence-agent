@@ -24,7 +24,7 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/components"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/eventstore"
 	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
 )
@@ -41,13 +41,12 @@ type exporterOptions struct {
 	metricsStore       pkgmetrics.Store
 	eventStore         eventstore.Store
 	componentsRegistry components.Registry
-	nvmlInstance       nvidianvml.Instance
+	dcgmInstance       nvidiadcgm.Instance
 	httpClient         *http.Client
 	timeout            time.Duration
-	dbRW               *sql.DB           // Read-write database connection
-	dbRO               *sql.DB           // Read-only database connection
-	machineID          string            // Agent's stable identity from server initialization
-	dcgmGPUIndexes     map[string]string // UUID → DCGM device ID for GPU index override
+	dbRW               *sql.DB // Read-write database connection
+	dbRO               *sql.DB // Read-only database connection
+	machineID          string  // Agent's stable identity from server initialization
 }
 
 // WithConfig sets the health exporter configuration
@@ -86,10 +85,10 @@ func WithComponentsRegistry(registry components.Registry) ExporterOption {
 	}
 }
 
-// WithNVMLInstance sets the NVML instance used for cached machine-info collection.
-func WithNVMLInstance(instance nvidianvml.Instance) ExporterOption {
+// WithDCGM sets the DCGM inventory used for machine identity and inventory.
+func WithDCGM(instance nvidiadcgm.Instance) ExporterOption {
 	return func(c *exporterOptions) error {
-		c.nvmlInstance = instance
+		c.dcgmInstance = instance
 		return nil
 	}
 }
@@ -139,15 +138,6 @@ func WithMachineID(machineID string) ExporterOption {
 			return errors.New("machine ID cannot be empty")
 		}
 		c.machineID = machineID
-		return nil
-	}
-}
-
-// WithDCGMGPUIndexes sets the UUID→DCGM-device-ID mapping so that
-// MachineInfo GPU indices match the "gpu" label emitted by DCGM metrics.
-func WithDCGMGPUIndexes(m map[string]string) ExporterOption {
-	return func(c *exporterOptions) error {
-		c.dcgmGPUIndexes = m
 		return nil
 	}
 }

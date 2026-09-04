@@ -27,7 +27,7 @@ import (
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
 	pkgmachineinfo "github.com/NVIDIA/fleet-intelligence-sdk/pkg/machine-info"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 	nvidiapci "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/pci"
 
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/dcgmversion"
@@ -39,14 +39,12 @@ const minimumDCGMVersion = "4.2.3"
 const minimumDriverMajorVersion = 510
 
 var (
-	newNVML           = nvidianvml.New
-	getMachineGPUInfo = pkgmachineinfo.GetMachineGPUInfo
-	lookPath          = exec.LookPath
-	detectDCGMVersion = dcgmversion.DetectHostengineVersion
-	listPCIGPUs       = nvidiapci.ListPCIGPUs
+	collectGPUInventory = collectDCGMGPUInventory
+	getMachineGPUInfo   = pkgmachineinfo.GetMachineGPUInfo
+	lookPath            = exec.LookPath
+	detectDCGMVersion   = dcgmversion.DetectHostengineVersion
+	listPCIGPUs         = nvidiapci.ListPCIGPUs
 )
-
-type nvmlInstance = nvidianvml.Instance
 
 type Input struct {
 	GPUHardwarePresent bool
@@ -106,19 +104,13 @@ func Run() (Result, error) {
 func CollectInput() (Input, error) {
 	input := Input{}
 
-	nvmlInstance, err := newNVML()
-	if err == nil {
-		defer func() { _ = nvmlInstance.Shutdown() }()
-
-		input.GPUDriverVersion = nvmlInstance.DriverVersion()
-
-		gpuInfo, gpuInfoErr := getMachineGPUInfo(nvmlInstance)
-		if gpuInfoErr == nil {
-			input.GPUInfo = gpuInfo
-			input.GPUHardwarePresent = hasDetectedGPUInfo(gpuInfo)
-		} else {
-			input.GPUInfoErr = gpuInfoErr
-		}
+	gpuInfo, driverVersion, gpuInfoErr := collectGPUInventory()
+	if gpuInfoErr == nil {
+		input.GPUInfo = gpuInfo
+		input.GPUDriverVersion = driverVersion
+		input.GPUHardwarePresent = hasDetectedGPUInfo(gpuInfo)
+	} else {
+		input.GPUInfoErr = gpuInfoErr
 	}
 
 	if !input.GPUHardwarePresent {
@@ -133,6 +125,17 @@ func CollectInput() (Input, error) {
 	input.DCGMVersion = dcgmVersion
 
 	return input, nil
+}
+
+func collectDCGMGPUInventory() (*apiv1.MachineGPUInfo, string, error) {
+	dcgmCtx, dcgmCancel := context.WithTimeout(context.Background(), time.Minute)
+	defer dcgmCancel()
+	devices, err := nvidiadcgm.CollectDeviceInventoryWithContext(dcgmCtx)
+	if err != nil {
+		return nil, "", err
+	}
+	gpuInfo, driverVersion, _, err := getMachineGPUInfo(devices)
+	return gpuInfo, driverVersion, err
 }
 
 func Evaluate(input *Input) Result {
@@ -266,7 +269,7 @@ func evaluateDriver(input *Input) Check {
 		}
 	}
 
-	driverMajor, _, _, err := nvidianvml.ParseDriverVersion(input.GPUDriverVersion)
+	driverMajor, _, _, err := parseDriverVersion(input.GPUDriverVersion)
 	if err != nil {
 		return Check{
 			Name:    "gpu-driver",
@@ -286,6 +289,31 @@ func evaluateDriver(input *Input) Check {
 		Passed:  true,
 		Message: "NVIDIA driver detected: " + input.GPUDriverVersion,
 	}
+}
+
+func parseDriverVersion(version string) (major, minor, patch int, err error) {
+	parts := strings.Split(version, ".")
+	if len(parts) < 2 {
+		return 0, 0, 0, fmt.Errorf("failed to parse driver version (expected at least 2 parts): %s", version)
+	}
+	if len(parts) > 3 {
+		return 0, 0, 0, fmt.Errorf("failed to parse driver version (expected at most 3 parts): %s", version)
+	}
+	major, err = strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to parse driver version (major): %w", err)
+	}
+	minor, err = strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to parse driver version (minor): %w", err)
+	}
+	if len(parts) == 3 {
+		patch, err = strconv.Atoi(parts[2])
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("failed to parse driver version (patch): %w", err)
+		}
+	}
+	return major, minor, patch, nil
 }
 
 func gpuHardwareDetected(input *Input) bool {

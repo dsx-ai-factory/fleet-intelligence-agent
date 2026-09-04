@@ -28,7 +28,7 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/eventstore"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 	"github.com/google/uuid"
 
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
@@ -75,22 +75,22 @@ type collector struct {
 	metricsStore        pkgmetrics.Store
 	eventStore          eventstore.Store
 	componentsRegistry  components.Registry
-	machineID           string            // Agent's stable identity from server initialization
-	dcgmGPUIndexes      map[string]string // UUID → DCGM device ID override for GPU indices
+	machineID           string // Agent's stable identity from server initialization
+	dcgmInstance        nvidiadcgm.Instance
 	machineInfoProvider machineInfoProvider
 }
 
 type collectorOptions struct {
-	nvmlInstance nvidianvml.Instance
+	dcgmInstance nvidiadcgm.Instance
 }
 
 // Option configures optional collector dependencies.
 type Option func(*collectorOptions)
 
-// WithNVMLInstance enables cached machine-info collection for health exports.
-func WithNVMLInstance(nvmlInstance nvidianvml.Instance) Option {
+// WithDCGM enables DCGM-backed machine-info collection for health exports.
+func WithDCGM(instance nvidiadcgm.Instance) Option {
 	return func(o *collectorOptions) {
-		o.nvmlInstance = nvmlInstance
+		o.dcgmInstance = instance
 	}
 }
 
@@ -101,22 +101,19 @@ func New(
 	eventStore eventstore.Store,
 	componentsRegistry components.Registry,
 	machineID string,
-	dcgmGPUIndexes map[string]string,
 	opts ...Option,
 ) Collector {
 	var collectorOpts collectorOptions
 	for _, opt := range opts {
-		opt(&collectorOpts)
+		if opt != nil {
+			opt(&collectorOpts)
+		}
 	}
 
 	var provider machineInfoProvider
 	needsIdentity := cfg != nil && (cfg.IncludeMachineInfo || cfg.IncludeMetrics || cfg.IncludeEvents || cfg.IncludeComponentData)
-	if needsIdentity && collectorOpts.nvmlInstance != nil {
-		var machineInfoOpts []machineinfo.MachineInfoOption
-		if len(dcgmGPUIndexes) > 0 {
-			machineInfoOpts = append(machineInfoOpts, machineinfo.WithDCGMGPUIndexes(dcgmGPUIndexes))
-		}
-		provider = newCachedMachineInfoProvider(collectorOpts.nvmlInstance, 0, machineInfoOpts...)
+	if needsIdentity && collectorOpts.dcgmInstance != nil {
+		provider = newCachedMachineInfoProvider(collectorOpts.dcgmInstance, 0)
 		provider.RefreshAsync(context.Background())
 	}
 
@@ -126,7 +123,7 @@ func New(
 		eventStore:          eventStore,
 		componentsRegistry:  componentsRegistry,
 		machineID:           machineID,
-		dcgmGPUIndexes:      dcgmGPUIndexes,
+		dcgmInstance:        collectorOpts.dcgmInstance,
 		machineInfoProvider: provider,
 	}
 }
@@ -142,19 +139,20 @@ func (c *collector) Collect(ctx context.Context) (*HealthData, error) {
 		return nil, fmt.Errorf("machine ID not initialized - collector must be created with a valid machine ID")
 	}
 
+	dcgmGPUIndexes := currentDCGMGPUIndexes(c.dcgmInstance)
 	data := &HealthData{
 		CollectionID:   collectionID,
 		MachineID:      c.machineID,
 		Timestamp:      time.Now().UTC(),
-		GPUUUIDToIndex: cloneStringMap(c.dcgmGPUIndexes),
-		EntityCatalog:  NewEntityCatalog(nil, c.dcgmGPUIndexes),
+		GPUUUIDToIndex: cloneStringMap(dcgmGPUIndexes),
+		EntityCatalog:  NewEntityCatalog(nil, dcgmGPUIndexes),
 	}
 
 	// Identity enrichment uses cached machine info independently of whether the
 	// full machine-info payload is enabled for export.
 	if c.machineInfoProvider != nil {
 		c.collectMachineInfo(ctx, data)
-		data.EntityCatalog = NewEntityCatalog(data.MachineInfo, c.dcgmGPUIndexes)
+		data.EntityCatalog = NewEntityCatalog(data.MachineInfo, dcgmGPUIndexes)
 		if !c.config.IncludeMachineInfo {
 			data.MachineInfo = nil
 		}
@@ -182,6 +180,19 @@ func (c *collector) Collect(ctx context.Context) (*HealthData, error) {
 	}
 
 	return data, nil
+}
+
+func currentDCGMGPUIndexes(instance nvidiadcgm.Instance) map[string]string {
+	indexes := make(map[string]string)
+	if instance == nil {
+		return indexes
+	}
+	for _, device := range instance.GetDevices() {
+		if device.UUID != "" {
+			indexes[device.UUID] = fmt.Sprintf("%d", device.ID)
+		}
+	}
+	return indexes
 }
 
 // collectMachineInfo reads cached machine info and triggers a best-effort refresh.

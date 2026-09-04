@@ -16,13 +16,78 @@
 package dcgm
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
 )
+
+func TestCollectDeviceInventoryWithContext(t *testing.T) {
+	originalInit := dcgmInitFunc
+	originalGetSupportedDevices := getSupportedDevicesForInventory
+	originalGetLatestValues := getLatestInventoryValues
+	t.Cleanup(func() {
+		dcgmInitFunc = originalInit
+		getSupportedDevicesForInventory = originalGetSupportedDevices
+		getLatestInventoryValues = originalGetLatestValues
+	})
+
+	cleanupCalled := false
+	dcgmInitFunc = func(dcgmInitParams) (func(), error) {
+		return func() { cleanupCalled = true }, nil
+	}
+	getSupportedDevicesForInventory = func() ([]uint, error) {
+		return []uint{1}, nil
+	}
+	getLatestInventoryValues = func([]dcgm.GroupEntityPair, []dcgm.Short, uint) ([]dcgm.FieldValue_v2, error) {
+		return []dcgm.FieldValue_v2{stringField(1, dcgm.DCGM_FI_DEV_UUID, "GPU-1")}, nil
+	}
+
+	got, err := CollectDeviceInventoryWithContext(context.Background())
+	if err != nil {
+		t.Fatalf("CollectDeviceInventoryWithContext() error = %v", err)
+	}
+	want := []DeviceInfo{{ID: 1, UUID: "GPU-1", MinorNumber: -1}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("devices = %+v, want %+v", got, want)
+	}
+	if !cleanupCalled {
+		t.Fatal("DCGM cleanup was not called")
+	}
+}
+
+func TestCollectDeviceInventoryWithContextStopsWaitingAtDeadline(t *testing.T) {
+	originalInit := dcgmInitFunc
+	originalGetSupportedDevices := getSupportedDevicesForInventory
+	t.Cleanup(func() {
+		dcgmInitFunc = originalInit
+		getSupportedDevicesForInventory = originalGetSupportedDevices
+	})
+
+	release := make(chan struct{})
+	finished := make(chan struct{})
+	dcgmInitFunc = func(dcgmInitParams) (func(), error) {
+		<-release
+		return func() { close(finished) }, nil
+	}
+	getSupportedDevicesForInventory = func() ([]uint, error) {
+		return nil, nil
+	}
+	t.Cleanup(func() {
+		close(release)
+		<-finished
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := CollectDeviceInventoryWithContext(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("CollectDeviceInventoryWithContext() error = %v, want %v", err, context.DeadlineExceeded)
+	}
+}
 
 func TestQueryDeviceInventoryUsesOneLiveBatch(t *testing.T) {
 	originalGetSupportedDevices := getSupportedDevicesForInventory

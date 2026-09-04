@@ -93,7 +93,7 @@ type GPUDevice struct {
 	CliqueID     *uint32 `json:"cliqueID,omitempty"`
 	SN           string  `json:"sn"`
 	MinorID      string  `json:"minorID"`
-	BoardID      int     `json:"boardID"`
+	BoardID      int     `json:"boardID,omitempty"`
 	VBIOSVersion string  `json:"vbiosVersion"`
 	ChassisSN    string  `json:"chassisSN"`
 	GPUIndex     string  `json:"gpuIndex,omitempty"`

@@ -49,7 +49,6 @@ import (
 	pkgmetricsstore "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics/store"
 	pkgmetricssyncer "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics/syncer"
 	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
@@ -270,11 +269,6 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 		s.faultInjector = nil
 	}
 
-	nvmlInstance, err := nvidianvml.NewWithExitOnSuccessfulLoad(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create NVML instance: %w", err)
-	}
-
 	dcgmGroupNames := components.NewDCGMGroupNames(fmt.Sprintf("daemon-%d", stdos.Getpid()))
 
 	// Initialize DCGM instance
@@ -284,6 +278,9 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DCGM instance: %w", err)
 	}
+	// Make the instance reachable by Stop immediately so failures later in
+	// initialization do not leak DCGM resources.
+	s.gpudInstance = &components.GPUdInstance{DCGMInstance: dcgmInstance}
 
 	// Create event store needed for health exporter
 	log.Logger.Infow("initializing event store", "retention", config.RetentionPeriod.Duration)
@@ -310,11 +307,9 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 
 	dcgmFieldValueCache := nvidiadcgm.NewFieldValueCache(ctx, dcgmInstance, healthCheckInterval)
 	log.Logger.Infow("DCGM field value cache created", "healthCheckInterval", healthCheckInterval)
-
 	s.gpudInstance = &components.GPUdInstance{
 		RootCtx:              ctx,
 		MachineID:            machineID,
-		NVMLInstance:         nvmlInstance,
 		DCGMInstance:         dcgmInstance,
 		DCGMHealthCache:      dcgmHealthCache,
 		DCGMFieldValueCache:  dcgmFieldValueCache,
@@ -383,16 +378,7 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 	promRecorder := pkgmetricsrecorder.NewPrometheusRecorder(ctx, 15*time.Minute, dbRO)
 	promRecorder.Start()
 
-	// Build UUID→DCGM-device-ID map so MachineInfo GPU indices match
-	// the "gpu" label already emitted by DCGM component metrics.
-	dcgmGPUIndexes := make(map[string]string)
-	for _, dev := range dcgmInstance.GetDevices() {
-		if dev.UUID != "" {
-			dcgmGPUIndexes[dev.UUID] = fmt.Sprintf("%d", dev.ID)
-		}
-	}
-
-	s.startInventoryLoop(loopCtx, config, nvmlInstance, dcgmGPUIndexes)
+	s.startInventoryLoop(loopCtx, config, dcgmInstance)
 	s.startAttestationLoop(loopCtx, config)
 
 	// Create and start health exporter with all dependencies if enabled
@@ -404,10 +390,9 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 			exporter.WithMetricsStore(metricsSQLiteStore),
 			exporter.WithEventStore(eventStore),
 			exporter.WithComponentsRegistry(s.componentsRegistry),
-			exporter.WithNVMLInstance(nvmlInstance),
+			exporter.WithDCGM(dcgmInstance),
 			exporter.WithDatabaseConnections(dbRW, dbRO),
 			exporter.WithMachineID(machineID),
-			exporter.WithDCGMGPUIndexes(dcgmGPUIndexes),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create health exporter: %w", err)
@@ -420,7 +405,7 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 	}
 
 	// Start the HTTP server
-	go s.startServer(ctx, nvmlInstance)
+	go s.startServer(ctx)
 
 	return s, nil
 }
@@ -428,8 +413,7 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 func (s *Server) startInventoryLoop(
 	ctx context.Context,
 	cfg *config.Config,
-	nvmlInstance nvidianvml.Instance,
-	dcgmGPUIndexes map[string]string,
+	dcgmInstance nvidiadcgm.Instance,
 ) {
 	interval := getInventorySyncInterval(cfg)
 	if interval <= 0 {
@@ -450,7 +434,7 @@ func (s *Server) startInventoryLoop(
 
 	source := inventorysource.NewMachineInfoSourceWithAgentConfig(
 		inventoryMachineInfoCollectorFunc(func(context.Context) (*machineinfo.MachineInfo, error) {
-			return machineinfo.GetMachineInfo(nvmlInstance, machineinfo.WithDCGMGPUIndexes(dcgmGPUIndexes))
+			return machineinfo.GetMachineInfo(dcgmInstance.GetDevices())
 		}),
 		&inventory.AgentConfig{
 			TotalComponents:             int64(len(allComponents)),
@@ -581,6 +565,12 @@ func (s *Server) Stop() {
 			}
 		}
 
+		if s.gpudInstance != nil && s.gpudInstance.DCGMInstance != nil {
+			if err := s.gpudInstance.DCGMInstance.Shutdown(); err != nil {
+				log.Logger.Warnw("failed to shutdown DCGM instance", "error", err)
+			}
+		}
+
 		if s.dbRW != nil {
 			if cerr := s.dbRW.Close(); cerr != nil {
 				log.Logger.Debugw("failed to close read-write db", "error", cerr)
@@ -619,15 +609,8 @@ func removeStaleSocket(path string) error {
 }
 
 // startServer creates and starts the HTTP server
-func (s *Server) startServer(ctx context.Context, nvmlInstance nvidianvml.Instance) {
-	defer func() {
-		if nvmlInstance != nil {
-			if err := nvmlInstance.Shutdown(); err != nil {
-				log.Logger.Warnw("failed to shutdown NVML instance", "error", err)
-			}
-		}
-		s.Stop()
-	}()
+func (s *Server) startServer(ctx context.Context) {
+	defer s.Stop()
 
 	// Create metrics store for health data
 	metricsSQLiteStore, err := pkgmetricsstore.NewSQLiteStore(ctx, s.dbRW, s.dbRO, pkgmetricsstore.DefaultTableName)

@@ -24,7 +24,7 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	pkgmetadata "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metadata"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/netutil"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 	"github.com/urfave/cli"
 
@@ -74,12 +74,13 @@ func machineInfoCommand(cliContext *cli.Context) error {
 		fmt.Printf("Fleetint machine ID: %q\n\n", machineID)
 	}
 
-	nvmlInstance, err := nvidianvml.New()
+	dcgmCtx, dcgmCancel := context.WithTimeout(context.Background(), time.Minute)
+	defer dcgmCancel()
+	devices, err := nvidiadcgm.CollectDeviceInventoryWithContext(dcgmCtx)
 	if err != nil {
-		return err
+		log.Logger.Warnw("DCGM inventory collection failed; continuing without GPU inventory", "error", err)
 	}
-
-	machineInfo, err := machineinfo.GetMachineInfo(nvmlInstance)
+	machineInfo, err := machineinfo.GetMachineInfo(devices)
 	if err != nil {
 		return err
 	}

@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
 )
@@ -39,8 +39,7 @@ type machineInfoProvider interface {
 }
 
 type cachedMachineInfoProvider struct {
-	nvmlInstance nvidianvml.Instance
-	opts         []machineinfo.MachineInfoOption
+	dcgmInstance nvidiadcgm.Instance
 	staleAfter   time.Duration
 
 	mu                 sync.RWMutex
@@ -53,17 +52,15 @@ type cachedMachineInfoProvider struct {
 }
 
 func newCachedMachineInfoProvider(
-	nvmlInstance nvidianvml.Instance,
+	dcgmInstance nvidiadcgm.Instance,
 	staleAfter time.Duration,
-	opts ...machineinfo.MachineInfoOption,
 ) machineInfoProvider {
 	if staleAfter <= 0 {
 		staleAfter = defaultMachineInfoStaleAfter
 	}
 
 	return &cachedMachineInfoProvider{
-		nvmlInstance:       nvmlInstance,
-		opts:               opts,
+		dcgmInstance:       dcgmInstance,
 		staleAfter:         staleAfter,
 		initialRefreshDone: make(chan struct{}),
 	}
@@ -81,7 +78,7 @@ func (p *cachedMachineInfoProvider) Get() (*machineinfo.MachineInfo, bool) {
 }
 
 func (p *cachedMachineInfoProvider) RefreshAsync(parent context.Context) {
-	if p == nil || p.nvmlInstance == nil {
+	if p == nil || p.dcgmInstance == nil {
 		return
 	}
 
@@ -101,7 +98,7 @@ func (p *cachedMachineInfoProvider) RefreshAsync(parent context.Context) {
 			p.markInitialRefreshDone()
 		}()
 
-		info, err := getMachineInfo(p.nvmlInstance, p.opts...)
+		info, err := getMachineInfo(p.dcgmInstance.GetDevices())
 		if err != nil {
 			log.Logger.Warnw("Machine info refresh failed", "error", err)
 			return

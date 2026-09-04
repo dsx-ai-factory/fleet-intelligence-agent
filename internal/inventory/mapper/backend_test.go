@@ -48,6 +48,22 @@ func TestToNodeUpsertRequestAgentConfigJSONIncludesZeroValues(t *testing.T) {
 	}`, string(data))
 }
 
+func TestToNodeUpsertRequestOmitsUnavailableGPUBoardID(t *testing.T) {
+	req := ToNodeUpsertRequest(&inventory.Snapshot{
+		Resources: inventory.Resources{
+			GPUInfo: inventory.GPUInfo{
+				GPUs: []inventory.GPUDevice{{UUID: "GPU-1"}},
+			},
+		},
+	})
+	require.NotNil(t, req)
+	require.Len(t, req.Resources.GPUInfo.GPUs, 1)
+
+	payload, err := json.Marshal(req.Resources.GPUInfo.GPUs[0])
+	require.NoError(t, err)
+	require.NotContains(t, string(payload), `"boardID"`)
+}
+
 func TestToNodeUpsertRequest(t *testing.T) {
 	bootTime := time.Date(2026, 4, 28, 12, 30, 0, 0, time.FixedZone("PDT", -7*60*60))
 	cliqueID := uint32(0)

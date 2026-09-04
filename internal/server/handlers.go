@@ -239,11 +239,7 @@ func (g *globalHandler) machineInfo(c *gin.Context) {
 		"service":    "fleetint",
 	}
 
-	if g.gpudInstance.NVMLInstance != nil {
-		info["nvidia_available"] = true
-	} else {
-		info["nvidia_available"] = false
-	}
+	info["nvidia_available"] = len(g.gpudInstance.GPUDevices()) > 0
 
 	c.JSON(http.StatusOK, info)
 }

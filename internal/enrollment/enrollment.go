@@ -25,7 +25,7 @@ import (
 
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	pkgmetadata "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metadata"
-	nvidianvml "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/nvml"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
@@ -207,15 +207,14 @@ func syncInventoryOnce(ctx context.Context, cfg *config.Config) error {
 	inventoryEnabled, inventoryIntervalSeconds := cfg.InventoryLoopAgentConfig()
 	attestationEnabled, attestationIntervalSeconds := cfg.AttestationLoopAgentConfig()
 
-	nvmlInstance, err := nvidianvml.New()
+	devices, err := nvidiadcgm.CollectDeviceInventoryWithContext(ctx)
 	if err != nil {
-		return fmt.Errorf("initialize nvml for inventory sync: %w", err)
+		log.Logger.Warnw("DCGM inventory collection failed; continuing without GPU inventory", "error", err)
 	}
-	defer func() { _ = nvmlInstance.Shutdown() }()
 
 	src := inventorysource.NewMachineInfoSourceWithAgentConfig(
 		machineInfoCollectorFunc(func(context.Context) (*machineinfo.MachineInfo, error) {
-			return machineinfo.GetMachineInfo(nvmlInstance)
+			return machineinfo.GetMachineInfo(devices)
 		}),
 		&inventory.AgentConfig{
 			TotalComponents:             int64(len(allComponents)),
