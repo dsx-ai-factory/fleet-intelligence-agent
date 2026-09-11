@@ -19,9 +19,10 @@ package converter
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -286,11 +287,7 @@ func inventoryMetrics(data *collector.HealthData, catalog *collector.EntityCatal
 		))
 	}
 
-	uuids := make([]string, 0, len(catalog.GPUsByUUID))
-	for uuid := range catalog.GPUsByUUID {
-		uuids = append(uuids, uuid)
-	}
-	sort.Strings(uuids)
+	uuids := slices.Sorted(maps.Keys(catalog.GPUsByUUID))
 
 	firmwarePoints := make([]*metricsv1.NumberDataPoint, 0, len(uuids))
 	for _, uuid := range uuids {
@@ -378,11 +375,7 @@ func (c *otlpConverter) convertMetricToOTLP(metric pkgmetrics.Metric, identity i
 // overwriting labels emitted by a component. MIG is intentionally unsupported.
 func (c *otlpConverter) convertLabelsToOTLPAttributes(labels map[string]string, identity identityContext) []*commonv1.KeyValue {
 	enriched := identity.enrichLabels(labels)
-	keys := make([]string, 0, len(enriched))
-	for key := range enriched {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(enriched))
 
 	attributes := make([]*commonv1.KeyValue, 0, len(keys))
 	for _, key := range keys {
@@ -520,10 +513,11 @@ func (c *otlpConverter) convertToOTLPLogs(data *collector.HealthData) []*logsv1.
 		}
 	}
 
-	// Add component data as log records
+	// Add component data as log records, in a stable component order so that an
+	// unchanged fleet does not produce a reordered export on every collection.
 	if len(data.ComponentData) > 0 {
-		for componentName, componentResult := range data.ComponentData {
-			componentInfo, ok := componentResult.(map[string]interface{})
+		for _, componentName := range slices.Sorted(maps.Keys(data.ComponentData)) {
+			componentInfo, ok := data.ComponentData[componentName].(map[string]interface{})
 			if !ok {
 				continue
 			}
@@ -632,11 +626,7 @@ func (c *otlpConverter) convertToOTLPLogs(data *collector.HealthData) []*logsv1.
 }
 
 func labelsToOTLPAttributes(labels map[string]string) []*commonv1.KeyValue {
-	keys := make([]string, 0, len(labels))
-	for key := range labels {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(labels))
 
 	attributes := make([]*commonv1.KeyValue, 0, len(keys))
 	for _, key := range keys {
@@ -647,10 +637,10 @@ func labelsToOTLPAttributes(labels map[string]string) []*commonv1.KeyValue {
 
 func extraInfoToAnyValue(extraInfo map[string]string) *commonv1.AnyValue {
 	values := make([]*commonv1.KeyValue, 0, len(extraInfo))
-	for key, raw := range extraInfo {
+	for _, key := range slices.Sorted(maps.Keys(extraInfo)) {
 		values = append(values, &commonv1.KeyValue{
 			Key:   key,
-			Value: stringToStructuredAnyValue(raw),
+			Value: stringToStructuredAnyValue(extraInfo[key]),
 		})
 	}
 
@@ -716,10 +706,10 @@ func jsonValueToAnyValue(v any) *commonv1.AnyValue {
 	switch value := v.(type) {
 	case map[string]any:
 		values := make([]*commonv1.KeyValue, 0, len(value))
-		for key, nested := range value {
+		for _, key := range slices.Sorted(maps.Keys(value)) {
 			values = append(values, &commonv1.KeyValue{
 				Key:   key,
-				Value: jsonValueToAnyValue(nested),
+				Value: jsonValueToAnyValue(value[key]),
 			})
 		}
 		return &commonv1.AnyValue{

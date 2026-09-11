@@ -239,6 +239,40 @@ To run linting locally:
 make lint
 ```
 
+### Deterministic output
+
+Go randomizes map iteration order on every run. Anything the backend stores, diffs,
+hashes, or shows as history must not carry that randomness, or unchanged machine
+state reads as a stream of changes that never happened. A single component leaking
+map order into `extra_info` produced one alert with 4,824 pages of history entries
+that differed only by GPU ordering.
+
+Iterating a map is fine. The rule applies the moment the result becomes an **ordered
+artifact**:
+
+- a slice built by `append` inside `for k, v := range someMap`
+- a string built with `strings.Join` from such a slice
+- a JSON array — including any struct marshaled into `ExtraInfo["data"]`
+- `HealthState.Reason`, `HealthState.Incidents`, machine-info and inventory device lists
+- OTLP `KeyValueList` and log-record order, Prometheus label order, CSV row order
+
+Sort by a stable key before the value leaves the producer, not at each place it is
+rendered. Canonical keys: GPU → UUID, mount target → target path, component → name.
+A plain `map[string]string` passed to `encoding/json` is already safe, because
+`encoding/json` sorts map keys — the exposure is a *slice* built from map iteration.
+
+`persistenceModesFromFieldValues` in the SDK is the reference implementation: it
+copies the device slice, sorts by UUID → BusID → ID, and only then builds output.
+The export pipeline uses `slices.Sorted(maps.Keys(m))` to walk maps in lexical key
+order, and `internal/inventory/hash.go` has the generic order-insensitive normalizer
+for whole structs.
+
+Any change that adds or reshapes one of these output boundaries needs a test.
+`TestOTLPConversionIsStableAcrossRepeatedConversions` in
+`internal/exporter/converter/ordering_test.go` is the shape to copy: run the same
+input repeatedly and require identical output. Do not write a test that asserts the
+result is *one of* several acceptable orderings — that locks the bug in.
+
 ### General Guidelines
 - Write clear, descriptive commit messages
 - Keep commits focused and atomic

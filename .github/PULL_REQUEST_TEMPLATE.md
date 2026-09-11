@@ -6,4 +6,5 @@
 ## Checklist
 - [ ] I am familiar with the [Contributing Guidelines](https://github.com/dsx-ai-factory/fleet-intelligence-agent/blob/main/CONTRIBUTING.md).
 - [ ] New or existing tests cover these changes.
+- [ ] Output the backend stores or diffs is deterministically ordered (see [Deterministic output](https://github.com/dsx-ai-factory/fleet-intelligence-agent/blob/main/CONTRIBUTING.md#deterministic-output)).
 - [ ] The documentation is up to date with these changes.
