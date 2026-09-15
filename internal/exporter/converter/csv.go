@@ -19,9 +19,11 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -199,9 +201,10 @@ func (c *csvConverter) writeComponentHealthCSV(outputDir, filename string, data 
 		return fmt.Errorf("failed to write CSV header: %w", err)
 	}
 
-	// Write component health data
-	for componentName, componentResult := range data.ComponentData {
-		componentInfo, ok := componentResult.(map[string]any)
+	// Write component health data in a stable component order so that repeated
+	// exports of unchanged state produce byte-identical files.
+	for _, componentName := range slices.Sorted(maps.Keys(data.ComponentData)) {
+		componentInfo, ok := data.ComponentData[componentName].(map[string]any)
 		if !ok {
 			log.Logger.Warnw("Unexpected component data format for CSV export", "component", componentName)
 			continue
