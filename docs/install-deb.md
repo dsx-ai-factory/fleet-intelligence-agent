@@ -6,7 +6,8 @@ Before installing Fleet Intelligence Agent, ensure the following prerequisites a
 
 - Configure an NVIDIA package repository for automatic dependency installation.
   The following dependencies are required and satisfied by the CUDA (network or local) repository.  
-  - `datacenter-gpu-manager-4-proprietary` (DCGM)
+  - `datacenter-gpu-manager-4-core` (DCGM HostEngine)
+  - `datacenter-gpu-manager-4-proprietary` (DCGM proprietary libraries)
   - `nvattest` (NVIDIA Attestation SDK CLI, NVAT)
   - `corelib` (NVAT GPU evidence source dependency)
 - DCGM HostEngine `4.2.3` or newer
@@ -42,7 +43,7 @@ sudo dpkg -i cuda-keyring_1.1-1_all.deb
 sudo apt-get update
 ```
 
-After adding the CUDA repository, package dependencies (`datacenter-gpu-manager-4-proprietary`, `nvattest`, and `corelib`) are resolved automatically by `apt` during Fleet Intelligence Agent installation.
+After adding the CUDA repository, package dependencies (`datacenter-gpu-manager-4-core`, `datacenter-gpu-manager-4-proprietary`, `nvattest`, and `corelib`) are resolved automatically by `apt` during Fleet Intelligence Agent installation.
 
 ## Install package
 
