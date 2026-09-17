@@ -34,7 +34,7 @@ const (
 	maxMappingFileSize = 1 << 20
 	maxJobIDLength     = 256
 	// maxJobIDsPerGPU bounds the number of identity series one mapping file can create.
-	maxJobIDsPerGPU = 64
+	maxJobIDsPerGPU = 16
 )
 
 // GPUIdentifierType selects how mapping filenames identify a GPU.
@@ -57,6 +57,7 @@ type Mapping map[string][]string
 // Reader returns the current scheduler-maintained GPU-to-job mapping.
 type Reader interface {
 	Read() (Mapping, error)
+	GPUIdentifierType() GPUIdentifierType
 }
 
 // FileReader reads the file convention used by dcgm-exporter and FleetInt's
@@ -70,6 +71,11 @@ type FileReader struct {
 // NewFileReader creates a reader for directory.
 func NewFileReader(directory string, gpuIdentifierType GPUIdentifierType) *FileReader {
 	return &FileReader{directory: directory, gpuIdentifierType: gpuIdentifierType}
+}
+
+// GPUIdentifierType returns the identifier used by mapping keys.
+func (r *FileReader) GPUIdentifierType() GPUIdentifierType {
+	return r.gpuIdentifierType
 }
 
 // Read reads a consistent-enough snapshot of the mapping directory. Mapping

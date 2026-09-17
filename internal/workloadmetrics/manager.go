@@ -78,11 +78,12 @@ func startWithRegisterer(
 		return m, nil
 	}
 	gpuIdentifier := workloadConfig.HPC.HPCGPUIdentifier()
+	gpuIdentifierType := hpcjob.GPUIdentifierType(gpuIdentifier)
 
 	collector := hpcjob.NewCollector(
 		hpcjob.NewFileReader(
 			workloadConfig.HPC.JobMappingDir,
-			hpcjob.GPUIdentifierType(gpuIdentifier),
+			gpuIdentifierType,
 		),
 		gpuUUIDByIndexProvider,
 	)
