@@ -21,38 +21,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestResolveInitParams(t *testing.T) {
-	originalGetenv := getenv
-	t.Cleanup(func() {
-		getenv = originalGetenv
-	})
-
-	t.Run("defaults", func(t *testing.T) {
-		getenv = func(string) string { return "" }
-
-		params := resolveInitParams()
-		assert.Equal(t, "localhost", params.address)
-		assert.Equal(t, "0", params.isUnixSocket)
-	})
-
-	t.Run("respects env", func(t *testing.T) {
-		getenv = func(key string) string {
-			switch key {
-			case "DCGM_URL":
-				return "nvidia-dcgm.gpu-operator.svc:5555"
-			case "DCGM_URL_IS_UNIX_SOCKET":
-				return "true"
-			default:
-				return ""
-			}
-		}
-
-		params := resolveInitParams()
-		assert.Equal(t, "nvidia-dcgm.gpu-operator.svc:5555", params.address)
-		assert.Equal(t, "1", params.isUnixSocket)
-	})
-}
-
 func TestExtractVersion(t *testing.T) {
 	t.Run("extracts version", func(t *testing.T) {
 		assert.Equal(t, "4.2.3", extractVersion("arch:x86_64;version: 4.2.3;build:123"))

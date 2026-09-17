@@ -24,6 +24,8 @@ import (
 	"time"
 
 	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
+
+	dcgmendpoint "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm/endpoint"
 )
 
 func TestCollectDeviceInventoryWithContext(t *testing.T) {
@@ -37,7 +39,7 @@ func TestCollectDeviceInventoryWithContext(t *testing.T) {
 	})
 
 	cleanupCalled := false
-	dcgmInitFunc = func(dcgmInitParams) (func(), error) {
+	dcgmInitFunc = func(dcgmendpoint.Candidate) (func(), error) {
 		return func() { cleanupCalled = true }, nil
 	}
 	getSupportedDevicesForInventory = func() ([]uint, error) {
@@ -60,6 +62,39 @@ func TestCollectDeviceInventoryWithContext(t *testing.T) {
 	}
 }
 
+func TestCollectDeviceInventoryWithContextTriesEndpointCandidates(t *testing.T) {
+	originalInit := dcgmInitFunc
+	originalGetSupportedDevices := getSupportedDevicesForInventory
+	originalGetLatestValues := getLatestInventoryValues
+	t.Cleanup(func() {
+		dcgmInitFunc = originalInit
+		getSupportedDevicesForInventory = originalGetSupportedDevices
+		getLatestInventoryValues = originalGetLatestValues
+	})
+
+	t.Setenv("DCGM_URL", "")
+	t.Setenv("DCGM_URLS", "legacy-dcgm:5555,dra-dcgm:5555")
+	var attempted []string
+	dcgmInitFunc = func(candidate dcgmendpoint.Candidate) (func(), error) {
+		attempted = append(attempted, candidate.Address)
+		if candidate.Address == "legacy-dcgm:5555" {
+			return nil, errors.New("unavailable")
+		}
+		return func() {}, nil
+	}
+	getSupportedDevicesForInventory = func() ([]uint, error) { return nil, nil }
+	getLatestInventoryValues = func([]dcgm.GroupEntityPair, []dcgm.Short, uint) ([]dcgm.FieldValue_v2, error) {
+		return nil, nil
+	}
+
+	if _, err := CollectDeviceInventoryWithContext(context.Background()); err != nil {
+		t.Fatalf("CollectDeviceInventoryWithContext() error = %v", err)
+	}
+	if !slices.Equal(attempted, []string{"legacy-dcgm:5555", "dra-dcgm:5555"}) {
+		t.Fatalf("unexpected attempt order: %v", attempted)
+	}
+}
+
 func TestCollectDeviceInventoryWithContextStopsWaitingAtDeadline(t *testing.T) {
 	originalInit := dcgmInitFunc
 	originalGetSupportedDevices := getSupportedDevicesForInventory
@@ -70,7 +105,7 @@ func TestCollectDeviceInventoryWithContextStopsWaitingAtDeadline(t *testing.T) {
 
 	release := make(chan struct{})
 	finished := make(chan struct{})
-	dcgmInitFunc = func(dcgmInitParams) (func(), error) {
+	dcgmInitFunc = func(dcgmendpoint.Candidate) (func(), error) {
 		<-release
 		return func() { close(finished) }, nil
 	}

@@ -50,9 +50,24 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.affinity }}
+      {{- if .Values.affinity }}
       affinity:
-        {{- toYaml . | nindent 8 }}
+        {{- toYaml .Values.affinity | nindent 8 }}
+      {{- else if empty .Values.nodeSelector }}
+      # Accept DCGM nodes from either the traditional ClusterPolicy or the
+      # DRA-based GPUCluster workflow. nodeSelectorTerms are ORed.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.deploy.dcgm
+                    operator: In
+                    values: ["true"]
+              - matchExpressions:
+                  - key: nvidia.com/gpu.deploy.dcgm-dra
+                    operator: In
+                    values: ["true"]
       {{- end }}
       {{- if and .Values.enroll.enabled .Values.enroll.unenroll }}
       {{- fail "enroll.enabled and enroll.unenroll cannot both be true" }}
