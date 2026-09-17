@@ -45,6 +45,7 @@ func TestDefault(t *testing.T) {
 		require.NotNil(t, cfg.Attestation)
 		assert.True(t, cfg.Attestation.Enabled)
 		assert.Equal(t, metav1.Duration{Duration: 24 * time.Hour}, cfg.Attestation.Interval)
+		assert.Nil(t, cfg.WorkloadAttribution)
 
 		// State path should be set
 		assert.NotEmpty(t, cfg.State, "State path should be set")
@@ -405,6 +406,103 @@ func TestValidateHealthExporter(t *testing.T) {
 
 		err := cfg.Validate()
 		assert.NoError(t, err)
+	})
+}
+
+func TestValidateWorkloadAttribution(t *testing.T) {
+	t.Run("disabled by default", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+		}
+		require.NoError(t, cfg.Validate())
+	})
+
+	t.Run("HPC with absolute path", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{
+				Source: WorkloadSourceHPC,
+				HPC: &HPCWorkloadConfig{
+					JobMappingDir: "/scheduler/gpu-job-mapping",
+				},
+			},
+		}
+		require.NoError(t, cfg.Validate())
+		require.Equal(t, HPCGPUIdentifierDCGMIndex, cfg.WorkloadAttribution.HPC.HPCGPUIdentifier())
+	})
+
+	t.Run("HPC with UUID identifier", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{
+				Source: WorkloadSourceHPC,
+				HPC: &HPCWorkloadConfig{
+					JobMappingDir: "/scheduler/gpu-job-mapping",
+					GPUIdentifier: HPCGPUIdentifierUUID,
+				},
+			},
+		}
+		require.NoError(t, cfg.Validate())
+		require.Equal(t, HPCGPUIdentifierUUID, cfg.WorkloadAttribution.HPC.HPCGPUIdentifier())
+	})
+
+	t.Run("HPC requires a directory", func(t *testing.T) {
+		cfg := &Config{
+			Address:             ":8080",
+			RetentionPeriod:     metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{Source: WorkloadSourceHPC},
+		}
+		require.ErrorContains(t, cfg.Validate(), "job_mapping_dir is required")
+	})
+
+	t.Run("HPC directory must be absolute", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{
+				Source: WorkloadSourceHPC,
+				HPC:    &HPCWorkloadConfig{JobMappingDir: "job-mapping"},
+			},
+		}
+		require.ErrorContains(t, cfg.Validate(), "job_mapping_dir must be an absolute path")
+	})
+
+	t.Run("disabled rejects HPC settings", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{
+				HPC: &HPCWorkloadConfig{JobMappingDir: "/scheduler/gpu-job-mapping"},
+			},
+		}
+		require.ErrorContains(t, cfg.Validate(), `requires source "hpc"`)
+	})
+
+	t.Run("rejects unimplemented source", func(t *testing.T) {
+		cfg := &Config{
+			Address:             ":8080",
+			RetentionPeriod:     metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{Source: "kubernetes"},
+		}
+		require.ErrorContains(t, cfg.Validate(), `unsupported workload_attribution source "kubernetes"`)
+	})
+
+	t.Run("rejects unsupported HPC GPU identifier", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{
+				Source: WorkloadSourceHPC,
+				HPC: &HPCWorkloadConfig{
+					JobMappingDir: "/scheduler/gpu-job-mapping",
+					GPUIdentifier: "linux_minor",
+				},
+			},
+		}
+		require.ErrorContains(t, cfg.Validate(), `unsupported workload_attribution.hpc.gpu_identifier "linux_minor"`)
 	})
 }
 
