@@ -19,45 +19,52 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
+
+	dcgmendpoint "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm/endpoint"
 )
 
-func TestResolveInitFromEnv(t *testing.T) {
-	// Default: no address override -> TCP localhost.
+func TestNewConnectedInstanceTriesCandidatesInOrder(t *testing.T) {
+	originalDCGMInitFunc := dcgmInitFunc
+	originalDCGMNewDefaultGroupFunc := dcgmNewDefaultGroupFunc
+	originalGetSupportedDevices := getSupportedDevicesForInventory
+	t.Cleanup(func() {
+		dcgmInitFunc = originalDCGMInitFunc
+		dcgmNewDefaultGroupFunc = originalDCGMNewDefaultGroupFunc
+		getSupportedDevicesForInventory = originalGetSupportedDevices
+	})
+
 	t.Setenv("DCGM_URL", "")
-	t.Setenv("DCGM_URL_IS_UNIX_SOCKET", "")
-	p := resolveInitFromEnv()
-	if p.isUnixSocket != "0" || p.address != "localhost" {
-		t.Fatalf("expected default tcp localhost, got isUnixSocket=%q address=%q", p.isUnixSocket, p.address)
+	t.Setenv("DCGM_URLS", "legacy-dcgm:5555,dra-dcgm:5555")
+	var attempted []string
+	dcgmInitFunc = func(candidate dcgmendpoint.Candidate) (func(), error) {
+		attempted = append(attempted, candidate.Address)
+		if candidate.Address == "legacy-dcgm:5555" {
+			return nil, errors.New("unavailable")
+		}
+		return func() {}, nil
 	}
+	getSupportedDevicesForInventory = func() ([]uint, error) { return nil, nil }
+	dcgmNewDefaultGroupFunc = func(string) (dcgm.GroupHandle, error) { return dcgm.GroupHandle{}, nil }
 
-	// TCP when DCGM_URL is set to host:port
-	t.Setenv("DCGM_URL", "dcgm.svc:5555")
-	t.Setenv("DCGM_URL_IS_UNIX_SOCKET", "0")
-	p = resolveInitFromEnv()
-	if p.isUnixSocket != "0" || p.address != "dcgm.svc:5555" {
-		t.Fatalf("expected tcp dcgm.svc:5555, got isUnixSocket=%q address=%q", p.isUnixSocket, p.address)
+	inst, err := newConnectedInstance("fallback-test")
+	if err != nil {
+		t.Fatalf("newConnectedInstance() error = %v", err)
 	}
-
-	// DCGM_URL unix socket path with truthy flag.
-	t.Setenv("DCGM_URL", "/run/dcgm/dcgm.sock")
-	t.Setenv("DCGM_URL_IS_UNIX_SOCKET", "true")
-	p = resolveInitFromEnv()
-	if p.isUnixSocket != "1" || p.address != "/run/dcgm/dcgm.sock" {
-		t.Fatalf("expected unix /run/dcgm/dcgm.sock, got isUnixSocket=%q address=%q", p.isUnixSocket, p.address)
+	if inst == nil || !inst.DCGMExists() {
+		t.Fatal("expected a connected DCGM instance")
 	}
-
-	// Invalid bool values default to tcp.
-	t.Setenv("DCGM_URL", "dcgm.svc:5555")
-	t.Setenv("DCGM_URL_IS_UNIX_SOCKET", "maybe")
-	p = resolveInitFromEnv()
-	if p.isUnixSocket != "0" {
-		t.Fatalf("expected invalid bool to default to tcp, got isUnixSocket=%q address=%q", p.isUnixSocket, p.address)
+	if !slices.Equal(attempted, []string{"legacy-dcgm:5555", "dra-dcgm:5555"}) {
+		t.Fatalf("unexpected attempt order: %v", attempted)
+	}
+	if got := os.Getenv("DCGM_URL"); got != "dra-dcgm:5555" {
+		t.Fatalf("selected DCGM_URL = %q, want dra-dcgm:5555", got)
 	}
 }
 
@@ -72,7 +79,7 @@ func TestNewConnectedInstanceCleansUpWhenGroupCreationFails(t *testing.T) {
 	}()
 
 	cleanupCalled := false
-	dcgmInitFunc = func(_ dcgmInitParams) (func(), error) {
+	dcgmInitFunc = func(_ dcgmendpoint.Candidate) (func(), error) {
 		return func() {
 			cleanupCalled = true
 		}, nil
@@ -112,7 +119,7 @@ func TestNewConnectedInstanceFailsWhenDeviceEnumerationFails(t *testing.T) {
 	})
 
 	cleanupCalled := false
-	dcgmInitFunc = func(_ dcgmInitParams) (func(), error) {
+	dcgmInitFunc = func(_ dcgmendpoint.Candidate) (func(), error) {
 		return func() {
 			cleanupCalled = true
 		}, nil
@@ -151,7 +158,7 @@ func TestNewConnectedInstanceRejectsRestartRequiredInventoryError(t *testing.T) 
 	})
 
 	cleanupCalled := false
-	dcgmInitFunc = func(_ dcgmInitParams) (func(), error) {
+	dcgmInitFunc = func(_ dcgmendpoint.Candidate) (func(), error) {
 		return func() { cleanupCalled = true }, nil
 	}
 	getSupportedDevicesForInventory = func() ([]uint, error) {

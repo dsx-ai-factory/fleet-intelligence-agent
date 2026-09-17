@@ -29,7 +29,10 @@ securityContext:
   runAsGroup: 0
 
 env:
-  DCGM_URL: nvidia-dcgm.gpu-operator.svc:5555
+  # DCGM_URL is an explicit endpoint override. When unset, the agent tries the
+  # ordered DCGM_URLS list, supporting both ClusterPolicy and DRA GPUCluster.
+  DCGM_URL: ""
+  DCGM_URLS: nvidia-dcgm.gpu-operator.svc:5555,nvidia-dcgm-dra.gpu-operator.svc:5555
   DCGM_URL_IS_UNIX_SOCKET: "false"
   MALLOC_ARENA_MAX: 4
   FLEETINT_COLLECT_INTERVAL: "1m"
@@ -89,13 +92,9 @@ resources:
     memory: "256Mi"
     ephemeral-storage: "256Mi"
 
-# Node selector restricts the agent to nodes where DCGM is deployed.
-# The agent requires a running DCGM HostEngine to collect GPU metrics,
-# so it must run on the same nodes as DCGM.
-# This label is automatically set by the NVIDIA GPU Operator when DCGM is enabled.
-# To override, set nodeSelector to a different label or {} to remove the restriction.
-nodeSelector:
-  nvidia.com/gpu.deploy.dcgm: "true"
+# Setting nodeSelector or affinity replaces the built-in GPU Operator
+# compatibility scheduling rule rendered by the chart.
+nodeSelector: {}
 
 tolerations: []
 affinity: {}

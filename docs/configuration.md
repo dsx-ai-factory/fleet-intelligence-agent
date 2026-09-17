@@ -40,7 +40,8 @@ These environment variables are read by `fleetint run` at startup.
 
 | Environment variable            | Description                                                                                              | Default                                                                  | Bare metal              | Kubernetes                          |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------- | ----------------------------------- |
-| `DCGM_URL`                      | DCGM HostEngine address used by the agent for DCGM-backed components.                                    | bare metal: `localhost`, Helm chart: `nvidia-dcgm.gpu-operator.svc:5555` | `/etc/default/fleetint` | `env.DCGM_URL`                      |
+| `DCGM_URL`                      | Explicit DCGM HostEngine address. When set, it takes precedence over `DCGM_URLS`.                         | bare metal: `localhost`, Helm chart: unset                               | `/etc/default/fleetint` | `env.DCGM_URL`                      |
+| `DCGM_URLS`                     | Ordered, comma-separated TCP addresses tried when `DCGM_URL` is unset.                                   | bare metal: unset, Helm chart: legacy and DRA GPU Operator services      | optional                | `env.DCGM_URLS`                     |
 | `DCGM_URL_IS_UNIX_SOCKET`       | Treat `DCGM_URL` as a Unix socket path instead of a network address.                                     | `false`                                                                  | `/etc/default/fleetint` | `env.DCGM_URL_IS_UNIX_SOCKET`       |
 | `MALLOC_ARENA_MAX`              | glibc arena cap to constrain RSS growth for DCGM/cgo-heavy workloads.                                    | `4`                                                                      | `/etc/default/fleetint` | `env.MALLOC_ARENA_MAX`              |
 | `FLEETINT_COLLECT_INTERVAL`     | Export interval for health data. Valid range: `1s` to `24h`.                                             | `1m`                                                                     | `/etc/default/fleetint` | `env.FLEETINT_COLLECT_INTERVAL`     |
@@ -66,7 +67,9 @@ Notes:
 
 - Duration-valued environment variables use Go duration syntax such as `30s`, `1m`, `10m`, or `24h`.
 - These environment variables modify the telemetry exporter configuration and runtime loop intervals used by `fleetint run`.
-- `DCGM_URL` and `DCGM_URL_IS_UNIX_SOCKET` configure connectivity to DCGM HostEngine for DCGM-backed components.
+- `DCGM_URL` is the explicit endpoint override. When it is unset, `DCGM_URLS`
+  supplies ordered TCP fallback endpoints. `DCGM_URL_IS_UNIX_SOCKET` applies
+  only to `DCGM_URL`.
 - `MALLOC_ARENA_MAX` is a Linux process-level tuning parameter (not a Fleet Intelligence setting) that caps the number of glibc memory arenas to constrain RSS growth in cgo-heavy workloads such as DCGM integration.
 
 ### Send Slurm workload identity to Fleet Intelligence
@@ -187,7 +190,8 @@ retentionPeriod: 24h
 components: all,-accelerator-nvidia-dcgm-prof
 
 env:
-  DCGM_URL: "nvidia-dcgm.gpu-operator.svc:5555"
+  DCGM_URL: ""
+  DCGM_URLS: "nvidia-dcgm.gpu-operator.svc:5555,nvidia-dcgm-dra.gpu-operator.svc:5555"
   DCGM_URL_IS_UNIX_SOCKET: "false"
   MALLOC_ARENA_MAX: "4"
   FLEETINT_COLLECT_INTERVAL: "2m"

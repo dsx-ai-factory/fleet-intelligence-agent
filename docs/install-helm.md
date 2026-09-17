@@ -2,10 +2,14 @@
 
 ## Prerequisites
 
-- NVIDIA GPU Operator installed with DCGM HostEngine enabled.
+- NVIDIA GPU Operator installed with standalone DCGM HostEngine enabled
+  (`dcgm.enabled=true`). GPUCluster otherwise runs only the exporter's embedded
+  HostEngine, which the agent cannot connect to.
 - NVIDIA Datacenter Driver major version `510` or newer on the cluster nodes.
 - DCGM HostEngine `4.2.3` or newer.
-- A DCGM service endpoint reachable from the cluster (defaults to `nvidia-dcgm.gpu-operator.svc:5555`).
+- A DCGM service endpoint reachable from the cluster. The chart automatically
+  tries the ClusterPolicy service (`nvidia-dcgm`) and the DRA GPUCluster service
+  (`nvidia-dcgm-dra`) in the `gpu-operator` namespace.
 - Access to GitHub Container Registry (`ghcr.io`) from your cluster/network.
 
 Set shared variables once for the examples below:
@@ -16,7 +20,7 @@ NS=fleet-intelligence
 
 CHART_VERSION='<version>'  # e.g. 0.3.2 or 0.3.2-rc.1
 
-# DCGM endpoint (usually the default is correct)
+# Optional explicit DCGM endpoint override
 DCGM_URL='nvidia-dcgm.gpu-operator.svc:5555'
 
 # Enrollment configuration - Go to the Fleet Intelligence UI to:
@@ -120,7 +124,13 @@ To use a different image registry/repository, add:
 --set image.repository="<custom-image-repo>"
 ```
 
-If DCGM is exposed at a different service name or port, set `env.DCGM_URL`:
+The default endpoint list supports both GPU Operator workflows:
+
+- `ClusterPolicy`: `nvidia-dcgm.gpu-operator.svc:5555`
+- DRA `GPUCluster`: `nvidia-dcgm-dra.gpu-operator.svc:5555`
+
+If DCGM is exposed at a different namespace, service name, or port, set the
+explicit `env.DCGM_URL` override:
 
 ```bash
 --set env.DCGM_URL="$DCGM_URL"
@@ -168,7 +178,8 @@ kubectl describe pod -n "$NS" -l app.kubernetes.io/name=fleet-intelligence-agent
 
 Common issues:
 - **ImagePullBackOff**: Verify nodes can reach `ghcr.io` and the image tag exists
-- **Pending**: Check node labels match `nodeSelector` (default: `nvidia.com/gpu.deploy.dcgm=true`)
+- **Pending**: Check the node has either `nvidia.com/gpu.deploy.dcgm=true` or
+  `nvidia.com/gpu.deploy.dcgm-dra=true`
 - **CrashLoopBackOff**: Check logs for errors
 
 **Enrollment failures:**
@@ -187,14 +198,15 @@ kubectl get secret "$ENROLL_TOKEN_SECRET_NAME" -n "$NS" -o jsonpath='{.data.toke
 **DCGM connection issues:**
 
 ```bash
-# Verify DCGM service is accessible
-kubectl get svc -n gpu-operator nvidia-dcgm
+# Verify the ClusterPolicy or GPUCluster DCGM service is present
+kubectl get svc -n gpu-operator \
+  -l 'app in (nvidia-dcgm,nvidia-dcgm-dra)'
 
-# Test DCGM connectivity from a pod
+# Test the ClusterPolicy endpoint from a pod; use nvidia-dcgm-dra for GPUCluster
 kubectl exec -n "$NS" "$POD_NAME" -- curl -v telnet://nvidia-dcgm.gpu-operator.svc:5555
 
-# Check DCGM URL environment variable
-kubectl get pods -n "$NS" "$POD_NAME" -o jsonpath='{.spec.containers[0].env[?(@.name=="DCGM_URL")].value}'
+# Check DCGM endpoint environment variables
+kubectl get pods -n "$NS" "$POD_NAME" -o jsonpath='{.spec.containers[0].env}'
 ```
 
 If DCGM is at a different location, update the URL:
@@ -209,17 +221,28 @@ helm upgrade fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-
 
 ## Node Scheduling
 
-**By default**, the agent only deploys to nodes where DCGM is running, using the nodeSelector:
+**By default**, the agent deploys to nodes where either GPU Operator workflow
+runs standalone DCGM. The two node affinity terms are alternatives:
 
 ```yaml
-nodeSelector:
-  nvidia.com/gpu.deploy.dcgm: "true"
+nodeSelectorTerms:
+  - matchExpressions:
+      - key: nvidia.com/gpu.deploy.dcgm
+        operator: In
+        values: ["true"]
+  - matchExpressions:
+      - key: nvidia.com/gpu.deploy.dcgm-dra
+        operator: In
+        values: ["true"]
 ```
 
-The agent requires a DCGM HostEngine to collect GPU metrics, so it must co-locate with DCGM. This label is
-automatically set by the NVIDIA GPU Operator when DCGM is enabled — no manual labeling is required.
+The agent requires a DCGM HostEngine to collect GPU metrics, so it must
+co-locate with DCGM. GPU Operator applies the appropriate label when standalone
+DCGM is enabled.
 
-If you need a different node selector or tolerations for GPU taints, you can override them.
+If you need custom scheduling, set either `nodeSelector` or `affinity`; either
+one replaces the built-in compatibility affinity. You can also configure
+tolerations for GPU taints.
 The examples below use a generic label to illustrate the override syntax — replace it with the actual label used in your cluster.
 
 Using `--set` (quote the tolerations for zsh, and escape dots in the label key):
