@@ -13,6 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+{{- $workloadSource := default "" .Values.workloadAttribution.source -}}
+{{- $hpcJobMappingDir := dig "hpc" "jobMappingDir" "" .Values.workloadAttribution -}}
+{{- $hpcGPUIdentifier := dig "hpc" "gpuIdentifier" "dcgm_index" .Values.workloadAttribution -}}
+{{- if and $workloadSource (ne $workloadSource "hpc") -}}
+{{- fail (printf "unsupported workloadAttribution.source %q; currently supported value: hpc" $workloadSource) -}}
+{{- end -}}
+{{- if and (eq $workloadSource "hpc") $hpcJobMappingDir (not (hasPrefix "/" $hpcJobMappingDir)) -}}
+{{- fail "workloadAttribution.hpc.jobMappingDir must be an absolute path" -}}
+{{- end -}}
+{{- if and (eq $workloadSource "hpc") (not (has $hpcGPUIdentifier (list "dcgm_index" "uuid"))) -}}
+{{- fail "workloadAttribution.hpc.gpuIdentifier must be dcgm_index or uuid" -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -139,6 +151,13 @@ spec:
             - {{ printf "--listen-address=%s" .Values.listenAddress | quote }}
             - {{ printf "--retention-period=%s" .Values.retentionPeriod | quote }}
             - {{ printf "--components=%s" .Values.components | quote }}
+            {{- with $workloadSource }}
+            - {{ printf "--workload-attribution-source=%s" . | quote }}
+            {{- end }}
+            {{- if eq $workloadSource "hpc" }}
+            - {{ printf "--hpc-job-mapping-dir=%s" (required "workloadAttribution.hpc.jobMappingDir is required when source is hpc" $hpcJobMappingDir) | quote }}
+            - {{ printf "--hpc-gpu-identifier=%s" $hpcGPUIdentifier | quote }}
+            {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           env:
@@ -182,6 +201,11 @@ spec:
               readOnly: true
             - name: state
               mountPath: /var/lib/fleetint
+            {{- if eq $workloadSource "hpc" }}
+            - name: hpc-job-mapping
+              mountPath: {{ $hpcJobMappingDir | quote }}
+              readOnly: true
+            {{- end }}
       volumes:
         - name: dev
           hostPath:
@@ -208,3 +232,9 @@ spec:
           hostPath:
             path: /var/lib/fleetint
             type: DirectoryOrCreate
+        {{- if eq $workloadSource "hpc" }}
+        - name: hpc-job-mapping
+          hostPath:
+            path: {{ $hpcJobMappingDir | quote }}
+            type: DirectoryOrCreate
+        {{- end }}

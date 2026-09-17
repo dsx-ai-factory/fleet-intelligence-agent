@@ -54,6 +54,12 @@ retentionPeriod: 24h
 components: all
 deployEnv: prod
 
+# Workload attribution is disabled when no source is configured. For HPC,
+# set source to hpc and provide hpc.jobMappingDir explicitly. HPC mapping
+# filenames use numeric DCGM indexes by default; set hpc.gpuIdentifier to uuid
+# when scheduler hooks create GPU UUID filenames.
+workloadAttribution: {}
+
 # Agent enrollment remains independent of the optional telemetry gateway.
 # Enrollment is still required for backend inventory and attestation workflows.
 # Requires enroll.endpoint and either enroll.tokenValue or enroll.tokenSecretName.

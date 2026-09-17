@@ -62,6 +62,7 @@ import (
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/nodeidentity"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/registry"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/workloadmetrics"
 )
 
 // Server is a simplified health metrics exporter server
@@ -97,6 +98,8 @@ type Server struct {
 	loopCancel context.CancelFunc
 
 	machineID string
+
+	workloadMetrics *workloadmetrics.Manager
 }
 
 type inventoryMachineInfoCollectorFunc func(context.Context) (*machineinfo.MachineInfo, error)
@@ -378,7 +381,13 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 		}
 	}
 
-	// Create metrics infrastructure needed for health exporter
+	s.workloadMetrics, err = workloadmetrics.Start(
+		config.WorkloadAttribution,
+		dcgmInstance,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("start workload metrics: %w", err)
+	}
 	promScraper, err := pkgmetricsscraper.NewPrometheusScraper(pkgmetrics.DefaultGatherer())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create scraper: %w", err)
@@ -554,6 +563,11 @@ func (s *Server) Stop() {
 		if s.listener != nil {
 			// Go's UnixListener.Close() automatically unlinks the socket file.
 			_ = s.listener.Close()
+		}
+
+		if s.workloadMetrics != nil {
+			s.workloadMetrics.Close()
+			s.workloadMetrics = nil
 		}
 
 		// Stop health exporter if running

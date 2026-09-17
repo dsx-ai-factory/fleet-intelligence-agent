@@ -258,6 +258,20 @@ func configureLoopConfigFromEnv(cfg *config.Config) error {
 	return nil
 }
 
+func configureWorkloadAttribution(cfg *config.Config, source, hpcJobMappingDir, hpcGPUIdentifier string) {
+	if source == "" && hpcJobMappingDir == "" {
+		return
+	}
+
+	cfg.WorkloadAttribution = &config.WorkloadAttributionConfig{Source: source}
+	if hpcJobMappingDir != "" {
+		cfg.WorkloadAttribution.HPC = &config.HPCWorkloadConfig{
+			JobMappingDir: filepath.Clean(hpcJobMappingDir),
+			GPUIdentifier: hpcGPUIdentifier,
+		}
+	}
+}
+
 func runCommand(cliContext *cli.Context) error {
 	logLevel := cliContext.String("log-level")
 	logFile := cliContext.String("log-file")
@@ -282,6 +296,9 @@ func runCommand(cliContext *cli.Context) error {
 
 	listenAddress := cliContext.String("listen-address")
 	retentionPeriod := cliContext.Duration("retention-period")
+	workloadAttributionSource := cliContext.String("workload-attribution-source")
+	hpcJobMappingDir := cliContext.String("hpc-job-mapping-dir")
+	hpcGPUIdentifier := cliContext.String("hpc-gpu-identifier")
 
 	ibClassRootDir := cliContext.String("infiniband-class-root-dir")
 	components := cliContext.String("components")
@@ -349,6 +366,7 @@ func runCommand(cliContext *cli.Context) error {
 	if retentionPeriod > 0 {
 		cfg.RetentionPeriod = metav1.Duration{Duration: retentionPeriod}
 	}
+	configureWorkloadAttribution(cfg, workloadAttributionSource, hpcJobMappingDir, hpcGPUIdentifier)
 
 	if components != "" {
 		cfg.Components = strings.Split(components, ",")
