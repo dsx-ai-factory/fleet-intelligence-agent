@@ -30,13 +30,18 @@ import (
 )
 
 type staticReader struct {
-	mapping Mapping
-	err     error
+	mapping           Mapping
+	err               error
+	gpuIdentifierType GPUIdentifierType
 }
 
 type mutableReader struct {
 	mu      sync.RWMutex
 	mapping Mapping
+}
+
+func (r *mutableReader) GPUIdentifierType() GPUIdentifierType {
+	return GPUIdentifierDCGMIndex
 }
 
 func (r *mutableReader) Read() (Mapping, error) {
@@ -53,6 +58,13 @@ func (r *mutableReader) Set(mapping Mapping) {
 
 func (r staticReader) Read() (Mapping, error) {
 	return r.mapping, r.err
+}
+
+func (r staticReader) GPUIdentifierType() GPUIdentifierType {
+	if r.gpuIdentifierType == "" {
+		return GPUIdentifierDCGMIndex
+	}
+	return r.gpuIdentifierType
 }
 
 func TestCollector(t *testing.T) {
@@ -94,9 +106,10 @@ func TestCollector(t *testing.T) {
 func TestCollectorResolvesUUIDFilename(t *testing.T) {
 	const uuid = "GPU-2cf69c7e-0d83-51f3-6d41-d3f7a6b08cb7"
 	registry := prometheus.NewRegistry()
-	registry.MustRegister(NewCollector(staticReader{mapping: Mapping{
-		uuid: {"123"},
-	}}, staticGPUUUIDProvider(map[string]string{"0": uuid})))
+	registry.MustRegister(NewCollector(staticReader{
+		mapping:           Mapping{uuid: {"123"}},
+		gpuIdentifierType: GPUIdentifierUUID,
+	}, staticGPUUUIDProvider(map[string]string{"0": uuid})))
 
 	scraper, err := pkgmetricsscraper.NewPrometheusScraper(registry)
 	require.NoError(t, err)
@@ -106,6 +119,39 @@ func TestCollectorResolvesUUIDFilename(t *testing.T) {
 	require.Equal(t, "0", metrics[0].Labels["gpu"])
 	require.Equal(t, uuid, metrics[0].Labels["uuid"])
 	require.Equal(t, "123", metrics[0].Labels["workload_id"])
+}
+
+func TestCollectorUsesConfiguredGPUIdentifierType(t *testing.T) {
+	tests := []struct {
+		name              string
+		gpuIdentifierType GPUIdentifierType
+		mapping           Mapping
+	}{
+		{
+			name:              "index mode does not accept UUID",
+			gpuIdentifierType: GPUIdentifierDCGMIndex,
+			mapping:           Mapping{"GPU-a": {"123"}},
+		},
+		{
+			name:              "UUID mode does not accept index",
+			gpuIdentifierType: GPUIdentifierUUID,
+			mapping:           Mapping{"0": {"123"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := prometheus.NewRegistry()
+			registry.MustRegister(NewCollector(
+				staticReader{mapping: tt.mapping, gpuIdentifierType: tt.gpuIdentifierType},
+				staticGPUUUIDProvider(map[string]string{"0": "GPU-a"}),
+			))
+
+			families, err := registry.Gather()
+			require.NoError(t, err)
+			require.Empty(t, families)
+		})
+	}
 }
 
 func TestCollectorDoesNotModifyExistingMetrics(t *testing.T) {

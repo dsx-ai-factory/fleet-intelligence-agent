@@ -34,14 +34,23 @@ const (
 // unchanged so job churn is not multiplied by the number of GPU metrics.
 type Collector struct {
 	reader                 Reader
+	gpuIdentifierType      GPUIdentifierType
 	gpuUUIDByIndexProvider func() map[string]string
 	desc                   *prometheus.Desc
 }
 
 // NewCollector creates a normalized HPC workload identity metric collector.
-func NewCollector(reader Reader, gpuUUIDByIndexProvider func() map[string]string) *Collector {
+func NewCollector(
+	reader Reader,
+	gpuUUIDByIndexProvider func() map[string]string,
+) *Collector {
+	var gpuIdentifierType GPUIdentifierType
+	if reader != nil {
+		gpuIdentifierType = reader.GPUIdentifierType()
+	}
 	return &Collector{
 		reader:                 reader,
+		gpuIdentifierType:      gpuIdentifierType,
 		gpuUUIDByIndexProvider: gpuUUIDByIndexProvider,
 		desc: prometheus.NewDesc(
 			metricName,
@@ -77,15 +86,23 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 	gpuUUIDByIndex := c.gpuUUIDByIndexProvider()
-	gpuIndexByUUID := make(map[string]string, len(gpuUUIDByIndex))
-	for gpuIndex, uuid := range gpuUUIDByIndex {
-		if uuid != "" {
-			gpuIndexByUUID[uuid] = gpuIndex
+	var gpuIndexByUUID map[string]string
+	if c.gpuIdentifierType == GPUIdentifierUUID {
+		gpuIndexByUUID = make(map[string]string, len(gpuUUIDByIndex))
+		for gpuIndex, uuid := range gpuUUIDByIndex {
+			if uuid != "" {
+				gpuIndexByUUID[uuid] = gpuIndex
+			}
 		}
 	}
 
 	for gpuIdentifier, jobIDs := range mapping {
-		gpuIndex, uuid, found := resolveGPU(gpuIdentifier, gpuUUIDByIndex, gpuIndexByUUID)
+		gpuIndex, uuid, found := resolveGPU(
+			gpuIdentifier,
+			c.gpuIdentifierType,
+			gpuUUIDByIndex,
+			gpuIndexByUUID,
+		)
 		if !found || uuid == "" {
 			log.Logger.Infow("HPC job mapping references an unknown GPU; omitting workload identity metrics", "gpuIdentifier", gpuIdentifier)
 			continue
@@ -106,15 +123,21 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 
 func resolveGPU(
 	gpuIdentifier string,
+	gpuIdentifierType GPUIdentifierType,
 	gpuUUIDByIndex map[string]string,
 	gpuIndexByUUID map[string]string,
 ) (gpuIndex string, uuid string, found bool) {
-	if uuid, found = gpuUUIDByIndex[gpuIdentifier]; found {
-		return gpuIdentifier, uuid, true
+	switch gpuIdentifierType {
+	case GPUIdentifierDCGMIndex:
+		uuid, found = gpuUUIDByIndex[gpuIdentifier]
+		if found {
+			return gpuIdentifier, uuid, true
+		}
+	case GPUIdentifierUUID:
+		gpuIndex, found = gpuIndexByUUID[gpuIdentifier]
+		if found {
+			return gpuIndex, gpuIdentifier, true
+		}
 	}
-	gpuIndex, found = gpuIndexByUUID[gpuIdentifier]
-	if !found {
-		return "", "", false
-	}
-	return gpuIndex, gpuIdentifier, true
+	return "", "", false
 }

@@ -86,7 +86,7 @@ The file format is based on the
 [dcgm-exporter HPC job-mapping convention](https://github.com/NVIDIA/dcgm-exporter#how-to-include-hpc-jobs-in-metric-labels):
 
 - Each regular file represents one whole GPU.
-- Each line contains one active Slurm job ID, with at most 64 unique IDs per
+- Each line contains one active Slurm job ID, with at most 16 unique IDs per
   GPU.
 - Removing a job ID or file stops new samples for that relationship on the next
   metrics scrape.
