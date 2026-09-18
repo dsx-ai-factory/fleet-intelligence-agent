@@ -19,7 +19,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -253,14 +252,6 @@ func newConnectedInstance(groupName string) (Instance, error) {
 		}
 		if len(candidates) > 1 {
 			log.Logger.Infow("selected DCGM HostEngine endpoint", "address", candidate.Address)
-			// Other DCGM consumers in this process use DCGM_URL. Publish the
-			// selected TCP candidate after a complete session is established.
-			if err := os.Setenv("DCGM_URL", candidate.Address); err != nil {
-				log.Logger.Warnw("failed to publish selected DCGM HostEngine endpoint", "error", err)
-			}
-			if err := os.Setenv("DCGM_URL_IS_UNIX_SOCKET", "false"); err != nil {
-				log.Logger.Warnw("failed to publish selected DCGM transport", "error", err)
-			}
 		}
 		return connectedInst, nil
 	}

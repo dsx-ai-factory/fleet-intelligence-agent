@@ -20,9 +20,6 @@ NS=fleet-intelligence
 
 CHART_VERSION='<version>'  # e.g. 0.3.2 or 0.3.2-rc.1
 
-# Optional explicit DCGM endpoint override
-DCGM_URL='nvidia-dcgm.gpu-operator.svc:5555'
-
 # Enrollment configuration - Go to the Fleet Intelligence UI to:
 #   1. Generate an enrollment token (ENROLL_TOKEN)
 #   2. Get the enrollment endpoint URL (ENROLL_ENDPOINT)
@@ -133,6 +130,7 @@ If DCGM is exposed at a different namespace, service name, or port, set the
 explicit `env.DCGM_URL` override:
 
 ```bash
+DCGM_URL='<dcgm-hostengine-address>'
 --set env.DCGM_URL="$DCGM_URL"
 ```
 

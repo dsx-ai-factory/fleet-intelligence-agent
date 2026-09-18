@@ -23,10 +23,20 @@ import (
 
 func TestExtractVersion(t *testing.T) {
 	t.Run("extracts version", func(t *testing.T) {
-		assert.Equal(t, "4.2.3", extractVersion("arch:x86_64;version: 4.2.3;build:123"))
+		version, err := extractVersion("arch:x86_64;version: 4.2.3;build:123")
+		assert.NoError(t, err)
+		assert.Equal(t, "4.2.3", version)
 	})
 
-	t.Run("returns empty when missing", func(t *testing.T) {
-		assert.Empty(t, extractVersion("arch:x86_64;build:123"))
+	t.Run("returns error when missing", func(t *testing.T) {
+		version, err := extractVersion("arch:x86_64;build:123")
+		assert.Error(t, err)
+		assert.Empty(t, version)
+	})
+
+	t.Run("returns error when empty", func(t *testing.T) {
+		version, err := extractVersion("arch:x86_64;version: ;build:123")
+		assert.Error(t, err)
+		assert.Empty(t, version)
 	})
 }

@@ -42,21 +42,30 @@ func DetectHostengineVersion() (string, error) {
 			initErrors = append(initErrors, fmt.Errorf("%s: %w", candidate.Address, err))
 			continue
 		}
-		return extractVersion(versionInfo.RawBuildInfoString), nil
+		version, err := extractVersion(versionInfo.RawBuildInfoString)
+		if err != nil {
+			initErrors = append(initErrors, fmt.Errorf("%s: %w", candidate.Address, err))
+			continue
+		}
+		return version, nil
 	}
 	return "", fmt.Errorf("failed to query any DCGM HostEngine endpoint: %w", errors.Join(initErrors...))
 }
 
-func extractVersion(raw string) string {
+func extractVersion(raw string) (string, error) {
 	for _, pair := range strings.Split(raw, ";") {
 		key, value, ok := strings.Cut(pair, ":")
 		if !ok {
 			continue
 		}
 		if strings.TrimSpace(key) == "version" {
-			return strings.TrimSpace(value)
+			version := strings.TrimSpace(value)
+			if version != "" {
+				return version, nil
+			}
+			break
 		}
 	}
 
-	return ""
+	return "", errors.New("version missing from DCGM HostEngine build information")
 }

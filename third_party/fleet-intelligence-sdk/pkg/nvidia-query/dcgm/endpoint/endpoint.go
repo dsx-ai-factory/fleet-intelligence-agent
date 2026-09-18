@@ -17,6 +17,7 @@
 package endpoint
 
 import (
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -51,7 +52,7 @@ func ResolveFromEnv() []Candidate {
 func resolve(getenv func(string) string) []Candidate {
 	address := strings.TrimSpace(getenv("DCGM_URL"))
 	if address != "" && !isValidAddress(address) {
-		log.Logger.Warnw("DCGM_URL contains invalid characters, ignoring override and using fallback discovery",
+		log.Logger.Warnw("DCGM_URL is not a valid DCGM address, ignoring override and using fallback discovery",
 			"value", address)
 		address = ""
 	}
@@ -68,7 +69,7 @@ func resolve(getenv func(string) string) []Candidate {
 		if candidate == "" {
 			continue
 		}
-		if !isValidAddress(candidate) || strings.HasPrefix(candidate, "/") {
+		if !isValidTCPAddress(candidate) {
 			log.Logger.Warnw("DCGM_URLS contains an invalid TCP address; skipping candidate", "value", candidate)
 			continue
 		}
@@ -85,21 +86,69 @@ func resolve(getenv func(string) string) []Candidate {
 	return []Candidate{{Address: defaultAddress}}
 }
 
-// isValidAddress accepts an absolute Unix socket path or a hostname/host:port
-// containing only characters understood by go-dcgm. URL schemes are rejected.
+// isValidAddress accepts an absolute Unix socket path or a structurally valid
+// TCP host with an optional port.
 func isValidAddress(address string) bool {
 	if strings.HasPrefix(address, "/") {
-		return true
+		return len(address) > 1
 	}
-	if strings.Contains(address, "://") {
+	return isValidTCPAddress(address)
+}
+
+func isValidTCPAddress(address string) bool {
+	if address == "" || strings.Contains(address, "://") {
 		return false
 	}
-	for _, char := range address {
-		switch {
-		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
-		case char == '.', char == '-', char == '_', char == ':', char == '[', char == ']':
-		default:
+
+	host := address
+	if strings.HasPrefix(address, "[") {
+		closingBracket := strings.IndexByte(address, ']')
+		if closingBracket <= 1 {
 			return false
+		}
+		host = address[1:closingBracket]
+		if net.ParseIP(host) == nil || !strings.Contains(host, ":") {
+			return false
+		}
+		remainder := address[closingBracket+1:]
+		return remainder == "" || strings.HasPrefix(remainder, ":") && isValidPort(remainder[1:])
+	}
+
+	if strings.ContainsAny(address, "[]") || strings.Count(address, ":") > 1 {
+		return false
+	}
+	if parsedHost, port, hasPort := strings.Cut(address, ":"); hasPort {
+		host = parsedHost
+		if !isValidPort(port) {
+			return false
+		}
+	}
+
+	if net.ParseIP(host) != nil {
+		return true
+	}
+	return isValidHostname(host)
+}
+
+func isValidPort(port string) bool {
+	value, err := strconv.Atoi(port)
+	return err == nil && value > 0 && value <= 65535
+}
+
+func isValidHostname(host string) bool {
+	host = strings.TrimSuffix(host, ".")
+	if host == "" || len(host) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, char := range label {
+			if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') &&
+				(char < '0' || char > '9') && char != '-' {
+				return false
+			}
 		}
 	}
 	return true
