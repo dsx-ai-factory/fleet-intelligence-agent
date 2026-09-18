@@ -19,7 +19,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"sync"
 	"testing"
@@ -63,8 +62,9 @@ func TestNewConnectedInstanceTriesCandidatesInOrder(t *testing.T) {
 	if !slices.Equal(attempted, []string{"legacy-dcgm:5555", "dra-dcgm:5555"}) {
 		t.Fatalf("unexpected attempt order: %v", attempted)
 	}
-	if got := os.Getenv("DCGM_URL"); got != "dra-dcgm:5555" {
-		t.Fatalf("selected DCGM_URL = %q, want dra-dcgm:5555", got)
+	wantCandidates := []dcgmendpoint.Candidate{{Address: "legacy-dcgm:5555"}, {Address: "dra-dcgm:5555"}}
+	if got := dcgmendpoint.ResolveFromEnv(); !slices.Equal(got, wantCandidates) {
+		t.Fatalf("endpoint candidates changed after selection: got %v, want %v", got, wantCandidates)
 	}
 }
 
