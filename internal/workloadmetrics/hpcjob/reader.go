@@ -33,8 +33,8 @@ import (
 const (
 	maxMappingFileSize = 1 << 20
 	maxJobIDLength     = 256
-	// maxJobIDsPerGPU bounds the number of identity series one mapping file can create.
-	maxJobIDsPerGPU = 16
+	// maxJobIDsPerMapping bounds the number of identity series one mapping file can create.
+	maxJobIDsPerMapping = 16
 )
 
 // GPUIdentifierType selects how mapping filenames identify a GPU.
@@ -46,13 +46,19 @@ const (
 )
 
 var (
-	dcgmIndexMappingFileRE = regexp.MustCompile(`^[0-9]+$`)
-	uuidMappingFileRE      = regexp.MustCompile(`^GPU-[[:xdigit:]-]+$`)
+	numericIdentifierRE = regexp.MustCompile(`^[0-9]+$`)
+	gpuUUIDRE           = regexp.MustCompile(`^GPU-[[:xdigit:]-]+$`)
 )
 
-// Mapping maps a whole-GPU identifier to its active job IDs. An identifier is
-// either the numeric DCGM GPU ID used by the gpu metric label or a GPU UUID.
-type Mapping map[string][]string
+// GPUJobMapping describes the jobs assigned to one whole GPU or GPU instance.
+type GPUJobMapping struct {
+	PhysicalGPUIdentifier string
+	GPUInstanceID         string
+	JobIDs                []string
+}
+
+// Mapping is the current set of scheduler-maintained GPU-to-job assignments.
+type Mapping []GPUJobMapping
 
 // Reader returns the current scheduler-maintained GPU-to-job mapping.
 type Reader interface {
@@ -61,8 +67,8 @@ type Reader interface {
 }
 
 // FileReader reads the file convention used by dcgm-exporter and FleetInt's
-// UUID extension. Each regular file is named for a numeric DCGM GPU ID or GPU
-// UUID and contains one job ID per line.
+// UUID extension. Each regular file is named for a GPU, optionally followed by
+// a GPU instance ID, and contains one job ID per line.
 type FileReader struct {
 	directory         string
 	gpuIdentifierType GPUIdentifierType
@@ -95,9 +101,16 @@ func (r *FileReader) Read() (Mapping, error) {
 		return nil, fmt.Errorf("read job mapping directory: %w", err)
 	}
 
-	mapping := make(Mapping)
+	mappings := make(Mapping, 0, len(entries))
 	for _, entry := range entries {
-		if !r.matchesGPUIdentifier(entry.Name()) || entry.Type()&os.ModeSymlink != 0 {
+		if entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		physicalGPUIdentifier, gpuInstanceID, found := parseMappingFilename(
+			entry.Name(),
+			r.gpuIdentifierType,
+		)
+		if !found {
 			continue
 		}
 
@@ -106,21 +119,39 @@ func (r *FileReader) Read() (Mapping, error) {
 			continue
 		}
 		if len(jobIDs) > 0 {
-			mapping[entry.Name()] = jobIDs
+			mappings = append(mappings, GPUJobMapping{
+				PhysicalGPUIdentifier: physicalGPUIdentifier,
+				GPUInstanceID:         gpuInstanceID,
+				JobIDs:                jobIDs,
+			})
 		}
 	}
-	return mapping, nil
+	return mappings, nil
 }
 
-func (r *FileReader) matchesGPUIdentifier(filename string) bool {
-	switch r.gpuIdentifierType {
-	case GPUIdentifierDCGMIndex:
-		return dcgmIndexMappingFileRE.MatchString(filename)
-	case GPUIdentifierUUID:
-		return uuidMappingFileRE.MatchString(filename)
-	default:
-		return false
+// parseMappingFilename validates the filename syntax and separates its physical
+// GPU identifier from the optional scheduler-provided GPU instance ID.
+func parseMappingFilename(
+	filename string,
+	gpuIdentifierType GPUIdentifierType,
+) (physicalGPUIdentifier string, gpuInstanceID string, found bool) {
+	physicalGPUIdentifier, gpuInstanceID, hasGPUInstanceID := strings.Cut(filename, ".")
+	if hasGPUInstanceID && !numericIdentifierRE.MatchString(gpuInstanceID) {
+		return "", "", false
 	}
+
+	switch gpuIdentifierType {
+	case GPUIdentifierDCGMIndex:
+		found = numericIdentifierRE.MatchString(physicalGPUIdentifier)
+	case GPUIdentifierUUID:
+		found = gpuUUIDRE.MatchString(physicalGPUIdentifier)
+	default:
+		return "", "", false
+	}
+	if !found {
+		return "", "", false
+	}
+	return physicalGPUIdentifier, gpuInstanceID, true
 }
 
 func readJobIDs(directory *os.File, filename string) ([]string, error) {
@@ -166,8 +197,8 @@ func readJobIDs(directory *os.File, filename string) ([]string, error) {
 		if _, found := seen[jobID]; found {
 			continue
 		}
-		if len(seen) >= maxJobIDsPerGPU {
-			return nil, fmt.Errorf("mapping file exceeds %d unique job IDs", maxJobIDsPerGPU)
+		if len(seen) >= maxJobIDsPerMapping {
+			return nil, fmt.Errorf("mapping file exceeds %d unique job IDs", maxJobIDsPerMapping)
 		}
 		seen[jobID] = struct{}{}
 	}

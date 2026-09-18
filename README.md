@@ -45,11 +45,15 @@ telemetry using a stable metric and label contract.
 
 The feature uses scheduler-maintained mapping files inspired by the
 [dcgm-exporter HPC job-mapping convention](https://github.com/NVIDIA/dcgm-exporter#how-to-include-hpc-jobs-in-metric-labels).
-FleetInt converts each active GPU/job relationship into a normalized metric:
+FleetInt converts each active GPU or MIG-instance/job relationship into a
+normalized metric:
 
 ```promql
 fleetint_gpu_workload_info{uuid="GPU-abc",gpu="0",workload_source="hpc",workload_id="123456"} 1
 ```
+
+MIG mappings preserve the scheduler-provided GPU instance as the optional
+`gpu_instance_id` label.
 
 Workload attribution is opt-in. The cluster administrator configures Slurm
 Prolog/Epilog hooks to maintain the files, then configures FleetInt with the

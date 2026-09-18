@@ -29,7 +29,9 @@ func TestFileReaderDCGMIndex(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "0"), []byte("123\n456\n123\n\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "GPU-2cf69c7e-0d83-51f3-6d41-d3f7a6b08cb7"), []byte("789\n"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "2.1"), []byte("ignored\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "2.1"), []byte("789\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "2.invalid"), []byte("ignored\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "2.1.0"), []byte("ignored\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "GPU-not-a-uuid"), []byte("ignored\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "not-a-gpu"), []byte("ignored\n"), 0o600))
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "3"), 0o700))
@@ -37,8 +39,9 @@ func TestFileReaderDCGMIndex(t *testing.T) {
 
 	mapping, err := NewFileReader(dir, GPUIdentifierDCGMIndex).Read()
 	require.NoError(t, err)
-	require.Equal(t, Mapping{
-		"0": {"123", "456"},
+	require.ElementsMatch(t, Mapping{
+		{PhysicalGPUIdentifier: "0", JobIDs: []string{"123", "456"}},
+		{PhysicalGPUIdentifier: "2", GPUInstanceID: "1", JobIDs: []string{"789"}},
 	}, mapping)
 }
 
@@ -47,10 +50,16 @@ func TestFileReaderUUID(t *testing.T) {
 	const uuid = "GPU-2cf69c7e-0d83-51f3-6d41-d3f7a6b08cb7"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "0"), []byte("ignored\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, uuid), []byte("123\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, uuid+".3"), []byte("456\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, uuid+".invalid"), []byte("ignored\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "MIG-2cf69c7e-0d83-51f3-6d41-d3f7a6b08cb7"), []byte("ignored\n"), 0o600))
 
 	mapping, err := NewFileReader(dir, GPUIdentifierUUID).Read()
 	require.NoError(t, err)
-	require.Equal(t, Mapping{uuid: {"123"}}, mapping)
+	require.ElementsMatch(t, Mapping{
+		{PhysicalGPUIdentifier: uuid, JobIDs: []string{"123"}},
+		{PhysicalGPUIdentifier: uuid, GPUInstanceID: "3", JobIDs: []string{"456"}},
+	}, mapping)
 }
 
 func TestFileReaderUnsupportedGPUIdentifierIgnoresAllFiles(t *testing.T) {
@@ -98,13 +107,13 @@ func TestFileReaderSkipsInvalidUTF8JobID(t *testing.T) {
 
 	mapping, err := NewFileReader(dir, GPUIdentifierDCGMIndex).Read()
 	require.NoError(t, err)
-	require.Equal(t, Mapping{"0": {"123"}}, mapping)
+	require.Equal(t, Mapping{{PhysicalGPUIdentifier: "0", JobIDs: []string{"123"}}}, mapping)
 }
 
 func TestFileReaderRejectsTooManyJobIDsForGPU(t *testing.T) {
 	dir := t.TempDir()
 	var contents strings.Builder
-	for i := 0; i <= maxJobIDsPerGPU; i++ {
+	for i := 0; i <= maxJobIDsPerMapping; i++ {
 		fmt.Fprintln(&contents, i)
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "0"), []byte(contents.String()), 0o600))
