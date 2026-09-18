@@ -127,7 +127,7 @@ func isValidTCPAddress(address string) bool {
 	if net.ParseIP(host) != nil {
 		return true
 	}
-	return isValidHostname(host)
+	return hasValidHostCharacters(host)
 }
 
 func isValidPort(port string) bool {
@@ -135,20 +135,19 @@ func isValidPort(port string) bool {
 	return err == nil && value > 0 && value <= 65535
 }
 
-func isValidHostname(host string) bool {
-	host = strings.TrimSuffix(host, ".")
-	if host == "" || len(host) > 253 {
+// hasValidHostCharacters preserves the permissive hostname character set used
+// before endpoint lists were introduced. Name resolution is left to the system
+// resolver so local aliases containing underscores remain supported.
+func hasValidHostCharacters(host string) bool {
+	if host == "" {
 		return false
 	}
-	for _, label := range strings.Split(host, ".") {
-		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+	for _, char := range host {
+		switch {
+		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
+		case char == '.', char == '-', char == '_':
+		default:
 			return false
-		}
-		for _, char := range label {
-			if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') &&
-				(char < '0' || char > '9') && char != '-' {
-				return false
-			}
 		}
 	}
 	return true

@@ -95,6 +95,8 @@ func TestIsValidAddress(t *testing.T) {
 	}{
 		{name: "hostname", address: "nvidia-dcgm.gpu-operator.svc", valid: true},
 		{name: "hostname and port", address: "nvidia-dcgm.gpu-operator.svc:5555", valid: true},
+		{name: "local alias with underscore", address: "dcgm_host:5555", valid: true},
+		{name: "previously accepted local name", address: "-dcgm_host:5555", valid: true},
 		{name: "IPv4 and port", address: "127.0.0.1:5555", valid: true},
 		{name: "bracketed IPv6", address: "[2001:db8::1]", valid: true},
 		{name: "bracketed IPv6 and port", address: "[2001:db8::1]:5555", valid: true},
@@ -106,7 +108,7 @@ func TestIsValidAddress(t *testing.T) {
 		{name: "zero port", address: "host:0", valid: false},
 		{name: "port too large", address: "host:65536", valid: false},
 		{name: "non-numeric port", address: "host:dcgm", valid: false},
-		{name: "invalid hostname label", address: "-host:5555", valid: false},
+		{name: "invalid hostname character", address: "dcgm host:5555", valid: false},
 		{name: "URL scheme", address: "http://host:5555", valid: false},
 		{name: "root is not a socket path", address: "/", valid: false},
 	}
