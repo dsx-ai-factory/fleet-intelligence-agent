@@ -85,9 +85,9 @@ Before enabling it:
 The file format is based on the
 [dcgm-exporter HPC job-mapping convention](https://github.com/NVIDIA/dcgm-exporter#how-to-include-hpc-jobs-in-metric-labels):
 
-- Each regular file represents one whole GPU.
+- Each regular file represents one whole GPU or MIG GPU instance.
 - Each line contains one active Slurm job ID, with at most 16 unique IDs per
-  GPU.
+  mapping file.
 - Removing a job ID or file stops new samples for that relationship on the next
   metrics scrape.
 
@@ -95,8 +95,13 @@ Choose the filename format that the scheduler hook can provide:
 
 | Value | Mapping filename | When to use it |
 | --- | --- | --- |
-| `dcgm_index` (default) | Numeric DCGM index, such as `0` | Use with an existing dcgm-exporter mapping directory, or when the hook's numeric value is verified to match FleetInt's `gpu` label. |
-| `uuid` | Whole-GPU UUID, such as `GPU-2cf69c7e-0d83-51f3-6d41-d3f7a6b08cb7` | Use when the hook receives or resolves the allocated GPU UUID. This avoids ambiguity between numeric identifier namespaces. |
+| `dcgm_index` (default) | Numeric DCGM index, such as `0`, or index and GPU-instance ID, such as `2.1` | Use with an existing dcgm-exporter mapping directory, or when the hook's numeric value is verified to match FleetInt's `gpu` label. |
+| `uuid` | Whole-GPU UUID, optionally followed by a GPU-instance ID, such as `GPU-2cf69c7e-0d83-51f3-6d41-d3f7a6b08cb7.1` | Use when the hook receives or resolves the allocated physical GPU UUID. This avoids ambiguity between numeric identifier namespaces. |
+
+For a MIG filename, FleetInt validates the physical GPU against live DCGM
+inventory and exports the instance suffix as `gpu_instance_id`. FleetInt trusts
+the administrator-maintained instance ID; it does not yet query DCGM MIG
+inventory to validate or enrich the instance.
 
 Slurm GRES indexes, Linux device minors, and job-local indexes from
 `CUDA_VISIBLE_DEVICES` are not guaranteed to equal the DCGM index. With the
@@ -134,14 +139,19 @@ sudo curl --unix-socket /run/fleetint/fleetint.sock \
 The local Prometheus output contains a series like:
 
 ```promql
-fleetint_gpu_workload_info{gpud_component="workload-attribution",gpu="0",uuid="GPU-abc",workload_id="123456",workload_source="hpc"} 1
+fleetint_gpu_workload_info{gpud_component="workload-attribution",gpu="0",gpu_instance_id="",uuid="GPU-abc",workload_id="123456",workload_source="hpc"} 1
+```
+
+A MIG mapping such as `2.1` includes the instance identity:
+
+```promql
+fleetint_gpu_workload_info{gpud_component="workload-attribution",gpu="2",gpu_instance_id="1",uuid="GPU-def",workload_id="123456",workload_source="hpc"} 1
 ```
 
 If the metric appears locally, it is included in the next normal metrics export
 to Fleet Intelligence. If it does not appear, check that the mapping directory
 contains active files, the configured filename mode matches those files, and
-DCGM reports the referenced GPU. MIG filenames such as `2.0` are not currently
-supported.
+DCGM reports the referenced physical GPU.
 
 FleetInt deliberately emits a separate identity metric instead of adding the
 job ID to every GPU metric. Existing GPU telemetry remains unchanged, and job

@@ -70,8 +70,8 @@ func (r staticReader) GPUIdentifierType() GPUIdentifierType {
 func TestCollector(t *testing.T) {
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(NewCollector(staticReader{mapping: Mapping{
-		"0": {"123", "456"},
-		"2": {"789"},
+		gpuJobMapping("0", "", "123", "456"),
+		gpuJobMapping("2", "", "789"),
 	}}, staticGPUUUIDProvider(map[string]string{"0": "GPU-a", "2": "GPU-c"})))
 
 	scraper, err := pkgmetricsscraper.NewPrometheusScraper(registry)
@@ -89,15 +89,15 @@ func TestCollector(t *testing.T) {
 	}
 	require.Equal(t, map[string]map[string]string{
 		"123": {
-			"uuid": "GPU-a", "gpu": "0", "workload_source": "hpc",
+			"uuid": "GPU-a", "gpu": "0", "gpu_instance_id": "", "workload_source": "hpc",
 			"workload_id": "123",
 		},
 		"456": {
-			"uuid": "GPU-a", "gpu": "0", "workload_source": "hpc",
+			"uuid": "GPU-a", "gpu": "0", "gpu_instance_id": "", "workload_source": "hpc",
 			"workload_id": "456",
 		},
 		"789": {
-			"uuid": "GPU-c", "gpu": "2", "workload_source": "hpc",
+			"uuid": "GPU-c", "gpu": "2", "gpu_instance_id": "", "workload_source": "hpc",
 			"workload_id": "789",
 		},
 	}, got)
@@ -107,7 +107,7 @@ func TestCollectorResolvesUUIDFilename(t *testing.T) {
 	const uuid = "GPU-2cf69c7e-0d83-51f3-6d41-d3f7a6b08cb7"
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(NewCollector(staticReader{
-		mapping:           Mapping{uuid: {"123"}},
+		mapping:           Mapping{gpuJobMapping(uuid, "", "123")},
 		gpuIdentifierType: GPUIdentifierUUID,
 	}, staticGPUUUIDProvider(map[string]string{"0": uuid})))
 
@@ -121,6 +121,49 @@ func TestCollectorResolvesUUIDFilename(t *testing.T) {
 	require.Equal(t, "123", metrics[0].Labels["workload_id"])
 }
 
+func TestCollectorPreservesGPUInstanceID(t *testing.T) {
+	const uuid = "GPU-2cf69c7e-0d83-51f3-6d41-d3f7a6b08cb7"
+	tests := []struct {
+		name              string
+		gpuIdentifierType GPUIdentifierType
+		mapping           Mapping
+		wantInstanceID    string
+	}{
+		{
+			name:              "DCGM index filename",
+			gpuIdentifierType: GPUIdentifierDCGMIndex,
+			mapping:           Mapping{gpuJobMapping("2", "1", "123")},
+			wantInstanceID:    "1",
+		},
+		{
+			name:              "GPU UUID filename",
+			gpuIdentifierType: GPUIdentifierUUID,
+			mapping:           Mapping{gpuJobMapping(uuid, "3", "123")},
+			wantInstanceID:    "3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := prometheus.NewRegistry()
+			registry.MustRegister(NewCollector(
+				staticReader{mapping: tt.mapping, gpuIdentifierType: tt.gpuIdentifierType},
+				staticGPUUUIDProvider(map[string]string{"2": uuid}),
+			))
+
+			scraper, err := pkgmetricsscraper.NewPrometheusScraper(registry)
+			require.NoError(t, err)
+			metrics, err := scraper.Scrape(context.Background())
+			require.NoError(t, err)
+			require.Len(t, metrics, 1)
+			require.Equal(t, "2", metrics[0].Labels["gpu"])
+			require.Equal(t, uuid, metrics[0].Labels["uuid"])
+			require.Equal(t, tt.wantInstanceID, metrics[0].Labels["gpu_instance_id"])
+			require.Equal(t, "123", metrics[0].Labels["workload_id"])
+		})
+	}
+}
+
 func TestCollectorUsesConfiguredGPUIdentifierType(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -130,12 +173,12 @@ func TestCollectorUsesConfiguredGPUIdentifierType(t *testing.T) {
 		{
 			name:              "index mode does not accept UUID",
 			gpuIdentifierType: GPUIdentifierDCGMIndex,
-			mapping:           Mapping{"GPU-a": {"123"}},
+			mapping:           Mapping{gpuJobMapping("GPU-a", "", "123")},
 		},
 		{
 			name:              "UUID mode does not accept index",
 			gpuIdentifierType: GPUIdentifierUUID,
-			mapping:           Mapping{"0": {"123"}},
+			mapping:           Mapping{gpuJobMapping("0", "", "123")},
 		},
 	}
 
@@ -162,7 +205,7 @@ func TestCollectorDoesNotModifyExistingMetrics(t *testing.T) {
 
 	jobRegistry := prometheus.NewRegistry()
 	jobRegistry.MustRegister(NewCollector(
-		staticReader{mapping: Mapping{"0": {"123"}}},
+		staticReader{mapping: Mapping{gpuJobMapping("0", "", "123")}},
 		staticGPUUUIDProvider(map[string]string{"0": "GPU-a"}),
 	))
 
@@ -191,10 +234,10 @@ func TestCollectorReaderFailureIsNonFatal(t *testing.T) {
 func TestCollectorSkipsUnknownGPUs(t *testing.T) {
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(NewCollector(staticReader{mapping: Mapping{
-		"0":           {"known"},
-		"1":           {"missing"},
-		"2":           {"empty-uuid"},
-		"GPU-unknown": {"missing-uuid"},
+		gpuJobMapping("0", "", "known"),
+		gpuJobMapping("1", "", "missing"),
+		gpuJobMapping("2", "", "empty-uuid"),
+		gpuJobMapping("GPU-unknown", "", "missing-uuid"),
 	}}, staticGPUUUIDProvider(map[string]string{
 		"0": "GPU-a",
 		"2": "",
@@ -234,10 +277,10 @@ func TestCollectorReflectsJobLifecycle(t *testing.T) {
 		return got
 	}
 
-	reader.Set(Mapping{"0": {"123"}})
+	reader.Set(Mapping{gpuJobMapping("0", "", "123")})
 	require.ElementsMatch(t, []string{"123"}, workloadIDs())
 
-	reader.Set(Mapping{"0": {"456"}})
+	reader.Set(Mapping{gpuJobMapping("0", "", "456")})
 	require.ElementsMatch(t, []string{"456"}, workloadIDs())
 
 	reader.Set(Mapping{})
@@ -248,7 +291,7 @@ func TestCollectorRecoversWhenGPUInventoryBecomesAvailable(t *testing.T) {
 	gpuUUIDByIndex := map[string]string{}
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(NewCollector(
-		staticReader{mapping: Mapping{"0": {"123"}}},
+		staticReader{mapping: Mapping{gpuJobMapping("0", "", "123")}},
 		func() map[string]string { return gpuUUIDByIndex },
 	))
 
@@ -300,5 +343,13 @@ func TestCollectorStopsEmittingRemovedMappingFile(t *testing.T) {
 func staticGPUUUIDProvider(gpuUUIDByIndex map[string]string) func() map[string]string {
 	return func() map[string]string {
 		return gpuUUIDByIndex
+	}
+}
+
+func gpuJobMapping(physicalGPUIdentifier, gpuInstanceID string, jobIDs ...string) GPUJobMapping {
+	return GPUJobMapping{
+		PhysicalGPUIdentifier: physicalGPUIdentifier,
+		GPUInstanceID:         gpuInstanceID,
+		JobIDs:                jobIDs,
 	}
 }

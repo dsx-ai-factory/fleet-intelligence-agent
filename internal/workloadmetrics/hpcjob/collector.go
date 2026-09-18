@@ -58,6 +58,7 @@ func NewCollector(
 			[]string{
 				"uuid",
 				"gpu",
+				"gpu_instance_id",
 				"workload_source",
 				"workload_id",
 			},
@@ -77,7 +78,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 
-	mapping, err := c.reader.Read()
+	mappings, err := c.reader.Read()
 	if err != nil {
 		log.Logger.Warnw("failed to read HPC job mapping; omitting workload identity metrics", "error", err)
 		return
@@ -96,24 +97,29 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 		}
 	}
 
-	for gpuIdentifier, jobIDs := range mapping {
+	for _, gpuJobMapping := range mappings {
 		gpuIndex, uuid, found := resolveGPU(
-			gpuIdentifier,
+			gpuJobMapping.PhysicalGPUIdentifier,
 			c.gpuIdentifierType,
 			gpuUUIDByIndex,
 			gpuIndexByUUID,
 		)
 		if !found || uuid == "" {
-			log.Logger.Infow("HPC job mapping references an unknown GPU; omitting workload identity metrics", "gpuIdentifier", gpuIdentifier)
+			log.Logger.Infow(
+				"HPC job mapping references an unknown GPU; omitting workload identity metrics",
+				"gpuIdentifier", gpuJobMapping.PhysicalGPUIdentifier,
+				"gpuInstanceID", gpuJobMapping.GPUInstanceID,
+			)
 			continue
 		}
-		for _, jobID := range jobIDs {
+		for _, jobID := range gpuJobMapping.JobIDs {
 			ch <- prometheus.MustNewConstMetric(
 				c.desc,
 				prometheus.GaugeValue,
 				1,
 				uuid,
 				gpuIndex,
+				gpuJobMapping.GPUInstanceID,
 				workloadSource,
 				jobID,
 			)
@@ -122,21 +128,21 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 }
 
 func resolveGPU(
-	gpuIdentifier string,
+	physicalGPUIdentifier string,
 	gpuIdentifierType GPUIdentifierType,
 	gpuUUIDByIndex map[string]string,
 	gpuIndexByUUID map[string]string,
 ) (gpuIndex string, uuid string, found bool) {
 	switch gpuIdentifierType {
 	case GPUIdentifierDCGMIndex:
-		uuid, found = gpuUUIDByIndex[gpuIdentifier]
+		uuid, found := gpuUUIDByIndex[physicalGPUIdentifier]
 		if found {
-			return gpuIdentifier, uuid, true
+			return physicalGPUIdentifier, uuid, true
 		}
 	case GPUIdentifierUUID:
-		gpuIndex, found = gpuIndexByUUID[gpuIdentifier]
+		gpuIndex, found := gpuIndexByUUID[physicalGPUIdentifier]
 		if found {
-			return gpuIndex, gpuIdentifier, true
+			return gpuIndex, physicalGPUIdentifier, true
 		}
 	}
 	return "", "", false
