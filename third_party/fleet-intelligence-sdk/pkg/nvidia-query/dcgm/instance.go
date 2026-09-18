@@ -19,15 +19,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
 
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
+	dcgmendpoint "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm/endpoint"
 )
 
 var _ Instance = &instance{}
@@ -37,72 +35,6 @@ const defaultDCGMGroupName = "fleetint-default-health"
 
 var dcgmReconnectInterval = defaultDCGMReconnectInterval
 var errReconnectAborted = errors.New("dcgm reconnect aborted")
-
-// dcgmInitParams defines how we initialize the go-dcgm client.
-type dcgmInitParams struct {
-	address      string
-	isUnixSocket string // "0" or "1" for go-dcgm
-}
-
-// isValidDCGMAddress returns true if addr is a plausible DCGM address:
-//   - an absolute unix socket path (starts with "/")
-//   - a hostname or host:port using only safe characters (no URL scheme)
-func isValidDCGMAddress(addr string) bool {
-	if strings.HasPrefix(addr, "/") {
-		return true // unix socket path
-	}
-	// Reject any value that looks like a URL scheme (e.g. "http://evil.com")
-	if strings.Contains(addr, "://") {
-		return false
-	}
-	// Allow hostname characters, dots, hyphens, underscores, colons (port), and brackets (IPv6)
-	for _, c := range addr {
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
-		case c == '.', c == '-', c == '_', c == ':', c == '[', c == ']':
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-// - If DCGM_URL is set: connect via TCP to that address.
-// - Otherwise: default to TCP "localhost" (default behavior).
-// - If DCGM_URL_IS_UNIX_SOCKET is truthy: treat the address as a unix socket path.
-func resolveInitFromEnv() dcgmInitParams {
-	// DCGM_URL can be either:
-	// - TCP address, optionally including port (e.g. "dcgm-service:5555")
-	// - unix socket path (e.g. "/run/dcgm/dcgm.sock")
-	addr := strings.TrimSpace(os.Getenv("DCGM_URL"))
-	addrInvalid := false
-	if addr != "" && !isValidDCGMAddress(addr) {
-		log.Logger.Warnw("DCGM_URL contains invalid characters, ignoring override and using default",
-			"value", addr, "default", "localhost")
-		addr = ""
-		addrInvalid = true
-	}
-
-	isUnixSocketRaw := strings.TrimSpace(os.Getenv("DCGM_URL_IS_UNIX_SOCKET"))
-	isUnixSocket := "0"
-	if isUnixSocketRaw != "" {
-		parsed, err := strconv.ParseBool(isUnixSocketRaw)
-		if err == nil && parsed {
-			isUnixSocket = "1"
-		}
-	}
-
-	if addr == "" {
-		addr = "localhost"
-		// When the address override was rejected, reset the socket flag so the
-		// TCP "localhost" default is not accidentally treated as a socket path.
-		if addrInvalid {
-			isUnixSocket = "0"
-		}
-	}
-
-	return dcgmInitParams{address: addr, isUnixSocket: isUnixSocket}
-}
 
 // allHealthSystems lists all DCGM health systems
 var allHealthSystems = []dcgm.HealthSystem{
@@ -272,8 +204,8 @@ var newConnectedInstanceWithGroupNameFunc = func(groupName string) (Instance, er
 	return newConnectedInstance(groupName)
 }
 
-var dcgmInitFunc = func(initParams dcgmInitParams) (func(), error) {
-	return dcgm.Init(dcgm.Standalone, initParams.address, initParams.isUnixSocket)
+var dcgmInitFunc = func(candidate dcgmendpoint.Candidate) (func(), error) {
+	return dcgm.Init(dcgm.Standalone, candidate.Address, candidate.UnixSocketFlag())
 }
 
 var dcgmNewDefaultGroupFunc = dcgm.NewDefaultGroup
@@ -310,9 +242,24 @@ func newConnectedInstance(groupName string) (Instance, error) {
 	if groupName == "" {
 		groupName = defaultDCGMGroupName
 	}
-	initParams := resolveInitFromEnv()
+	candidates := dcgmendpoint.ResolveFromEnv()
+	var candidateErrors []error
+	for _, candidate := range candidates {
+		connectedInst, err := newConnectedInstanceAt(groupName, candidate)
+		if err != nil {
+			candidateErrors = append(candidateErrors, fmt.Errorf("%s: %w", candidate.Address, err))
+			continue
+		}
+		if len(candidates) > 1 {
+			log.Logger.Infow("selected DCGM HostEngine endpoint", "address", candidate.Address)
+		}
+		return connectedInst, nil
+	}
+	return nil, fmt.Errorf("failed to connect to any DCGM HostEngine endpoint: %w", errors.Join(candidateErrors...))
+}
 
-	cleanup, err := dcgmInitFunc(initParams)
+func newConnectedInstanceAt(groupName string, candidate dcgmendpoint.Candidate) (Instance, error) {
+	cleanup, err := dcgmInitFunc(candidate)
 	if err != nil {
 		return nil, err
 	}
