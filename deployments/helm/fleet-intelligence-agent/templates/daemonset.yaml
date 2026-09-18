@@ -24,7 +24,7 @@
 {{- end -}}
 {{- if and (eq $workloadSource "hpc") (not (has $hpcGPUIdentifier (list "dcgm_index" "uuid"))) -}}
 {{- fail "workloadAttribution.hpc.gpuIdentifier must be dcgm_index or uuid" -}}
-{{- end -}}
+{{- end }}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
