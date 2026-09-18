@@ -68,6 +68,7 @@ nfpms:
     formats:
       - deb
     dependencies:
+      - datacenter-gpu-manager-4-core
       - datacenter-gpu-manager-4-proprietary
       - nvattest
       - corelib
@@ -108,6 +109,7 @@ nfpms:
     formats:
       - rpm
     dependencies:
+      - datacenter-gpu-manager-4-core
       - datacenter-gpu-manager-4-proprietary
       - nvattest
       - corelib
