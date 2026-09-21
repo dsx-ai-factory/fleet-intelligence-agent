@@ -54,13 +54,15 @@ printf 'machine %s\nlogin %s\npassword %s\n' \
   "$ARTIFACTORY_TOKEN" > "$credentials_file"
 
 publish_packages() {
-  local package_entry architecture package package_name upload_url
+  local package_entry architecture package package_name sha256 upload_url
 
   for package_entry in "${packages[@]}"; do
     architecture="${package_entry%%:*}"
     package="${package_entry#*:}"
     package_name="$(basename "$package")"
     [[ "$package_name" =~ ^fleetint_[a-zA-Z0-9.+~_-]+_(amd64|arm64)\.deb$ ]] || return 1
+    sha256="$(sha256sum "$package" | cut -d' ' -f1)"
+    [[ "$sha256" =~ ^[a-f0-9]{64}$ ]] || return 1
 
     upload_url="${artifactory_destination_url}/${package_name}"
     upload_url+=";deb.distribution=noble;deb.component=main;deb.architecture=${architecture}"
@@ -78,6 +80,7 @@ publish_packages() {
       --retry-max-time 300 \
       --retry-connrefused \
       --netrc-file "$credentials_file" \
+      --header "X-Checksum-Sha256: ${sha256}" \
       --upload-file "$package" \
       "$upload_url" || return 1
   done
