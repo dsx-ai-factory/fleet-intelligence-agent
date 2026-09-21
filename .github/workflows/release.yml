@@ -120,6 +120,14 @@ jobs:
           NVSEC_CHECKSUM_JOB_TYPE: ${{ vars.NVSEC_CHECKSUM_JOB_TYPE || 'FLEET_INTELLIGENCE' }}
           NSPECT_ID: ${{ vars.NSPECT_ID }}
 
+      - name: Publish DEB packages to Artifactory
+        if: ${{ !contains(github.ref_name, '-') }}
+        run: scripts/publish-deb-artifactory.sh dist
+        env:
+          ARTIFACTORY_URL: ${{ secrets.ARTIFACTORY_URL }}
+          ARTIFACTORY_USER: ${{ secrets.ARTIFACTORY_USER }}
+          ARTIFACTORY_TOKEN: ${{ secrets.ARTIFACTORY_TOKEN }}
+
       - name: Replace signed assets in draft release
         uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
         with:
