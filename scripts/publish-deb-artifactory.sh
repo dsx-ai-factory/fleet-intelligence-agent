@@ -8,8 +8,6 @@ if [[ $# -ne 1 ]]; then
 fi
 
 dist_dir="${1%/}"
-debian_distribution="${ARTIFACTORY_DEBIAN_DISTRIBUTION:-noble}"
-debian_component="${ARTIFACTORY_DEBIAN_COMPONENT:-main}"
 
 [[ -n "${ARTIFACTORY_URL:-}" ]] || exit 1
 [[ -n "${ARTIFACTORY_USER:-}" ]] || exit 1
@@ -20,11 +18,6 @@ artifactory_destination_url="${ARTIFACTORY_URL%/}"
 [[ -d "$dist_dir" ]] || exit 1
 
 [[ "$artifactory_destination_url" == https://* ]] || exit 1
-
-for value_name in debian_distribution debian_component; do
-  value="${!value_name}"
-  [[ "$value" =~ ^[a-zA-Z0-9._-]+$ ]] || exit 1
-done
 
 [[ "$ARTIFACTORY_USER" != *[$'\r\n\t ']* ]] || exit 1
 [[ "$ARTIFACTORY_TOKEN" != *[$'\r\n\t ']* ]] || exit 1
@@ -63,7 +56,7 @@ for package_entry in "${packages[@]}"; do
   [[ "$package_name" =~ ^fleetint_[a-zA-Z0-9.+~_-]+_(amd64|arm64)\.deb$ ]] || exit 1
 
   upload_url="${artifactory_destination_url}/${package_name}"
-  upload_url+=";deb.distribution=${debian_distribution};deb.component=${debian_component};deb.architecture=${architecture}"
+  upload_url+=";deb.distribution=noble;deb.component=main;deb.architecture=${architecture}"
 
   curl \
     --fail \
