@@ -121,6 +121,7 @@ jobs:
           NSPECT_ID: ${{ vars.NSPECT_ID }}
 
       - name: Publish DEB packages to Artifactory
+        if: ${{ !contains(github.ref_name, '-') }}
         run: scripts/publish-deb-artifactory.sh dist
         env:
           ARTIFACTORY_URL: ${{ secrets.ARTIFACTORY_URL }}

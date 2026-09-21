@@ -42,30 +42,50 @@ cleanup() {
 trap cleanup EXIT
 chmod 0600 "$credentials_file"
 
-artifactory_host="${artifactory_destination_url#https://}"
-artifactory_host="${artifactory_host%%/*}"
+artifactory_authority="${artifactory_destination_url#https://}"
+artifactory_authority="${artifactory_authority%%/*}"
+[[ "$artifactory_authority" != *"@"* ]] || exit 1
+[[ "$artifactory_authority" != \[* ]] || exit 1
+artifactory_host="${artifactory_authority%%:*}"
+[[ -n "$artifactory_host" ]] || exit 1
 printf 'machine %s\nlogin %s\npassword %s\n' \
   "$artifactory_host" \
   "$ARTIFACTORY_USER" \
   "$ARTIFACTORY_TOKEN" > "$credentials_file"
 
-for package_entry in "${packages[@]}"; do
-  architecture="${package_entry%%:*}"
-  package="${package_entry#*:}"
-  package_name="$(basename "$package")"
-  [[ "$package_name" =~ ^fleetint_[a-zA-Z0-9.+~_-]+_(amd64|arm64)\.deb$ ]] || exit 1
+publish_packages() {
+  local package_entry architecture package package_name upload_url
 
-  upload_url="${artifactory_destination_url}/${package_name}"
-  upload_url+=";deb.distribution=noble;deb.component=main;deb.architecture=${architecture}"
+  for package_entry in "${packages[@]}"; do
+    architecture="${package_entry%%:*}"
+    package="${package_entry#*:}"
+    package_name="$(basename "$package")"
+    [[ "$package_name" =~ ^fleetint_[a-zA-Z0-9.+~_-]+_(amd64|arm64)\.deb$ ]] || return 1
 
-  curl \
-    --fail \
-    --silent \
-    --output /dev/null \
-    --retry 3 \
-    --retry-delay 2 \
-    --retry-connrefused \
-    --netrc-file "$credentials_file" \
-    --upload-file "$package" \
-    "$upload_url"
+    upload_url="${artifactory_destination_url}/${package_name}"
+    upload_url+=";deb.distribution=noble;deb.component=main;deb.architecture=${architecture}"
+
+    curl \
+      --fail \
+      --silent \
+      --output /dev/null \
+      --connect-timeout 15 \
+      --max-time 600 \
+      --low-speed-limit 1024 \
+      --low-speed-time 60 \
+      --retry 2 \
+      --retry-delay 2 \
+      --retry-max-time 300 \
+      --retry-connrefused \
+      --netrc-file "$credentials_file" \
+      --upload-file "$package" \
+      "$upload_url" || return 1
+  done
+}
+
+for transaction_attempt in 1 2 3; do
+  publish_packages && exit 0
+  (( transaction_attempt == 3 )) || sleep $((transaction_attempt * 2))
 done
+
+exit 1
