@@ -71,8 +71,8 @@ publish_packages() {
       --output /dev/null \
       --connect-timeout 15 \
       --max-time 600 \
-      --low-speed-limit 1024 \
-      --low-speed-time 60 \
+      --speed-limit 1024 \
+      --speed-time 60 \
       --retry 2 \
       --retry-delay 2 \
       --retry-max-time 300 \
