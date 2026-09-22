@@ -372,7 +372,8 @@ func (c *otlpConverter) convertMetricToOTLP(metric pkgmetrics.Metric, identity i
 }
 
 // convertLabelsToOTLPAttributes adds stable physical-entity identity without
-// overwriting labels emitted by a component. MIG is intentionally unsupported.
+// overwriting labels emitted by a component. Source-provided MIG labels pass
+// through, but MIG inventory enrichment is intentionally unsupported.
 func (c *otlpConverter) convertLabelsToOTLPAttributes(labels map[string]string, identity identityContext) []*commonv1.KeyValue {
 	enriched := identity.enrichLabels(labels)
 	keys := slices.Sorted(maps.Keys(enriched))

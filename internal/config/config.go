@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
@@ -34,6 +35,13 @@ type ConfigEntry struct {
 	Key   string
 	Value string
 }
+
+const (
+	WorkloadSourceHPC = "hpc"
+
+	HPCGPUIdentifierDCGMIndex = "dcgm_index"
+	HPCGPUIdentifierUUID      = "uuid"
+)
 
 // Config provides configuration for the health metrics exporter
 type Config struct {
@@ -66,6 +74,9 @@ type Config struct {
 	// SECURITY: Only accessible from localhost (127.0.0.0/8 or ::1). Disabled by default.
 	EnableFaultInjection bool `json:"enable_fault_injection"`
 
+	// WorkloadAttribution selects one source of GPU-to-workload assignments.
+	WorkloadAttribution *WorkloadAttributionConfig `json:"workload_attribution,omitempty"`
+
 	// Inventory controls the periodic inventory loop.
 	Inventory *InventoryConfig `json:"inventory,omitempty"`
 
@@ -74,6 +85,18 @@ type Config struct {
 
 	// Health Exporter Configuration
 	HealthExporter *HealthExporterConfig `json:"health_exporter,omitempty"`
+}
+
+// WorkloadAttributionConfig selects one workload assignment source.
+type WorkloadAttributionConfig struct {
+	Source string             `json:"source"`
+	HPC    *HPCWorkloadConfig `json:"hpc,omitempty"`
+}
+
+// HPCWorkloadConfig configures scheduler-maintained GPU-to-job mapping files.
+type HPCWorkloadConfig struct {
+	JobMappingDir string `json:"job_mapping_dir"`
+	GPUIdentifier string `json:"gpu_identifier,omitempty"`
 }
 
 // InventoryConfig holds configuration for the periodic inventory loop.
@@ -158,6 +181,10 @@ type HealthExporterConfig struct {
 
 // Validate checks if the configuration is valid
 func (config *Config) Validate() error {
+	if err := config.WorkloadAttribution.Validate(); err != nil {
+		return err
+	}
+
 	// In offline mode, address is not required
 	isOfflineMode := config.HealthExporter != nil && config.HealthExporter.OfflineMode
 	if !isOfflineMode {
@@ -222,6 +249,48 @@ func (config *Config) Validate() error {
 	}
 
 	return nil
+}
+
+// Validate checks whether the workload attribution configuration is complete
+// and supported. A nil receiver represents disabled workload attribution.
+func (cfg *WorkloadAttributionConfig) Validate() error {
+	if cfg == nil || cfg.Source == "" {
+		if cfg != nil && cfg.HPC != nil &&
+			(cfg.HPC.JobMappingDir != "" || cfg.HPC.GPUIdentifier != "") {
+			return fmt.Errorf("workload_attribution.hpc configuration requires source %q", WorkloadSourceHPC)
+		}
+		return nil
+	}
+
+	if cfg.Source != WorkloadSourceHPC {
+		return fmt.Errorf("unsupported workload_attribution source %q", cfg.Source)
+	}
+	if cfg.HPC == nil || cfg.HPC.JobMappingDir == "" {
+		return fmt.Errorf("workload_attribution.hpc.job_mapping_dir is required when source is %q", WorkloadSourceHPC)
+	}
+	if !filepath.IsAbs(cfg.HPC.JobMappingDir) {
+		return fmt.Errorf("workload_attribution.hpc.job_mapping_dir must be an absolute path")
+	}
+	if cfg.HPC.GPUIdentifier != "" &&
+		cfg.HPC.GPUIdentifier != HPCGPUIdentifierDCGMIndex &&
+		cfg.HPC.GPUIdentifier != HPCGPUIdentifierUUID {
+		return fmt.Errorf(
+			"unsupported workload_attribution.hpc.gpu_identifier %q; supported values are %q and %q",
+			cfg.HPC.GPUIdentifier,
+			HPCGPUIdentifierDCGMIndex,
+			HPCGPUIdentifierUUID,
+		)
+	}
+	return nil
+}
+
+// HPCGPUIdentifier returns the configured mapping filename identifier, using
+// the dcgm-exporter-compatible numeric DCGM index when it is unset.
+func (cfg *HPCWorkloadConfig) HPCGPUIdentifier() string {
+	if cfg == nil || cfg.GPUIdentifier == "" {
+		return HPCGPUIdentifierDCGMIndex
+	}
+	return cfg.GPUIdentifier
 }
 
 func validateLoopConfig(name string, cfg interface {

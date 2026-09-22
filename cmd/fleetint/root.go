@@ -88,6 +88,22 @@ func App() *cli.App {
 					Usage: "set the listen address",
 					Value: config.DefaultListenAddress,
 				},
+				&cli.StringFlag{
+					Name:   "workload-attribution-source",
+					Usage:  "workload attribution source [hpc] (disabled when unset)",
+					EnvVar: "FLEETINT_WORKLOAD_ATTRIBUTION_SOURCE",
+				},
+				&cli.StringFlag{
+					Name:   "hpc-job-mapping-dir",
+					Usage:  "directory containing scheduler-maintained GPU-to-job mapping files (required for the hpc workload source)",
+					EnvVar: "FLEETINT_HPC_JOB_MAPPING_DIR",
+				},
+				&cli.StringFlag{
+					Name:   "hpc-gpu-identifier",
+					Usage:  "GPU identifier used by HPC mapping filenames [dcgm_index, uuid]",
+					Value:  config.HPCGPUIdentifierDCGMIndex,
+					EnvVar: "FLEETINT_HPC_GPU_IDENTIFIER",
+				},
 				&cli.DurationFlag{
 					Name:  "retention-period",
 					Usage: "set the time period to retain metrics for (once elapsed, old records are automatically purged)",

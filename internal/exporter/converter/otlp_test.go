@@ -99,6 +99,54 @@ func TestOTLPConverter_Convert_WithMetrics(t *testing.T) {
 	assert.Contains(t, metrics[0].Description, "gpu")
 }
 
+func TestOTLPConverter_Convert_WorkloadGPUInstanceID(t *testing.T) {
+	tests := []struct {
+		name              string
+		gpuInstanceID     string
+		wantInstanceLabel bool
+	}{
+		{name: "MIG instance", gpuInstanceID: "1", wantInstanceLabel: true},
+		{name: "whole GPU", gpuInstanceID: "", wantInstanceLabel: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := &collector.HealthData{
+				Timestamp: time.Now(),
+				MachineID: "test-machine",
+				Metrics: metrics.Metrics{{
+					Component:        "workload-attribution",
+					Name:             "fleetint_gpu_workload_info",
+					UnixMilliseconds: 1699200000000,
+					Value:            1,
+					Labels: map[string]string{
+						"uuid":            "GPU-abc",
+						"gpu":             "2",
+						"gpu_instance_id": tt.gpuInstanceID,
+						"workload_source": "hpc",
+						"workload_id":     "123",
+					},
+				}},
+			}
+
+			otlpData := NewOTLPConverter().Convert(data)
+			otlpMetrics := otlpData.Metrics.ResourceMetrics[0].ScopeMetrics[0].Metrics
+			workloadMetric := findOTLPMetric(otlpMetrics, "fleetint_gpu_workload_info")
+			require.NotNil(t, workloadMetric)
+
+			attributes := make(map[string]string)
+			for _, attribute := range workloadMetric.GetGauge().DataPoints[0].Attributes {
+				attributes[attribute.Key] = attribute.Value.GetStringValue()
+			}
+			if tt.wantInstanceLabel {
+				require.Equal(t, tt.gpuInstanceID, attributes["gpu_instance_id"])
+			} else {
+				require.NotContains(t, attributes, "gpu_instance_id")
+			}
+		})
+	}
+}
+
 func TestOTLPConverter_Convert_CounterMetricsBecomeCumulativeSums(t *testing.T) {
 	data := &collector.HealthData{
 		Timestamp: time.Now(),

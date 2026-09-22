@@ -44,6 +44,9 @@ Common values (defaults from `values.yaml`):
 | `listenAddress` | `0.0.0.0:15133` | Listen address. |
 | `retentionPeriod` | `24h` | Retention period for stored metrics and events. |
 | `components` | `all` | Enabled components. |
+| `workloadAttribution.source` | unset | Workload assignment source. Currently supported value: `hpc`. Leaving it unset disables workload attribution. |
+| `workloadAttribution.hpc.jobMappingDir` | `""` | Host mapping directory mounted read-only when the source is `hpc`; an explicit absolute path is required. |
+| `workloadAttribution.hpc.gpuIdentifier` | `dcgm_index` | Mapping filename identifier: `dcgm_index` or `uuid`. |
 | `enroll.enabled` | `false` | Enable enrollment init container. |
 | `enroll.unenroll` | `false` | Run explicit unenroll init container (cleanup persisted enrollment metadata). |
 | `enroll.force` | `false` | Append `--force` to the enrollment command. |
@@ -67,6 +70,27 @@ Common values (defaults from `values.yaml`):
 | `serviceAccount.create` | `true` | Create ServiceAccount. |
 | `serviceAccount.name` | `""` | ServiceAccount name. |
 | `serviceAccount.automountToken` | `false` | Automount service account token. |
+
+### Slurm workload identity
+
+Enable workload identity to send GPU-to-job relationships with the agent's
+normal telemetry:
+
+```yaml
+workloadAttribution:
+  source: hpc
+  hpc:
+    jobMappingDir: /var/run/nvidia/slurm
+    gpuIdentifier: uuid
+```
+
+The chart mounts the host mapping directory read-only. Slurm Prolog/Epilog
+hooks must maintain the files. Use `dcgm_index` instead of `uuid` only when the
+numeric filenames match the DCGM `gpu` label, as they do for the dcgm-exporter
+convention.
+
+See [Send Slurm workload identity to Fleet Intelligence](../../../docs/configuration.md#send-slurm-workload-identity-to-fleet-intelligence)
+for mapping-file requirements and verification steps.
 
 ### Enrollment (per node via init container)
 
