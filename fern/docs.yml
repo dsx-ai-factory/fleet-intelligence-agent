@@ -22,6 +22,9 @@ navigation:
   - page: Overview
     path: ../README.md
     slug: overview
+  - page: Getting Started
+    path: ../docs/getting-started.md
+    slug: getting-started
   - page: Architecture
     path: ../docs/architecture.md
     slug: architecture

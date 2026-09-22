@@ -86,11 +86,11 @@ release/
 # Local development
 local/
 dev/
+.cache/
 !third_party/fleet-intelligence-sdk/pkg/nvidia/dev/
 !third_party/fleet-intelligence-sdk/pkg/nvidia/dev/**
 
 CLAUDE.md
-AGENTS.md
 
 .worktrees/
 docs/plans/

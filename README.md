@@ -1,8 +1,12 @@
 # NVIDIA Fleet Intelligence Agent
 
-NVIDIA Fleet Intelligence Agent - Host agent for GPU telemetry collection and attestation.
+NVIDIA Fleet Intelligence Agent gives GPU infrastructure operators a single,
+lightweight agent for collecting hardware health, system telemetry, and
+attestation data. It helps teams detect node-level problems and export
+consistent diagnostics from bare-metal or Kubernetes environments without
+assembling separate collectors for each signal source.
 
-Built on top of [leptonai/gpud](https://github.com/leptonai/gpud)
+Built on top of [leptonai/gpud](https://github.com/leptonai/gpud).
 
 ## Overview
 
@@ -45,15 +49,57 @@ contains enrollment credentials.
 | AlmaLinux | 8, 9, 10 | x86_64, ARM64 | Ampere, Ada Lovelace, Hopper, Blackwell, Rubin |
 | Amazon Linux | 2023 | x86_64, ARM64 | Ampere, Ada Lovelace, Hopper, Blackwell, Rubin |
 
+## Quickstart
+
+Install the agent using the guide for your environment:
+
+- [Ubuntu or Debian package](docs/install-deb.md)
+- [RHEL, Rocky Linux, AlmaLinux, or Amazon Linux package](docs/install-rpm.md)
+- [Kubernetes with Helm](docs/install-helm.md)
+
+After installing a host package, validate the machine and run a one-time health
+scan:
+
+```bash
+sudo fleetint precheck
+sudo fleetint scan
+```
+
+To export telemetry to the Fleet Intelligence backend, generate an enrollment
+token from the Fleet Intelligence UI and enroll the host:
+
+```bash
+sudo fleetint enroll \
+  --endpoint=https://data.fleet-intelligence.nvidia.com \
+  --token-file=/path/to/enrollment-token
+sudo fleetint status
+```
+
+Use `--token-file` instead of `--token` to avoid exposing the token in the
+process list. Enrollment is optional for local scans and offline collection.
+Kubernetes users configure enrollment during Helm installation.
+
+See [Getting Started](docs/getting-started.md) for prerequisites, deployment
+verification, and the next configuration steps.
+
 ## Documentation
 
 Full documentation is available at **[docs.nvidia.com/fleet-intel/agent](https://docs.nvidia.com/fleet-intel/agent)**, including installation guides, configuration reference, architecture overview, and usage examples.
 
 For the broader Fleet Intelligence platform documentation, see [docs.nvidia.com/fleet-intel](https://docs.nvidia.com/fleet-intel).
 
+- [Getting Started](docs/getting-started.md)
+- [Usage](docs/usage.md)
+- [Configuration](docs/configuration.md)
+- [Architecture](docs/architecture.md)
+- [Development](docs/development.md)
+
 ## Contributing
 
 See [CONTRIBUTING.md](https://github.com/dsx-ai-factory/fleet-intelligence-agent/blob/main/CONTRIBUTING.md) for development setup and guidelines.
+
+Participation in this project is governed by the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 Related: [leptonai/gpud](https://github.com/leptonai/gpud) (upstream dependency)
 
