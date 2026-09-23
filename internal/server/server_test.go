@@ -41,7 +41,7 @@ func TestGetHealthCheckInterval(t *testing.T) {
 		{
 			name:     "nil_health_exporter",
 			config:   &config.Config{},
-			expected: time.Minute,
+			expected: 30 * time.Second,
 		},
 		{
 			name: "zero_interval",
@@ -50,7 +50,7 @@ func TestGetHealthCheckInterval(t *testing.T) {
 					HealthCheckInterval: metav1.Duration{Duration: 0},
 				},
 			},
-			expected: time.Minute,
+			expected: 30 * time.Second,
 		},
 		{
 			name: "custom_interval",
@@ -76,6 +76,40 @@ func TestGetHealthCheckInterval(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			interval := getHealthCheckInterval(tt.config)
 			assert.Equal(t, tt.expected, interval)
+		})
+	}
+}
+
+func TestGetDCGMHealthCheckInterval(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   *config.Config
+		expected time.Duration
+	}{
+		{
+			name:     "nil_health_exporter",
+			config:   &config.Config{},
+			expected: time.Minute,
+		},
+		{
+			name: "zero_interval",
+			config: &config.Config{HealthExporter: &config.HealthExporterConfig{
+				DCGMHealthCheckInterval: metav1.Duration{},
+			}},
+			expected: time.Minute,
+		},
+		{
+			name: "custom_interval",
+			config: &config.Config{HealthExporter: &config.HealthExporterConfig{
+				DCGMHealthCheckInterval: metav1.Duration{Duration: 2 * time.Minute},
+			}},
+			expected: 2 * time.Minute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, getDCGMHealthCheckInterval(tt.config))
 		})
 	}
 }
@@ -623,7 +657,7 @@ func TestGetHealthCheckIntervalEdgeCases(t *testing.T) {
 					HealthCheckInterval: metav1.Duration{Duration: -1 * time.Second},
 				},
 			},
-			expected: time.Minute, // Should use default for invalid values
+			expected: 30 * time.Second, // Should use default for invalid values
 		},
 		{
 			name: "very_small_interval",

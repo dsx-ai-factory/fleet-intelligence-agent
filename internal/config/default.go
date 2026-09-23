@@ -100,20 +100,21 @@ func Default(ctx context.Context, opts ...OpOption) (*Config, error) {
 		},
 		// Health exporter is enabled by default
 		HealthExporter: &HealthExporterConfig{
-			MetricsEndpoint:      "",
-			LogsEndpoint:         "",
-			AuthToken:            "",
-			Interval:             metav1.Duration{Duration: 1 * time.Minute},
-			Timeout:              metav1.Duration{Duration: 30 * time.Second},
-			IncludeMetrics:       true,
-			IncludeEvents:        true,
-			IncludeMachineInfo:   true,
-			IncludeComponentData: true,
-			MetricsLookback:      metav1.Duration{Duration: 1 * time.Minute},
-			EventsLookback:       metav1.Duration{Duration: 1 * time.Minute},
-			HealthCheckInterval:  metav1.Duration{Duration: 1 * time.Minute}, // Default 1 minute for component health checks
-			RetryMaxAttempts:     3,                                          // Retry up to 3 times
-			OutputFormat:         "json",                                     // Default to JSON format for offline mode
+			MetricsEndpoint:         "",
+			LogsEndpoint:            "",
+			AuthToken:               "",
+			Interval:                metav1.Duration{Duration: 1 * time.Minute},
+			Timeout:                 metav1.Duration{Duration: 30 * time.Second},
+			IncludeMetrics:          true,
+			IncludeEvents:           true,
+			IncludeMachineInfo:      true,
+			IncludeComponentData:    true,
+			MetricsLookback:         metav1.Duration{Duration: 1 * time.Minute},
+			EventsLookback:          metav1.Duration{Duration: 1 * time.Minute},
+			HealthCheckInterval:     metav1.Duration{Duration: 30 * time.Second}, // Default 30 seconds for component health checks and metric scraping
+			DCGMHealthCheckInterval: metav1.Duration{Duration: 1 * time.Minute},  // Default 1 minute for DCGM passive health checks
+			RetryMaxAttempts:        3,                                           // Retry up to 3 times
+			OutputFormat:            "json",                                      // Default to JSON format for offline mode
 		},
 	}
 

@@ -152,9 +152,13 @@ type HealthExporterConfig struct {
 	// EventsLookback determines how far back to look for events data
 	EventsLookback metav1.Duration `json:"events_lookback"`
 
-	// HealthCheckInterval determines how often individual components perform their health checks
-	// Valid range: 1 second (minimum) to 24 hours (maximum), default is 1 minute
+	// HealthCheckInterval determines how often components perform health checks and metrics are scraped.
+	// Valid range: 1 second (minimum) to 24 hours (maximum), default is 30 seconds.
 	HealthCheckInterval metav1.Duration `json:"health_check_interval"`
+
+	// DCGMHealthCheckInterval determines how often the DCGM passive health module is polled.
+	// Valid range: 1 minute (minimum) to 24 hours (maximum), default is 1 minute.
+	DCGMHealthCheckInterval metav1.Duration `json:"dcgm_health_check_interval"`
 
 	// RetryMaxAttempts is the maximum number of retry attempts for failed requests
 	RetryMaxAttempts int `json:"retry_max_attempts"`
@@ -228,6 +232,17 @@ func (config *Config) Validate() error {
 			}
 			if config.HealthExporter.HealthCheckInterval.Duration > 24*time.Hour {
 				return fmt.Errorf("health_check_interval must be at most 24 hours, got %v", config.HealthExporter.HealthCheckInterval.Duration)
+			}
+		}
+
+		// DCGM passive health evaluates counters over a one-minute window and
+		// should not be polled more frequently than that window.
+		if config.HealthExporter.DCGMHealthCheckInterval.Duration != 0 {
+			if config.HealthExporter.DCGMHealthCheckInterval.Duration < time.Minute {
+				return fmt.Errorf("dcgm_health_check_interval must be at least 1 minute, got %v", config.HealthExporter.DCGMHealthCheckInterval.Duration)
+			}
+			if config.HealthExporter.DCGMHealthCheckInterval.Duration > 24*time.Hour {
+				return fmt.Errorf("dcgm_health_check_interval must be at most 24 hours, got %v", config.HealthExporter.DCGMHealthCheckInterval.Duration)
 			}
 		}
 
@@ -440,9 +455,17 @@ func (config *Config) AttestationLoopAgentConfig() (enabled bool, intervalSecond
 // HealthCheckInterval returns the resolved component health-check interval.
 func (config *Config) HealthCheckInterval() time.Duration {
 	if config == nil || config.HealthExporter == nil || config.HealthExporter.HealthCheckInterval.Duration <= 0 {
-		return time.Minute
+		return 30 * time.Second
 	}
 	return config.HealthExporter.HealthCheckInterval.Duration
+}
+
+// DCGMHealthCheckInterval returns the resolved DCGM passive-health polling interval.
+func (config *Config) DCGMHealthCheckInterval() time.Duration {
+	if config == nil || config.HealthExporter == nil || config.HealthExporter.DCGMHealthCheckInterval.Duration <= 0 {
+		return time.Minute
+	}
+	return config.HealthExporter.DCGMHealthCheckInterval.Duration
 }
 
 // MetricScrapeIntervalSeconds returns the resolved metric scrape interval stored in inventory.
