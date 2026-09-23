@@ -102,6 +102,7 @@ The command prints each check result and exits non-zero if any hard requirement 
 
 **Environment Variables (DCGM connection):**
 - `DCGM_URL`: Address of the DCGM HostEngine (default: `localhost`)
+- `DCGM_URLS`: Ordered comma-separated TCP addresses used when `DCGM_URL` is unset
 - `DCGM_URL_IS_UNIX_SOCKET`: Set to `true` if `DCGM_URL` is a Unix socket path (default: `false`)
 
 ### Enroll Agent

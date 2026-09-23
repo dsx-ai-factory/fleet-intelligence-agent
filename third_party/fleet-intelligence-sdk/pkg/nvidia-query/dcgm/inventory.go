@@ -17,6 +17,7 @@ package dcgm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -24,6 +25,7 @@ import (
 	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
 
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
+	dcgmendpoint "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm/endpoint"
 )
 
 // DeviceInfo stores cached GPU identity and inventory information.
@@ -156,19 +158,30 @@ type deviceInventoryResult struct {
 func CollectDeviceInventoryWithContext(ctx context.Context) ([]DeviceInfo, error) {
 	resultCh := make(chan deviceInventoryResult, 1)
 	go func() {
-		cleanup, err := dcgmInitFunc(resolveInitFromEnv())
-		if err != nil {
-			resultCh <- deviceInventoryResult{err: fmt.Errorf("initialize DCGM for device inventory: %w", err)}
+		var candidateErrors []error
+		for _, candidate := range dcgmendpoint.ResolveFromEnv() {
+			cleanup, err := dcgmInitFunc(candidate)
+			if err != nil {
+				candidateErrors = append(candidateErrors, fmt.Errorf("%s: %w", candidate.Address, err))
+				continue
+			}
+
+			// One-shot callers retain partial inventory when individual fields are
+			// unavailable; only long-lived instances use completeness to retry.
+			devices, _, err := queryDeviceInventory()
+			if cleanup != nil {
+				cleanup()
+			}
+			if err != nil {
+				candidateErrors = append(candidateErrors, fmt.Errorf("%s: %w", candidate.Address, err))
+				continue
+			}
+			resultCh <- deviceInventoryResult{devices: devices}
 			return
 		}
-
-		// One-shot callers retain partial inventory when individual fields are
-		// unavailable; only long-lived instances use completeness to retry.
-		devices, _, err := queryDeviceInventory()
-		if cleanup != nil {
-			cleanup()
+		resultCh <- deviceInventoryResult{
+			err: fmt.Errorf("collect device inventory from any DCGM HostEngine endpoint: %w", errors.Join(candidateErrors...)),
 		}
-		resultCh <- deviceInventoryResult{devices: devices, err: err}
 	}()
 
 	select {

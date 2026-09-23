@@ -22,7 +22,8 @@ Common values (defaults from `values.yaml`):
 | `securityContext.privileged` | `true` | Run privileged. |
 | `securityContext.runAsUser` | `0` | Run as root. |
 | `securityContext.runAsGroup` | `0` | Run as root group. |
-| `env.DCGM_URL` | `nvidia-dcgm.gpu-operator.svc:5555` | DCGM HostEngine endpoint. |
+| `env.DCGM_URL` | `""` | Explicit DCGM HostEngine endpoint; takes precedence over `DCGM_URLS`. |
+| `env.DCGM_URLS` | `nvidia-dcgm.gpu-operator.svc:5555,nvidia-dcgm-dra.gpu-operator.svc:5555` | Ordered TCP endpoints tried when `DCGM_URL` is unset. |
 | `env.DCGM_URL_IS_UNIX_SOCKET` | `"false"` | Treat `DCGM_URL` as a unix socket path. |
 | `env.MALLOC_ARENA_MAX` | `4` | glibc arena cap to help constrain RSS for DCGM/cgo-heavy workloads. |
 | `env.FLEETINT_COLLECT_INTERVAL` | `"1m"` | Data collection interval (1s to 24h). |
@@ -64,9 +65,9 @@ Common values (defaults from `values.yaml`):
 | `resources.limits.cpu` | `500m` | CPU limit. |
 | `resources.limits.memory` | `512Mi` | Memory limit. |
 | `resources.limits.ephemeral-storage` | `1Gi` | Ephemeral storage limit. |
-| `nodeSelector` | `{"nvidia.com/gpu.deploy.dcgm": "true"}` | Node selector (targets GPU nodes). |
+| `nodeSelector` | `{}` | Optional custom node selector. When set, it takes precedence over `affinity`. |
 | `tolerations` | `[]` | Tolerations. |
-| `affinity` | `{}` | Affinity rules. |
+| `affinity` | DCGM `ClusterPolicy` or `GPUCluster` node affinity | Affinity rules. The default accepts either GPU Operator DCGM node label. |
 | `serviceAccount.create` | `true` | Create ServiceAccount. |
 | `serviceAccount.name` | `""` | ServiceAccount name. |
 | `serviceAccount.automountToken` | `false` | Automount service account token. |
@@ -102,10 +103,12 @@ See `docs/install-helm.md` for the enrollment flow and secret creation steps.
 
 ## Notes
 
-- The chart assumes DCGM HostEngine is already running in the cluster (typically
-  via NVIDIA GPU Operator). Set `env.DCGM_URL` to match your DCGM Service.
+- The chart assumes standalone DCGM HostEngine is enabled in NVIDIA GPU Operator
+  with `dcgm.enabled=true`. The default endpoint list supports both the
+  `ClusterPolicy` and DRA `GPUCluster` workflows. Set `env.DCGM_URL` to use a
+  custom endpoint.
 - The DaemonSet uses `runtimeClassName: nvidia` by default.
-- **Node Scheduling**: The agent requires a running DCGM HostEngine to collect GPU metrics, so it only deploys to
-  nodes where DCGM is present (labeled `nvidia.com/gpu.deploy.dcgm=true`). This label is automatically set by
-  the NVIDIA GPU Operator when DCGM is enabled. To override, set a different `nodeSelector` or `null` to remove
-  the restriction.
+- **Node Scheduling**: The default node affinity accepts either
+  `nvidia.com/gpu.deploy.dcgm=true` (`ClusterPolicy`) or
+  `nvidia.com/gpu.deploy.dcgm-dra=true` (`GPUCluster`). Set `affinity` to
+  customize this rule, or set `nodeSelector` to use a custom selector instead.

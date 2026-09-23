@@ -16,67 +16,56 @@
 package dcgmversion
 
 import (
-	"os"
-	"strconv"
+	"errors"
+	"fmt"
 	"strings"
 
+	dcgmendpoint "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm/endpoint"
 	godcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
 )
-
-var getenv = os.Getenv
 
 // DetectHostengineVersion returns the DCGM HostEngine version for the current
 // environment. It initializes a standalone DCGM connection and extracts the
 // semantic version from the build info string.
 func DetectHostengineVersion() (string, error) {
-	initParams := resolveInitParams()
-	cleanup, err := godcgm.Init(godcgm.Standalone, initParams.address, initParams.isUnixSocket)
-	if err != nil {
-		return "", err
-	}
-	defer cleanup()
+	var initErrors []error
+	for _, candidate := range dcgmendpoint.ResolveFromEnv() {
+		cleanup, err := godcgm.Init(godcgm.Standalone, candidate.Address, candidate.UnixSocketFlag())
+		if err != nil {
+			initErrors = append(initErrors, fmt.Errorf("%s: %w", candidate.Address, err))
+			continue
+		}
 
-	versionInfo, err := godcgm.GetHostengineVersionInfo()
-	if err != nil {
-		return "", err
+		versionInfo, err := godcgm.GetHostengineVersionInfo()
+		cleanup()
+		if err != nil {
+			initErrors = append(initErrors, fmt.Errorf("%s: %w", candidate.Address, err))
+			continue
+		}
+		version, err := extractVersion(versionInfo.RawBuildInfoString)
+		if err != nil {
+			initErrors = append(initErrors, fmt.Errorf("%s: %w", candidate.Address, err))
+			continue
+		}
+		return version, nil
 	}
-
-	return extractVersion(versionInfo.RawBuildInfoString), nil
+	return "", fmt.Errorf("failed to query any DCGM HostEngine endpoint: %w", errors.Join(initErrors...))
 }
 
-type initParams struct {
-	address      string
-	isUnixSocket string
-}
-
-func resolveInitParams() initParams {
-	address := strings.TrimSpace(getenv("DCGM_URL"))
-	isUnixSocket := "0"
-
-	if truthy, err := strconv.ParseBool(strings.TrimSpace(getenv("DCGM_URL_IS_UNIX_SOCKET"))); err == nil && truthy {
-		isUnixSocket = "1"
-	}
-
-	if address == "" {
-		address = "localhost"
-	}
-
-	return initParams{
-		address:      address,
-		isUnixSocket: isUnixSocket,
-	}
-}
-
-func extractVersion(raw string) string {
+func extractVersion(raw string) (string, error) {
 	for _, pair := range strings.Split(raw, ";") {
 		key, value, ok := strings.Cut(pair, ":")
 		if !ok {
 			continue
 		}
 		if strings.TrimSpace(key) == "version" {
-			return strings.TrimSpace(value)
+			version := strings.TrimSpace(value)
+			if version != "" {
+				return version, nil
+			}
+			break
 		}
 	}
 
-	return ""
+	return "", errors.New("version missing from DCGM HostEngine build information")
 }
