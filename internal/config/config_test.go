@@ -760,7 +760,7 @@ func TestDefaultWithHealthExporter(t *testing.T) {
 		assert.True(t, cfg.HealthExporter.IncludeComponentData)
 		assert.Equal(t, metav1.Duration{Duration: 1 * time.Minute}, cfg.HealthExporter.MetricsLookback)
 		assert.Equal(t, metav1.Duration{Duration: 1 * time.Minute}, cfg.HealthExporter.EventsLookback)
-		assert.Equal(t, metav1.Duration{Duration: 1 * time.Minute}, cfg.HealthExporter.HealthCheckInterval)
+		assert.Equal(t, metav1.Duration{Duration: 30 * time.Second}, cfg.HealthExporter.HealthCheckInterval)
 		assert.Equal(t, 3, cfg.HealthExporter.RetryMaxAttempts)
 		assert.Equal(t, "json", cfg.HealthExporter.OutputFormat)
 		assert.Equal(t, "", cfg.HealthExporter.MetricsEndpoint)
@@ -1041,6 +1041,6 @@ func TestInventoryAgentConfig(t *testing.T) {
 
 	assert.Equal(t, 30*time.Second, cfg.HealthCheckInterval())
 	assert.Equal(t, int64(30), cfg.MetricScrapeIntervalSeconds())
-	assert.Equal(t, time.Minute, (*Config)(nil).HealthCheckInterval())
-	assert.Equal(t, int64(60), (*Config)(nil).MetricScrapeIntervalSeconds())
+	assert.Equal(t, 30*time.Second, (*Config)(nil).HealthCheckInterval())
+	assert.Equal(t, int64(30), (*Config)(nil).MetricScrapeIntervalSeconds())
 }
