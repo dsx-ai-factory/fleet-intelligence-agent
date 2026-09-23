@@ -164,6 +164,10 @@ func getHealthCheckInterval(config *config.Config) time.Duration {
 	return config.HealthCheckInterval()
 }
 
+func getDCGMHealthCheckInterval(config *config.Config) time.Duration {
+	return config.DCGMHealthCheckInterval()
+}
+
 func getInventorySyncInterval(config *config.Config) time.Duration {
 	if config == nil {
 		return 0
@@ -320,10 +324,11 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 
 	// Determine health check interval
 	healthCheckInterval := getHealthCheckInterval(config)
+	dcgmHealthCheckInterval := getDCGMHealthCheckInterval(config)
 
 	// Create shared DCGM caches
-	dcgmHealthCache := nvidiadcgm.NewHealthCache(ctx, dcgmInstance, healthCheckInterval)
-	log.Logger.Infow("DCGM health check cache configured", "healthCheckInterval", healthCheckInterval)
+	dcgmHealthCache := nvidiadcgm.NewHealthCache(ctx, dcgmInstance, dcgmHealthCheckInterval)
+	log.Logger.Infow("DCGM health check cache configured", "healthCheckInterval", dcgmHealthCheckInterval)
 
 	dcgmFieldValueCache := nvidiadcgm.NewFieldValueCache(ctx, dcgmInstance, healthCheckInterval)
 	log.Logger.Infow("DCGM field value cache created", "healthCheckInterval", healthCheckInterval)

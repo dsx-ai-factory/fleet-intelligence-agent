@@ -33,7 +33,8 @@ Common values (defaults from `values.yaml`):
 | `env.FLEETINT_INCLUDE_HEALTHCHECKS` | `"true"` | Include component health data in export. |
 | `env.FLEETINT_METRICS_LOOKBACK` | `"1m"` | Lookback window for metrics export. |
 | `env.FLEETINT_EVENTS_LOOKBACK` | `"1m"` | Lookback window for events export. |
-| `env.FLEETINT_CHECK_INTERVAL` | `"30s"` | Health-check and metrics-scrape frequency (1s to 24h). |
+| `env.FLEETINT_CHECK_INTERVAL` | `"30s"` | Component evaluation and metrics-scrape frequency (1s to 24h). |
+| `env.FLEETINT_DCGM_HEALTH_CHECK_INTERVAL` | `"1m"` | DCGM passive-health polling frequency (1m to 24h). |
 | `env.FLEETINT_RETRY_MAX_ATTEMPTS` | `"3"` | Max retry attempts for failed exports. |
 | `env.FLEETINT_INVENTORY_ENABLED` | `"true"` | Enable or disable the inventory loop. |
 | `env.FLEETINT_INVENTORY_INTERVAL` | `"1h"` | Inventory loop interval override. Minimum: `5m`. |

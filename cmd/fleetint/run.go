@@ -216,6 +216,10 @@ func configureHealthExporterFromEnv(cfg *config.Config) error {
 		return err
 	}
 
+	if err := setDurationFromEnv("FLEETINT_DCGM_HEALTH_CHECK_INTERVAL", &he.DCGMHealthCheckInterval, "set DCGM passive health check interval from env", "dcgm_health_check_interval", time.Minute, 24*time.Hour); err != nil {
+		return err
+	}
+
 	if err := setIntFromEnv("FLEETINT_RETRY_MAX_ATTEMPTS", &he.RetryMaxAttempts, "set health exporter retry max attempts from env", "retry_max_attempts", 0); err != nil {
 		return err
 	}
@@ -399,19 +403,20 @@ func runCommand(cliContext *cli.Context) error {
 
 		// Create health exporter configuration for offline mode
 		cfg.HealthExporter = &config.HealthExporterConfig{
-			OfflineMode:          true,
-			OutputPath:           offlineModePath,
-			Duration:             offlineModeDuration,
-			OutputFormat:         offlineModeOutputFormat,
-			IncludeMetrics:       cfg.HealthExporter.IncludeMetrics,
-			IncludeEvents:        cfg.HealthExporter.IncludeEvents,
-			IncludeMachineInfo:   cfg.HealthExporter.IncludeMachineInfo,
-			IncludeComponentData: cfg.HealthExporter.IncludeComponentData,
-			Interval:             cfg.HealthExporter.Interval,
-			Timeout:              cfg.HealthExporter.Timeout,
-			MetricsLookback:      cfg.HealthExporter.MetricsLookback,
-			EventsLookback:       cfg.HealthExporter.EventsLookback,
-			HealthCheckInterval:  cfg.HealthExporter.HealthCheckInterval,
+			OfflineMode:             true,
+			OutputPath:              offlineModePath,
+			Duration:                offlineModeDuration,
+			OutputFormat:            offlineModeOutputFormat,
+			IncludeMetrics:          cfg.HealthExporter.IncludeMetrics,
+			IncludeEvents:           cfg.HealthExporter.IncludeEvents,
+			IncludeMachineInfo:      cfg.HealthExporter.IncludeMachineInfo,
+			IncludeComponentData:    cfg.HealthExporter.IncludeComponentData,
+			Interval:                cfg.HealthExporter.Interval,
+			Timeout:                 cfg.HealthExporter.Timeout,
+			MetricsLookback:         cfg.HealthExporter.MetricsLookback,
+			EventsLookback:          cfg.HealthExporter.EventsLookback,
+			HealthCheckInterval:     cfg.HealthExporter.HealthCheckInterval,
+			DCGMHealthCheckInterval: cfg.HealthExporter.DCGMHealthCheckInterval,
 		}
 	}
 

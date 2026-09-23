@@ -407,6 +407,42 @@ func TestValidateHealthExporter(t *testing.T) {
 		err := cfg.Validate()
 		assert.NoError(t, err)
 	})
+
+	t.Run("valid DCGM health check interval", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			HealthExporter: &HealthExporterConfig{
+				DCGMHealthCheckInterval: metav1.Duration{Duration: time.Minute},
+			},
+		}
+
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("DCGM health check interval too short", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			HealthExporter: &HealthExporterConfig{
+				DCGMHealthCheckInterval: metav1.Duration{Duration: 30 * time.Second},
+			},
+		}
+
+		require.ErrorContains(t, cfg.Validate(), "dcgm_health_check_interval must be at least 1 minute")
+	})
+
+	t.Run("DCGM health check interval too long", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			HealthExporter: &HealthExporterConfig{
+				DCGMHealthCheckInterval: metav1.Duration{Duration: 25 * time.Hour},
+			},
+		}
+
+		require.ErrorContains(t, cfg.Validate(), "dcgm_health_check_interval must be at most 24 hours")
+	})
 }
 
 func TestValidateWorkloadAttribution(t *testing.T) {
@@ -761,6 +797,7 @@ func TestDefaultWithHealthExporter(t *testing.T) {
 		assert.Equal(t, metav1.Duration{Duration: 1 * time.Minute}, cfg.HealthExporter.MetricsLookback)
 		assert.Equal(t, metav1.Duration{Duration: 1 * time.Minute}, cfg.HealthExporter.EventsLookback)
 		assert.Equal(t, metav1.Duration{Duration: 30 * time.Second}, cfg.HealthExporter.HealthCheckInterval)
+		assert.Equal(t, metav1.Duration{Duration: time.Minute}, cfg.HealthExporter.DCGMHealthCheckInterval)
 		assert.Equal(t, 3, cfg.HealthExporter.RetryMaxAttempts)
 		assert.Equal(t, "json", cfg.HealthExporter.OutputFormat)
 		assert.Equal(t, "", cfg.HealthExporter.MetricsEndpoint)
@@ -1014,7 +1051,8 @@ func TestInventoryAgentConfig(t *testing.T) {
 		RetentionPeriod: metav1.Duration{Duration: 24 * time.Hour},
 		Components:      []string{"*", "-memory", "-disk"},
 		HealthExporter: &HealthExporterConfig{
-			HealthCheckInterval: metav1.Duration{Duration: 30 * time.Second},
+			HealthCheckInterval:     metav1.Duration{Duration: 30 * time.Second},
+			DCGMHealthCheckInterval: metav1.Duration{Duration: 2 * time.Minute},
 		},
 		Inventory: &InventoryConfig{
 			Enabled:  true,
@@ -1040,7 +1078,9 @@ func TestInventoryAgentConfig(t *testing.T) {
 	assert.Equal(t, int64(86400), attestationIntervalSeconds)
 
 	assert.Equal(t, 30*time.Second, cfg.HealthCheckInterval())
+	assert.Equal(t, 2*time.Minute, cfg.DCGMHealthCheckInterval())
 	assert.Equal(t, int64(30), cfg.MetricScrapeIntervalSeconds())
 	assert.Equal(t, 30*time.Second, (*Config)(nil).HealthCheckInterval())
+	assert.Equal(t, time.Minute, (*Config)(nil).DCGMHealthCheckInterval())
 	assert.Equal(t, int64(30), (*Config)(nil).MetricScrapeIntervalSeconds())
 }
