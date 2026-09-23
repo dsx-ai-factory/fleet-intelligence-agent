@@ -238,9 +238,9 @@ The agent requires a DCGM HostEngine to collect GPU metrics, so it must
 co-locate with DCGM. GPU Operator applies the appropriate label when standalone
 DCGM is enabled.
 
-If you need custom scheduling, set either `nodeSelector` or `affinity`; either
-one replaces the built-in compatibility affinity. You can also configure
-tolerations for GPU taints.
+If you need custom scheduling, replace `affinity` or set `nodeSelector`. A
+non-empty `nodeSelector` takes precedence over `affinity`. You can also
+configure tolerations for GPU taints.
 The examples below use a generic label to illustrate the override syntax — replace it with the actual label used in your cluster.
 
 Using `--set` (quote the tolerations for zsh, and escape dots in the label key):

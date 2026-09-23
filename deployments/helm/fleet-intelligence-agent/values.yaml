@@ -92,12 +92,26 @@ resources:
     memory: "256Mi"
     ephemeral-storage: "256Mi"
 
-# Setting nodeSelector or affinity replaces the built-in GPU Operator
-# compatibility scheduling rule rendered by the chart.
+# A custom nodeSelector takes precedence over affinity.
 nodeSelector: {}
 
 tolerations: []
-affinity: {}
+
+# By default, schedule on nodes where either the traditional ClusterPolicy or
+# DRA-based GPUCluster workflow deploys standalone DCGM. nodeSelectorTerms are
+# ORed. Replace this value to configure custom affinity.
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: nvidia.com/gpu.deploy.dcgm
+              operator: In
+              values: ["true"]
+        - matchExpressions:
+            - key: nvidia.com/gpu.deploy.dcgm-dra
+              operator: In
+              values: ["true"]
 
 serviceAccount:
   create: true

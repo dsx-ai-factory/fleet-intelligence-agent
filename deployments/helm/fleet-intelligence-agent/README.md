@@ -65,9 +65,9 @@ Common values (defaults from `values.yaml`):
 | `resources.limits.cpu` | `500m` | CPU limit. |
 | `resources.limits.memory` | `512Mi` | Memory limit. |
 | `resources.limits.ephemeral-storage` | `1Gi` | Ephemeral storage limit. |
-| `nodeSelector` | `{}` | Optional custom node selector. |
+| `nodeSelector` | `{}` | Optional custom node selector. When set, it takes precedence over `affinity`. |
 | `tolerations` | `[]` | Tolerations. |
-| `affinity` | `{}` | Custom affinity. When both affinity and nodeSelector are empty, the chart accepts either GPU Operator DCGM node label. |
+| `affinity` | DCGM `ClusterPolicy` or `GPUCluster` node affinity | Affinity rules. The default accepts either GPU Operator DCGM node label. |
 | `serviceAccount.create` | `true` | Create ServiceAccount. |
 | `serviceAccount.name` | `""` | ServiceAccount name. |
 | `serviceAccount.automountToken` | `false` | Automount service account token. |
@@ -110,5 +110,5 @@ See `docs/install-helm.md` for the enrollment flow and secret creation steps.
 - The DaemonSet uses `runtimeClassName: nvidia` by default.
 - **Node Scheduling**: The default node affinity accepts either
   `nvidia.com/gpu.deploy.dcgm=true` (`ClusterPolicy`) or
-  `nvidia.com/gpu.deploy.dcgm-dra=true` (`GPUCluster`). Setting either
-  `affinity` or `nodeSelector` replaces this built-in scheduling rule.
+  `nvidia.com/gpu.deploy.dcgm-dra=true` (`GPUCluster`). Set `affinity` to
+  customize this rule, or set `nodeSelector` to use a custom selector instead.
