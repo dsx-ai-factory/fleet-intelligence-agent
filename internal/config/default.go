@@ -111,9 +111,9 @@ func Default(ctx context.Context, opts ...OpOption) (*Config, error) {
 			IncludeComponentData: true,
 			MetricsLookback:      metav1.Duration{Duration: 1 * time.Minute},
 			EventsLookback:       metav1.Duration{Duration: 1 * time.Minute},
-			HealthCheckInterval:  metav1.Duration{Duration: 1 * time.Minute}, // Default 1 minute for component health checks
-			RetryMaxAttempts:     3,                                          // Retry up to 3 times
-			OutputFormat:         "json",                                     // Default to JSON format for offline mode
+			HealthCheckInterval:  metav1.Duration{Duration: 30 * time.Second}, // Default 30 seconds for component health checks and metric scraping
+			RetryMaxAttempts:     3,                                           // Retry up to 3 times
+			OutputFormat:         "json",                                      // Default to JSON format for offline mode
 		},
 	}
 

@@ -41,7 +41,7 @@ func TestGetHealthCheckInterval(t *testing.T) {
 		{
 			name:     "nil_health_exporter",
 			config:   &config.Config{},
-			expected: time.Minute,
+			expected: 30 * time.Second,
 		},
 		{
 			name: "zero_interval",
@@ -50,7 +50,7 @@ func TestGetHealthCheckInterval(t *testing.T) {
 					HealthCheckInterval: metav1.Duration{Duration: 0},
 				},
 			},
-			expected: time.Minute,
+			expected: 30 * time.Second,
 		},
 		{
 			name: "custom_interval",
@@ -623,7 +623,7 @@ func TestGetHealthCheckIntervalEdgeCases(t *testing.T) {
 					HealthCheckInterval: metav1.Duration{Duration: -1 * time.Second},
 				},
 			},
-			expected: time.Minute, // Should use default for invalid values
+			expected: 30 * time.Second, // Should use default for invalid values
 		},
 		{
 			name: "very_small_interval",

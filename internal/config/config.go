@@ -152,8 +152,8 @@ type HealthExporterConfig struct {
 	// EventsLookback determines how far back to look for events data
 	EventsLookback metav1.Duration `json:"events_lookback"`
 
-	// HealthCheckInterval determines how often individual components perform their health checks
-	// Valid range: 1 second (minimum) to 24 hours (maximum), default is 1 minute
+	// HealthCheckInterval determines how often components perform health checks and metrics are scraped.
+	// Valid range: 1 second (minimum) to 24 hours (maximum), default is 30 seconds.
 	HealthCheckInterval metav1.Duration `json:"health_check_interval"`
 
 	// RetryMaxAttempts is the maximum number of retry attempts for failed requests
@@ -440,7 +440,7 @@ func (config *Config) AttestationLoopAgentConfig() (enabled bool, intervalSecond
 // HealthCheckInterval returns the resolved component health-check interval.
 func (config *Config) HealthCheckInterval() time.Duration {
 	if config == nil || config.HealthExporter == nil || config.HealthExporter.HealthCheckInterval.Duration <= 0 {
-		return time.Minute
+		return 30 * time.Second
 	}
 	return config.HealthExporter.HealthCheckInterval.Duration
 }
