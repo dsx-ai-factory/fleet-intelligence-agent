@@ -80,6 +80,40 @@ func TestGetHealthCheckInterval(t *testing.T) {
 	}
 }
 
+func TestGetDCGMHealthCheckInterval(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   *config.Config
+		expected time.Duration
+	}{
+		{
+			name:     "nil_health_exporter",
+			config:   &config.Config{},
+			expected: time.Minute,
+		},
+		{
+			name: "zero_interval",
+			config: &config.Config{HealthExporter: &config.HealthExporterConfig{
+				DCGMHealthCheckInterval: metav1.Duration{},
+			}},
+			expected: time.Minute,
+		},
+		{
+			name: "custom_interval",
+			config: &config.Config{HealthExporter: &config.HealthExporterConfig{
+				DCGMHealthCheckInterval: metav1.Duration{Duration: 2 * time.Minute},
+			}},
+			expected: 2 * time.Minute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, getDCGMHealthCheckInterval(tt.config))
+		})
+	}
+}
+
 func TestGetInventorySyncInterval(t *testing.T) {
 	tests := []struct {
 		name     string
