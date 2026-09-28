@@ -288,6 +288,32 @@ func TestCollectorCloseClosesAllocationReader(t *testing.T) {
 	require.True(t, allocations.closed)
 }
 
+func TestCollectorCloseReturnsAllocationReaderError(t *testing.T) {
+	collector := newCollector(
+		&config.KubernetesWorkloadConfig{},
+		&fakeAllocationReader{closeErr: errors.New("close failed")},
+		nil,
+		nil,
+	)
+
+	err := collector.Close()
+	require.ErrorContains(t, err, "close Kubernetes workload collector")
+}
+
+func TestCollectorClosesPodLabelReader(t *testing.T) {
+	podLabels := &fakeCloseablePodLabelReader{closeErr: errors.New("close failed")}
+	collector := newCollector(
+		&config.KubernetesWorkloadConfig{},
+		&fakeAllocationReader{},
+		podLabels,
+		nil,
+	)
+
+	err := collector.Close()
+	require.ErrorContains(t, err, "close Kubernetes workload collector")
+	require.Equal(t, 1, podLabels.closeCalls)
+}
+
 type fakeAllocationReader struct {
 	allocations []GPUAllocation
 	err         error
@@ -308,6 +334,20 @@ type fakePodLabelReader struct {
 	labels map[string]map[string]string
 	err    error
 	calls  int
+}
+
+type fakeCloseablePodLabelReader struct {
+	closeErr   error
+	closeCalls int
+}
+
+func (*fakeCloseablePodLabelReader) Labels(context.Context, string, string) (map[string]string, error) {
+	return nil, nil
+}
+
+func (r *fakeCloseablePodLabelReader) Close() error {
+	r.closeCalls++
+	return r.closeErr
 }
 
 func (r *fakePodLabelReader) Labels(_ context.Context, namespace, podName string) (map[string]string, error) {

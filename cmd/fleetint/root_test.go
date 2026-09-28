@@ -186,6 +186,35 @@ func TestConfigureHPCWorkloadAttribution(t *testing.T) {
 	require.Nil(t, cfg.WorkloadAttribution.Kubernetes)
 }
 
+func TestWorkloadAttributionOptionsFromContext(t *testing.T) {
+	flagSet := flagpkg.NewFlagSet("test", flagpkg.ContinueOnError)
+	flagSet.String("workload-attribution-source", "", "")
+	flagSet.String("hpc-job-mapping-dir", "", "")
+	flagSet.String("hpc-gpu-identifier", "", "")
+	workloadLabels := cli.NewStringSlice()
+	flagSet.Var(workloadLabels, "kubernetes-workload-label", "")
+	flagSet.String("kubernetes-pod-resources-socket", "", "")
+	flagSet.String("kubernetes-gpu-identifier", "", "")
+	require.NoError(t, flagSet.Parse([]string{
+		"--workload-attribution-source", "kubernetes",
+		"--kubernetes-workload-label", "jobset.sigs.k8s.io/jobset-name",
+		"--kubernetes-workload-label", "training.kubeflow.org/job-name",
+		"--kubernetes-pod-resources-socket", "/var/lib/kubelet/pod-resources/kubelet.sock",
+		"--kubernetes-gpu-identifier", "uuid",
+	}))
+
+	options := workloadAttributionOptionsFromContext(cli.NewContext(nil, flagSet, nil))
+	require.Equal(t, "kubernetes", options.source)
+	require.Empty(t, options.hpcJobMappingDir)
+	require.Empty(t, options.hpcGPUIdentifier)
+	require.Equal(t, []string{
+		"jobset.sigs.k8s.io/jobset-name",
+		"training.kubeflow.org/job-name",
+	}, options.kubernetesWorkloadLabels)
+	require.Equal(t, "/var/lib/kubelet/pod-resources/kubelet.sock", options.kubernetesPodResourcesSocket)
+	require.Equal(t, "uuid", options.kubernetesGPUIdentifier)
+}
+
 func hpcJobMappingDirFlag(t *testing.T) *cli.StringFlag {
 	t.Helper()
 
