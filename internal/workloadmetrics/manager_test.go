@@ -16,6 +16,7 @@
 package workloadmetrics
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -83,6 +84,48 @@ func TestManagerRegistrationFailure(t *testing.T) {
 	require.Nil(t, second)
 }
 
+func TestManagerKubernetesCollectorCreationFailure(t *testing.T) {
+	t.Setenv("NODE_NAME", "")
+	manager, err := startWithRegisterer(
+		prometheus.NewRegistry(),
+		&config.WorkloadAttributionConfig{
+			Source: config.WorkloadSourceKubernetes,
+			Kubernetes: &config.KubernetesWorkloadConfig{
+				WorkloadLabels: []string{"job-name"},
+			},
+		},
+		staticGPUUUIDProvider(map[string]string{"0": "GPU-a"}),
+	)
+	require.ErrorContains(t, err, "create Kubernetes workload identity metric collector")
+	require.Nil(t, manager)
+}
+
+func TestManagerClosesRegisteredCollector(t *testing.T) {
+	collector := &fakeCloseableCollector{
+		desc:     prometheus.NewDesc("fleetint_test_workload_info", "test", nil, nil),
+		closeErr: errors.New("close failed"),
+	}
+	registry := prometheus.NewRegistry()
+	manager := &Manager{registerer: registry}
+	require.NoError(t, manager.registerCollector("test", collector))
+
+	manager.Close()
+	manager.Close()
+	require.Equal(t, 1, collector.closeCalls)
+}
+
+func TestManagerClosesCollectorWhenRegistrationFails(t *testing.T) {
+	desc := prometheus.NewDesc("fleetint_test_workload_info", "test", nil, nil)
+	registry := prometheus.NewRegistry()
+	manager := &Manager{registerer: registry}
+	require.NoError(t, manager.registerCollector("test", &fakeCloseableCollector{desc: desc}))
+
+	duplicate := &fakeCloseableCollector{desc: desc}
+	err := manager.registerCollector("test", duplicate)
+	require.ErrorContains(t, err, "register test workload identity metric collector")
+	require.Equal(t, 1, duplicate.closeCalls)
+}
+
 func TestManagerRejectsUnsupportedSource(t *testing.T) {
 	manager, err := startWithRegisterer(
 		prometheus.NewRegistry(),
@@ -122,4 +165,21 @@ func staticGPUUUIDProvider(gpuUUIDByIndex map[string]string) func() map[string]s
 	return func() map[string]string {
 		return gpuUUIDByIndex
 	}
+}
+
+type fakeCloseableCollector struct {
+	desc       *prometheus.Desc
+	closeErr   error
+	closeCalls int
+}
+
+func (c *fakeCloseableCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.desc
+}
+
+func (c *fakeCloseableCollector) Collect(chan<- prometheus.Metric) {}
+
+func (c *fakeCloseableCollector) Close() error {
+	c.closeCalls++
+	return c.closeErr
 }

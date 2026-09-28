@@ -89,10 +89,9 @@ func startWithRegisterer(
 			),
 			gpuUUIDByIndexProvider,
 		)
-		if err := registerer.Register(collector); err != nil {
-			return nil, fmt.Errorf("register HPC workload identity metric collector: %w", err)
+		if err := m.registerCollector("HPC", collector); err != nil {
+			return nil, err
 		}
-		m.collectors = append(m.collectors, collector)
 
 		log.Logger.Infow(
 			"enabled HPC workload identity metrics",
@@ -104,11 +103,9 @@ func startWithRegisterer(
 		if err != nil {
 			return nil, fmt.Errorf("create Kubernetes workload identity metric collector: %w", err)
 		}
-		if err := registerer.Register(collector); err != nil {
-			_ = collector.Close()
-			return nil, fmt.Errorf("register Kubernetes workload identity metric collector: %w", err)
+		if err := m.registerCollector("Kubernetes", collector); err != nil {
+			return nil, err
 		}
-		m.collectors = append(m.collectors, collector)
 
 		log.Logger.Infow(
 			"enabled Kubernetes workload identity metrics",
@@ -118,6 +115,17 @@ func startWithRegisterer(
 		)
 	}
 	return m, nil
+}
+
+func (m *Manager) registerCollector(source string, collector prometheus.Collector) error {
+	if err := m.registerer.Register(collector); err != nil {
+		if closer, ok := collector.(interface{ Close() error }); ok {
+			_ = closer.Close()
+		}
+		return fmt.Errorf("register %s workload identity metric collector: %w", source, err)
+	}
+	m.collectors = append(m.collectors, collector)
+	return nil
 }
 
 // Close unregisters every workload collector owned by this manager. It is safe
