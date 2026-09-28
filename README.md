@@ -55,13 +55,13 @@ Both sources produce the normalized workload identity metric without adding
 workload labels to every GPU telemetry series:
 
 ```promql
-fleetint_gpu_workload_info{uuid="GPU-abc",gpu="0",workload_source="hpc",workload_id="123456"} 1
+fleetint_gpu_workload_info{gpud_component="workload-attribution",uuid="GPU-abc",gpu="0",workload_source="hpc",workload_id="123456"} 1
 ```
 
 Kubernetes attribution also reports the concrete pod/container allocation:
 
 ```promql
-fleetint_gpu_pod_info{uuid="GPU-abc",gpu="0",pod_namespace="ml",pod_name="training-42-worker-0",container_name="trainer"} 1
+fleetint_gpu_pod_info{gpud_component="workload-attribution",uuid="GPU-abc",gpu="0",pod_namespace="ml",pod_name="training-42-worker-0",container_name="trainer"} 1
 ```
 
 See the [Kubernetes](docs/configuration.md#send-kubernetes-workload-identity-to-fleet-intelligence)

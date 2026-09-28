@@ -19,6 +19,7 @@
 {{- $kubernetesWorkloadLabels := dig "kubernetes" "workloadLabels" (list) .Values.workloadAttribution -}}
 {{- $kubernetesPodResourcesSocket := dig "kubernetes" "podResourcesSocket" "/var/lib/kubelet/pod-resources/kubelet.sock" .Values.workloadAttribution -}}
 {{- $kubernetesGPUIdentifier := dig "kubernetes" "gpuIdentifier" "uuid" .Values.workloadAttribution -}}
+{{- $createKubernetesRBAC := dig "kubernetes" "rbac" "create" true .Values.workloadAttribution -}}
 {{- if and $workloadSource (not (has $workloadSource (list "hpc" "kubernetes"))) -}}
 {{- fail (printf "unsupported workloadAttribution.source %q; supported values: hpc, kubernetes" $workloadSource) -}}
 {{- end -}}
@@ -36,6 +37,9 @@
 {{- end -}}
 {{- if and (eq $workloadSource "kubernetes") (not (has $kubernetesGPUIdentifier (list "device_name" "uuid"))) -}}
 {{- fail "workloadAttribution.kubernetes.gpuIdentifier must be device_name or uuid" -}}
+{{- end }}
+{{- if and (eq $workloadSource "kubernetes") $createKubernetesRBAC (not .Values.serviceAccount.create) (not .Values.serviceAccount.name) -}}
+{{- fail "Kubernetes workload attribution with RBAC creation requires serviceAccount.create=true or serviceAccount.name" -}}
 {{- end }}
 apiVersion: apps/v1
 kind: DaemonSet

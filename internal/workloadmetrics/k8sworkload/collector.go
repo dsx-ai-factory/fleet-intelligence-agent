@@ -84,7 +84,8 @@ func NewCollector(
 	if err != nil {
 		return nil, err
 	}
-	podLabels, err := newInClusterPodLabelReader()
+	var podLabels podLabelReader
+	reader, err := newInClusterPodLabelReader()
 	if err != nil {
 		if errors.Is(err, errNodeNameRequired) {
 			_ = allocations.Close()
@@ -94,6 +95,8 @@ func NewCollector(
 			"Kubernetes pod metadata is unavailable; workload identity metrics are disabled",
 			"error", err,
 		)
+	} else {
+		podLabels = reader
 	}
 	return newCollector(cfg, allocations, podLabels, gpuUUIDByIndexProvider), nil
 }

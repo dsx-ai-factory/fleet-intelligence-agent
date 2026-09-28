@@ -200,6 +200,23 @@ func TestNewCollectorRejectsInvalidRuntimeConfiguration(t *testing.T) {
 	require.Nil(t, collector)
 }
 
+func TestNewCollectorContinuesWithoutKubernetesAPIConfiguration(t *testing.T) {
+	t.Setenv("NODE_NAME", "gpu-node-1")
+	t.Setenv("KUBERNETES_SERVICE_HOST", "")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "")
+	collector, err := NewCollector(
+		&config.KubernetesWorkloadConfig{
+			WorkloadLabels:     []string{"job-name"},
+			PodResourcesSocket: "/var/lib/kubelet/pod-resources/kubelet.sock",
+		},
+		staticGPUUUIDProvider(nil),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, collector)
+	require.Nil(t, collector.podLabels)
+	require.NoError(t, collector.Close())
+}
+
 func TestCollectorSkipsUnavailablePodLabelsAndUnknownGPUs(t *testing.T) {
 	labels := &fakePodLabelReader{err: errors.New("metadata unavailable")}
 	collector := newCollector(

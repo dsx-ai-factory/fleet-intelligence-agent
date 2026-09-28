@@ -20,7 +20,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.8.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/sys v0.47.0
-	google.golang.org/grpc v1.83.1
+	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.11
 	k8s.io/api v0.32.0
 	k8s.io/apimachinery v0.32.0
