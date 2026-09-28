@@ -38,7 +38,7 @@ import (
 
 var (
 	errNodeNameRequired     = errors.New("NODE_NAME is required for Kubernetes workload attribution")
-	errPodMetadataNotSynced = errors.New("Kubernetes pod metadata cache is not synchronized")
+	errPodMetadataNotSynced = errors.New("kubernetes pod metadata cache is not synchronized")
 )
 
 const (
