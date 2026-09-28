@@ -45,9 +45,13 @@ Common values (defaults from `values.yaml`):
 | `listenAddress` | `0.0.0.0:15133` | Listen address. |
 | `retentionPeriod` | `24h` | Retention period for stored metrics and events. |
 | `components` | `all` | Enabled components. |
-| `workloadAttribution.source` | unset | Workload assignment source. Currently supported value: `hpc`. Leaving it unset disables workload attribution. |
+| `workloadAttribution.source` | unset | Workload assignment source: `hpc` or `kubernetes`. Leaving it unset disables workload attribution. |
 | `workloadAttribution.hpc.jobMappingDir` | `""` | Host mapping directory mounted read-only when the source is `hpc`; an explicit absolute path is required. |
 | `workloadAttribution.hpc.gpuIdentifier` | `dcgm_index` | Mapping filename identifier: `dcgm_index` or `uuid`. |
+| `workloadAttribution.kubernetes.workloadLabels` | `[]` | Ordered pod labels that may contain the workload ID. The first label present on a pod is used. |
+| `workloadAttribution.kubernetes.podResourcesSocket` | `/var/lib/kubelet/pod-resources/kubelet.sock` | Kubelet pod-resources socket mounted from the host. |
+| `workloadAttribution.kubernetes.gpuIdentifier` | `uuid` | GPU identifier returned by the NVIDIA device plugin: `uuid` or `device_name`. |
+| `workloadAttribution.kubernetes.rbac.create` | `true` | Create pod read permissions used to retrieve workload labels. |
 | `enroll.enabled` | `false` | Enable enrollment init container. |
 | `enroll.unenroll` | `false` | Run explicit unenroll init container (cleanup persisted enrollment metadata). |
 | `enroll.force` | `false` | Append `--force` to the enrollment command. |
@@ -70,7 +74,7 @@ Common values (defaults from `values.yaml`):
 | `affinity` | DCGM `ClusterPolicy` or `GPUCluster` node affinity | Affinity rules. The default accepts either GPU Operator DCGM node label. |
 | `serviceAccount.create` | `true` | Create ServiceAccount. |
 | `serviceAccount.name` | `""` | ServiceAccount name. |
-| `serviceAccount.automountToken` | `false` | Automount service account token. |
+| `serviceAccount.automountToken` | `false` | Automount the service account token when Kubernetes workload attribution is disabled. The `kubernetes` source instead mounts a dedicated, rotating API token only into the main agent container. |
 
 ### Slurm workload identity
 
@@ -92,6 +96,31 @@ convention.
 
 See [Send Slurm workload identity to Fleet Intelligence](../../../docs/configuration.md#send-slurm-workload-identity-to-fleet-intelligence)
 for mapping-file requirements and verification steps.
+
+### Kubernetes workload identity
+
+Configure the pod labels used by the workload frameworks installed in the
+cluster:
+
+```yaml
+workloadAttribution:
+  source: kubernetes
+  kubernetes:
+    workloadLabels:
+      - jobset.sigs.k8s.io/jobset-name
+      - training.kubeflow.org/job-name
+```
+
+The order is significant. FleetInt uses the first configured label present on
+each GPU-using pod and exports its value as `workload_id`. FleetInt emits
+`fleetint_gpu_pod_info` for the concrete pod/container allocation and
+`fleetint_gpu_workload_info` for the normalized workload. The chart mounts the
+kubelet pod-resources directory and creates the pod read permissions needed to
+retrieve labels. Set `rbac.create: false` only when equivalent permissions are
+managed separately.
+
+See [Send Kubernetes workload identity to Fleet Intelligence](../../../docs/configuration.md#send-kubernetes-workload-identity-to-fleet-intelligence)
+for the data flow, metric format, and limitations.
 
 ### Enrollment (per node via init container)
 

@@ -53,9 +53,12 @@ These environment variables are read by `fleetint run` at startup.
 | `FLEETINT_EVENTS_LOOKBACK`      | Lookback window for events included in each export.                                                      | `1m`                                                                     | `/etc/default/fleetint` | `env.FLEETINT_EVENTS_LOOKBACK`      |
 | `FLEETINT_CHECK_INTERVAL`       | Health check interval for monitored components. Valid range: `1s` to `24h`.                              | `1m`                                                                     | `/etc/default/fleetint` | `env.FLEETINT_CHECK_INTERVAL`       |
 | `FLEETINT_RETRY_MAX_ATTEMPTS`   | Maximum retry attempts for failed exports. Minimum: `0`.                                                 | `3`                                                                      | `/etc/default/fleetint` | `env.FLEETINT_RETRY_MAX_ATTEMPTS`   |
-| `FLEETINT_WORKLOAD_ATTRIBUTION_SOURCE` | Workload assignment source. Currently supported value: `hpc`. Unset disables workload attribution. | unset | `/etc/default/fleetint` | `workloadAttribution.source` |
+| `FLEETINT_WORKLOAD_ATTRIBUTION_SOURCE` | Workload assignment source: `hpc` or `kubernetes`. Unset disables workload attribution. | unset | `/etc/default/fleetint` | `workloadAttribution.source` |
 | `FLEETINT_HPC_JOB_MAPPING_DIR`  | Absolute path to the scheduler-maintained GPU-to-job mapping directory. Required when the workload source is `hpc`. | unset                                                                    | `/etc/default/fleetint` | `workloadAttribution.hpc.jobMappingDir` |
 | `FLEETINT_HPC_GPU_IDENTIFIER`   | Identifier used by HPC mapping filenames: `dcgm_index` or `uuid`. | `dcgm_index` | `/etc/default/fleetint` | `workloadAttribution.hpc.gpuIdentifier` |
+| `FLEETINT_KUBERNETES_WORKLOAD_LABELS` | Comma-separated, ordered pod labels that may contain the workload ID. Required when the source is `kubernetes`. | unset | Helm values or environment | `workloadAttribution.kubernetes.workloadLabels` |
+| `FLEETINT_KUBERNETES_POD_RESOURCES_SOCKET` | Absolute path to the kubelet pod-resources socket. | `/var/lib/kubelet/pod-resources/kubelet.sock` | Helm values or environment | `workloadAttribution.kubernetes.podResourcesSocket` |
+| `FLEETINT_KUBERNETES_GPU_IDENTIFIER` | GPU identifier returned by the NVIDIA device plugin: `uuid` or `device_name`. | `uuid` | Helm values or environment | `workloadAttribution.kubernetes.gpuIdentifier` |
 | `FLEETINT_INVENTORY_ENABLED`    | Enable or disable the inventory loop.                                                                    | `true`                                                                   | `/etc/default/fleetint` | `env.FLEETINT_INVENTORY_ENABLED`    |
 | `FLEETINT_INVENTORY_INTERVAL`   | Inventory loop interval override. Minimum: `5m`.                                                         | `1h`                                                                     | `/etc/default/fleetint` | `env.FLEETINT_INVENTORY_INTERVAL`   |
 | `FLEETINT_ATTESTATION_ENABLED`  | Enable or disable the attestation loop.                                                                  | `true`                                                                   | `/etc/default/fleetint` | `env.FLEETINT_ATTESTATION_ENABLED`  |
@@ -71,6 +74,64 @@ Notes:
   supplies ordered TCP fallback endpoints. `DCGM_URL_IS_UNIX_SOCKET` applies
   only to `DCGM_URL`.
 - `MALLOC_ARENA_MAX` is a Linux process-level tuning parameter (not a Fleet Intelligence setting) that caps the number of glibc memory arenas to constrain RSS growth in cgo-heavy workloads such as DCGM integration.
+
+### Send Kubernetes workload identity to Fleet Intelligence
+
+This feature follows the same basic flow as
+[dcgm-exporter's Kubernetes workload labels](https://docs.nvidia.com/datacenter/dcgm/latest/installation/install-dcgm-exporter.html#add-workload-labels):
+the kubelet pod-resources API identifies the pod using a GPU, and pod labels
+provide the higher-level job name.
+
+FleetInt normalizes cluster-specific labels into one backend contract. Configure
+the labels used by the workload frameworks installed in the cluster:
+
+```yaml
+workloadAttribution:
+  source: kubernetes
+  kubernetes:
+    workloadLabels:
+      - jobset.sigs.k8s.io/jobset-name
+      - training.kubeflow.org/job-name
+```
+
+The list is ordered. FleetInt uses the first configured label present on a pod
+as `workload_id`. Pods without a configured workload label still produce a pod
+allocation metric, but do not produce a workload identity metric. This supports
+clusters that run more than one workload framework without exposing
+framework-specific label names to the backend.
+
+The Helm chart mounts the standard kubelet pod-resources directory and creates
+the pod read permissions needed for a node-scoped metadata watch. It emits the
+current GPU-to-pod allocation separately from the normalized workload identity:
+
+```promql
+fleetint_gpu_pod_info{gpud_component="workload-attribution",gpu="0",uuid="GPU-abc",pod_namespace="ml",pod_name="training-42-worker-0",container_name="trainer"} 1
+```
+
+```promql
+fleetint_gpu_workload_info{gpud_component="workload-attribution",gpu="0",uuid="GPU-abc",workload_id="training-42",workload_namespace="ml",workload_source="kubernetes"} 1
+```
+
+Both relationships are refreshed during each normal metric collection. When a
+pod releases the GPU, its pod and workload series are no longer emitted. Shared
+GPUs may emit up to 16 current pod assignments and 16 workload identities per
+physical GPU. Pod UID is intentionally omitted to avoid creating a new series
+for every pod restart.
+
+FleetInt starts while the pod metadata cache synchronizes. The metadata watch
+retries in the background, and workload identities begin appearing after the
+cache is ready. If the in-cluster Kubernetes client itself cannot be created,
+FleetInt continues collecting its regular metrics and GPU-to-pod assignments
+but cannot emit label-derived workload identities until restart. `NODE_NAME` is
+still required so the agent never watches pods from every node in the cluster.
+
+The default `gpuIdentifier: uuid` matches the NVIDIA device plugin's default
+device-ID strategy. Set it to `device_name` when the pod-resources API returns
+names such as `nvidia0`. This matches dcgm-exporter's `device-name` behavior:
+FleetInt maps DCGM GPU entity `0` to `nvidia0`. This is a compatibility naming
+convention, not a lookup of the host device minor. Native `MIG-...` allocation
+IDs are not yet resolved because the agent does not yet query the live DCGM MIG
+inventory.
 
 ### Send Slurm workload identity to Fleet Intelligence
 
@@ -220,9 +281,12 @@ These are the `fleetint run` flags supported by the CLI.
 | `--log-file`               | Log file path. Leave empty to log to stdout/stderr.                                                                                          | empty                                                          | `FLEETINT_FLAGS="--log-file=..."`            | not exposed by chart by default |
 | `--listen-address`         | Listen address for the agent API server. An absolute path creates a Unix socket; a `host:port` value opens a TCP listener.                   | `/run/fleetint/fleetint.sock`                                  | `FLEETINT_FLAGS="--listen-address=..."`      | `listenAddress`                 |
 | `--retention-period`       | Retention period for stored metrics and events. Minimum `1m`.                                                                                | `24h`                                                          | `FLEETINT_FLAGS="--retention-period=..."`    | `retentionPeriod`               |
-| `--workload-attribution-source` | Workload assignment source. Currently supported value: `hpc`.                                                                          | unset (disabled)                                               | `FLEETINT_FLAGS="--workload-attribution-source=hpc ..."` | `workloadAttribution.source` |
+| `--workload-attribution-source` | Workload assignment source: `hpc` or `kubernetes`.                                                                                       | unset (disabled)                                               | `FLEETINT_FLAGS="--workload-attribution-source=hpc ..."` | `workloadAttribution.source` |
 | `--hpc-job-mapping-dir`    | Absolute path to the scheduler-maintained GPU-to-job mapping directory. Required when the source is `hpc`.                                  | unset                                                          | `FLEETINT_FLAGS="--hpc-job-mapping-dir=..."` | `workloadAttribution.hpc.jobMappingDir` |
 | `--hpc-gpu-identifier`     | Identifier used by HPC mapping filenames: `dcgm_index` or `uuid`.                                                                          | `dcgm_index`                                                   | `FLEETINT_FLAGS="--hpc-gpu-identifier=uuid ..."` | `workloadAttribution.hpc.gpuIdentifier` |
+| `--kubernetes-workload-label` | Ordered pod label containing the workload ID. Repeat the flag for fallback labels. Required for the `kubernetes` source.                  | unset                                                          | environment only in Kubernetes | `workloadAttribution.kubernetes.workloadLabels` |
+| `--kubernetes-pod-resources-socket` | Absolute path to the kubelet pod-resources socket.                                                                                | `/var/lib/kubelet/pod-resources/kubelet.sock`                  | environment only in Kubernetes | `workloadAttribution.kubernetes.podResourcesSocket` |
+| `--kubernetes-gpu-identifier` | GPU identifier returned by the device plugin: `uuid` or `device_name`.                                                                   | `uuid`                                                         | environment only in Kubernetes | `workloadAttribution.kubernetes.gpuIdentifier` |
 | `--components`             | Comma-separated component selection. Use `all`, `*`, explicit names, and `-name` exclusions.                                                 | empty flag value, which means enable all components by default | `FLEETINT_FLAGS="--components=..."`          | `components`                    |
 | `--offline-mode`           | Disable the HTTP API server and write telemetry to files instead.                                                                            | `false`                                                        | `FLEETINT_FLAGS="--offline-mode ..."`        | not exposed by chart by default |
 | `--path`                   | Absolute path to the output directory for offline mode. Must not point inside restricted system directories. Required with `--offline-mode`. | empty                                                          | `FLEETINT_FLAGS="--path=/path ..."`          | not exposed by chart by default |

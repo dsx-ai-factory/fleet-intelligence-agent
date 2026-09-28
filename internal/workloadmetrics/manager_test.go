@@ -86,10 +86,10 @@ func TestManagerRegistrationFailure(t *testing.T) {
 func TestManagerRejectsUnsupportedSource(t *testing.T) {
 	manager, err := startWithRegisterer(
 		prometheus.NewRegistry(),
-		&config.WorkloadAttributionConfig{Source: "kubernetes"},
+		&config.WorkloadAttributionConfig{Source: "container"},
 		nil,
 	)
-	require.ErrorContains(t, err, `unsupported workload_attribution source "kubernetes"`)
+	require.ErrorContains(t, err, `unsupported workload_attribution source "container"`)
 	require.Nil(t, manager)
 }
 

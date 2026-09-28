@@ -29,6 +29,7 @@ import (
 
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/workloadmetrics/hpcjob"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/workloadmetrics/k8sworkload"
 )
 
 // Manager owns workload metric collectors for one FleetInt server instance.
@@ -77,26 +78,45 @@ func startWithRegisterer(
 	if workloadConfig == nil || workloadConfig.Source == "" {
 		return m, nil
 	}
-	gpuIdentifier := workloadConfig.HPC.HPCGPUIdentifier()
-	gpuIdentifierType := hpcjob.GPUIdentifierType(gpuIdentifier)
 
-	collector := hpcjob.NewCollector(
-		hpcjob.NewFileReader(
-			workloadConfig.HPC.JobMappingDir,
-			gpuIdentifierType,
-		),
-		gpuUUIDByIndexProvider,
-	)
-	if err := registerer.Register(collector); err != nil {
-		return nil, fmt.Errorf("register HPC workload identity metric collector: %w", err)
+	switch workloadConfig.Source {
+	case config.WorkloadSourceHPC:
+		gpuIdentifier := workloadConfig.HPC.HPCGPUIdentifier()
+		collector := hpcjob.NewCollector(
+			hpcjob.NewFileReader(
+				workloadConfig.HPC.JobMappingDir,
+				hpcjob.GPUIdentifierType(gpuIdentifier),
+			),
+			gpuUUIDByIndexProvider,
+		)
+		if err := registerer.Register(collector); err != nil {
+			return nil, fmt.Errorf("register HPC workload identity metric collector: %w", err)
+		}
+		m.collectors = append(m.collectors, collector)
+
+		log.Logger.Infow(
+			"enabled HPC workload identity metrics",
+			"mappingDirectory", workloadConfig.HPC.JobMappingDir,
+			"gpuIdentifier", gpuIdentifier,
+		)
+	case config.WorkloadSourceKubernetes:
+		collector, err := k8sworkload.NewCollector(workloadConfig.Kubernetes, gpuUUIDByIndexProvider)
+		if err != nil {
+			return nil, fmt.Errorf("create Kubernetes workload identity metric collector: %w", err)
+		}
+		if err := registerer.Register(collector); err != nil {
+			_ = collector.Close()
+			return nil, fmt.Errorf("register Kubernetes workload identity metric collector: %w", err)
+		}
+		m.collectors = append(m.collectors, collector)
+
+		log.Logger.Infow(
+			"enabled Kubernetes workload identity metrics",
+			"workloadLabels", workloadConfig.Kubernetes.WorkloadLabels,
+			"podResourcesSocket", workloadConfig.Kubernetes.KubernetesPodResourcesSocket(),
+			"gpuIdentifier", workloadConfig.Kubernetes.KubernetesGPUIdentifier(),
+		)
 	}
-	m.collectors = append(m.collectors, collector)
-
-	log.Logger.Infow(
-		"enabled HPC workload identity metrics",
-		"mappingDirectory", workloadConfig.HPC.JobMappingDir,
-		"gpuIdentifier", gpuIdentifier,
-	)
 	return m, nil
 }
 
@@ -109,6 +129,11 @@ func (m *Manager) Close() {
 	m.closeOnce.Do(func() {
 		for i := len(m.collectors) - 1; i >= 0; i-- {
 			m.registerer.Unregister(m.collectors[i])
+			if closer, ok := m.collectors[i].(interface{ Close() error }); ok {
+				if err := closer.Close(); err != nil {
+					log.Logger.Infow("failed to close workload metric collector", "error", err)
+				}
+			}
 		}
 		m.collectors = nil
 	})

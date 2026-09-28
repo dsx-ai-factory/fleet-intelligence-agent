@@ -258,16 +258,36 @@ func configureLoopConfigFromEnv(cfg *config.Config) error {
 	return nil
 }
 
-func configureWorkloadAttribution(cfg *config.Config, source, hpcJobMappingDir, hpcGPUIdentifier string) {
-	if source == "" && hpcJobMappingDir == "" {
+type workloadAttributionOptions struct {
+	source                       string
+	hpcJobMappingDir             string
+	hpcGPUIdentifier             string
+	kubernetesWorkloadLabels     []string
+	kubernetesPodResourcesSocket string
+	kubernetesGPUIdentifier      string
+}
+
+func configureWorkloadAttribution(cfg *config.Config, options *workloadAttributionOptions) {
+	if options.source == "" && options.hpcJobMappingDir == "" && len(options.kubernetesWorkloadLabels) == 0 {
 		return
 	}
 
-	cfg.WorkloadAttribution = &config.WorkloadAttributionConfig{Source: source}
-	if hpcJobMappingDir != "" {
+	cfg.WorkloadAttribution = &config.WorkloadAttributionConfig{Source: options.source}
+	if options.hpcJobMappingDir != "" {
 		cfg.WorkloadAttribution.HPC = &config.HPCWorkloadConfig{
-			JobMappingDir: filepath.Clean(hpcJobMappingDir),
-			GPUIdentifier: hpcGPUIdentifier,
+			JobMappingDir: filepath.Clean(options.hpcJobMappingDir),
+			GPUIdentifier: options.hpcGPUIdentifier,
+		}
+	}
+	if options.source == config.WorkloadSourceKubernetes || len(options.kubernetesWorkloadLabels) > 0 {
+		podResourcesSocket := options.kubernetesPodResourcesSocket
+		if podResourcesSocket != "" {
+			podResourcesSocket = filepath.Clean(podResourcesSocket)
+		}
+		cfg.WorkloadAttribution.Kubernetes = &config.KubernetesWorkloadConfig{
+			WorkloadLabels:     options.kubernetesWorkloadLabels,
+			PodResourcesSocket: podResourcesSocket,
+			GPUIdentifier:      options.kubernetesGPUIdentifier,
 		}
 	}
 }
@@ -299,6 +319,9 @@ func runCommand(cliContext *cli.Context) error {
 	workloadAttributionSource := cliContext.String("workload-attribution-source")
 	hpcJobMappingDir := cliContext.String("hpc-job-mapping-dir")
 	hpcGPUIdentifier := cliContext.String("hpc-gpu-identifier")
+	kubernetesWorkloadLabels := cliContext.StringSlice("kubernetes-workload-label")
+	kubernetesPodResourcesSocket := cliContext.String("kubernetes-pod-resources-socket")
+	kubernetesGPUIdentifier := cliContext.String("kubernetes-gpu-identifier")
 
 	ibClassRootDir := cliContext.String("infiniband-class-root-dir")
 	components := cliContext.String("components")
@@ -366,7 +389,14 @@ func runCommand(cliContext *cli.Context) error {
 	if retentionPeriod > 0 {
 		cfg.RetentionPeriod = metav1.Duration{Duration: retentionPeriod}
 	}
-	configureWorkloadAttribution(cfg, workloadAttributionSource, hpcJobMappingDir, hpcGPUIdentifier)
+	configureWorkloadAttribution(cfg, &workloadAttributionOptions{
+		source:                       workloadAttributionSource,
+		hpcJobMappingDir:             hpcJobMappingDir,
+		hpcGPUIdentifier:             hpcGPUIdentifier,
+		kubernetesWorkloadLabels:     kubernetesWorkloadLabels,
+		kubernetesPodResourcesSocket: kubernetesPodResourcesSocket,
+		kubernetesGPUIdentifier:      kubernetesGPUIdentifier,
+	})
 
 	if components != "" {
 		cfg.Components = strings.Split(components, ",")

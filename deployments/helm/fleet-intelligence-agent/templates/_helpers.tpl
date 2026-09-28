@@ -19,3 +19,12 @@ app.kubernetes.io/name: {{ include "fleet-intelligence-agent.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
+{{- define "fleet-intelligence-agent.serviceAccountName" -}}
+{{- if .Values.serviceAccount.name -}}
+{{- .Values.serviceAccount.name -}}
+{{- else if .Values.serviceAccount.create -}}
+{{- include "fleet-intelligence-agent.fullname" . -}}
+{{- else -}}
+default
+{{- end -}}
+{{- end -}}
