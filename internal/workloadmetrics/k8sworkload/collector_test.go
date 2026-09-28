@@ -177,6 +177,58 @@ func TestCollectorOmitsScrapeWhenPodResourcesFails(t *testing.T) {
 	require.Empty(t, gatherMetrics(t, collector, podMetricName))
 }
 
+func TestNewCollectorRejectsInvalidRuntimeConfiguration(t *testing.T) {
+	collector, err := NewCollector(
+		&config.KubernetesWorkloadConfig{
+			WorkloadLabels:     []string{"job-name"},
+			PodResourcesSocket: "relative/kubelet.sock",
+		},
+		staticGPUUUIDProvider(nil),
+	)
+	require.ErrorContains(t, err, "must be absolute")
+	require.Nil(t, collector)
+
+	t.Setenv("NODE_NAME", "")
+	collector, err = NewCollector(
+		&config.KubernetesWorkloadConfig{
+			WorkloadLabels:     []string{"job-name"},
+			PodResourcesSocket: "/var/lib/kubelet/pod-resources/kubelet.sock",
+		},
+		staticGPUUUIDProvider(nil),
+	)
+	require.ErrorIs(t, err, errNodeNameRequired)
+	require.Nil(t, collector)
+}
+
+func TestCollectorSkipsUnavailablePodLabelsAndUnknownGPUs(t *testing.T) {
+	labels := &fakePodLabelReader{err: errors.New("metadata unavailable")}
+	collector := newCollector(
+		&config.KubernetesWorkloadConfig{WorkloadLabels: []string{"job-name"}},
+		&fakeAllocationReader{allocations: []GPUAllocation{
+			{Namespace: "ml", PodName: "worker", DeviceID: "GPU-abc"},
+			{Namespace: "ml", PodName: "unknown", DeviceID: "GPU-unknown"},
+		}},
+		labels,
+		staticGPUUUIDProvider(map[string]string{"0": "GPU-abc", "1": ""}),
+	)
+
+	families := gatherMetricFamilies(t, collector)
+	require.Len(t, families[podMetricName], 1)
+	require.Empty(t, families[workloadMetricName])
+	require.Equal(t, 1, labels.calls)
+}
+
+func TestCollectorDoesNothingWithoutRuntimeDependencies(t *testing.T) {
+	collector := newCollector(
+		&config.KubernetesWorkloadConfig{WorkloadLabels: []string{"job-name"}},
+		nil,
+		nil,
+		nil,
+	)
+	require.Empty(t, gatherMetricFamilies(t, collector))
+	require.NoError(t, (*Collector)(nil).Close())
+}
+
 func TestCollectorSkipsInvalidMetricLabels(t *testing.T) {
 	collector := newCollector(
 		&config.KubernetesWorkloadConfig{WorkloadLabels: []string{"job-name"}},
@@ -239,6 +291,7 @@ func TestCollectorCloseClosesAllocationReader(t *testing.T) {
 type fakeAllocationReader struct {
 	allocations []GPUAllocation
 	err         error
+	closeErr    error
 	closed      bool
 }
 
@@ -248,17 +301,18 @@ func (r *fakeAllocationReader) List(context.Context) ([]GPUAllocation, error) {
 
 func (r *fakeAllocationReader) Close() error {
 	r.closed = true
-	return nil
+	return r.closeErr
 }
 
 type fakePodLabelReader struct {
 	labels map[string]map[string]string
+	err    error
 	calls  int
 }
 
 func (r *fakePodLabelReader) Labels(_ context.Context, namespace, podName string) (map[string]string, error) {
 	r.calls++
-	return r.labels[namespace+"/"+podName], nil
+	return r.labels[namespace+"/"+podName], r.err
 }
 
 func gatherMetrics(t *testing.T, collector prometheus.Collector, metricName string) []*dto.Metric {

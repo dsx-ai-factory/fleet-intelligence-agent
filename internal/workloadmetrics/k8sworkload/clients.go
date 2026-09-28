@@ -145,6 +145,10 @@ func newInClusterPodLabelReader() (*inClusterPodLabelReader, error) {
 			options.FieldSelector = fieldSelector
 		},
 	)
+	return newPodLabelReader(listWatch), nil
+}
+
+func newPodLabelReader(listWatch cache.ListerWatcher) *inClusterPodLabelReader {
 	informer := cache.NewSharedIndexInformer(
 		listWatch,
 		&corev1.Pod{},
@@ -157,7 +161,7 @@ func newInClusterPodLabelReader() (*inClusterPodLabelReader, error) {
 		stop:      make(chan struct{}),
 	}
 	go informer.Run(reader.stop)
-	return reader, nil
+	return reader
 }
 
 func (r *inClusterPodLabelReader) Labels(ctx context.Context, namespace, podName string) (map[string]string, error) {

@@ -166,6 +166,26 @@ func TestConfigureKubernetesWorkloadAttribution(t *testing.T) {
 	require.Equal(t, config.KubernetesGPUIdentifierUUID, cfg.WorkloadAttribution.Kubernetes.GPUIdentifier)
 }
 
+func TestConfigureWorkloadAttributionDisabled(t *testing.T) {
+	cfg := &config.Config{}
+	configureWorkloadAttribution(cfg, &workloadAttributionOptions{})
+	require.Nil(t, cfg.WorkloadAttribution)
+}
+
+func TestConfigureHPCWorkloadAttribution(t *testing.T) {
+	cfg := &config.Config{}
+	configureWorkloadAttribution(cfg, &workloadAttributionOptions{
+		source:           config.WorkloadSourceHPC,
+		hpcJobMappingDir: "/scheduler/mappings/../job-mappings",
+		hpcGPUIdentifier: config.HPCGPUIdentifierUUID,
+	})
+
+	require.Equal(t, config.WorkloadSourceHPC, cfg.WorkloadAttribution.Source)
+	require.Equal(t, "/scheduler/job-mappings", cfg.WorkloadAttribution.HPC.JobMappingDir)
+	require.Equal(t, config.HPCGPUIdentifierUUID, cfg.WorkloadAttribution.HPC.GPUIdentifier)
+	require.Nil(t, cfg.WorkloadAttribution.Kubernetes)
+}
+
 func hpcJobMappingDirFlag(t *testing.T) *cli.StringFlag {
 	t.Helper()
 

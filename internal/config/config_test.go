@@ -481,6 +481,17 @@ func TestValidateWorkloadAttribution(t *testing.T) {
 		require.ErrorContains(t, cfg.Validate(), `requires source "hpc"`)
 	})
 
+	t.Run("disabled rejects Kubernetes settings", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{
+				Kubernetes: &KubernetesWorkloadConfig{WorkloadLabels: []string{"job-name"}},
+			},
+		}
+		require.ErrorContains(t, cfg.Validate(), `requires source "kubernetes"`)
+	})
+
 	t.Run("Kubernetes with ordered workload labels", func(t *testing.T) {
 		cfg := &Config{
 			Address:         ":8080",
@@ -505,6 +516,32 @@ func TestValidateWorkloadAttribution(t *testing.T) {
 			WorkloadAttribution: &WorkloadAttributionConfig{Source: WorkloadSourceKubernetes},
 		}
 		require.ErrorContains(t, cfg.Validate(), "workload_labels is required")
+	})
+
+	t.Run("Kubernetes rejects HPC settings", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{
+				Source:     WorkloadSourceKubernetes,
+				HPC:        &HPCWorkloadConfig{JobMappingDir: "/scheduler/gpu-job-mapping"},
+				Kubernetes: &KubernetesWorkloadConfig{WorkloadLabels: []string{"job-name"}},
+			},
+		}
+		require.ErrorContains(t, cfg.Validate(), `requires source "hpc"`)
+	})
+
+	t.Run("HPC rejects Kubernetes settings", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{
+				Source:     WorkloadSourceHPC,
+				HPC:        &HPCWorkloadConfig{JobMappingDir: "/scheduler/gpu-job-mapping"},
+				Kubernetes: &KubernetesWorkloadConfig{WorkloadLabels: []string{"job-name"}},
+			},
+		}
+		require.ErrorContains(t, cfg.Validate(), `requires source "kubernetes"`)
 	})
 
 	t.Run("Kubernetes rejects invalid workload label", func(t *testing.T) {
