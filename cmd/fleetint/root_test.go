@@ -191,7 +191,7 @@ func TestWorkloadAttributionOptionsFromContext(t *testing.T) {
 	flagSet.String("workload-attribution-source", "", "")
 	flagSet.String("hpc-job-mapping-dir", "", "")
 	flagSet.String("hpc-gpu-identifier", "", "")
-	workloadLabels := cli.NewStringSlice()
+	workloadLabels := &cli.StringSlice{}
 	flagSet.Var(workloadLabels, "kubernetes-workload-label", "")
 	flagSet.String("kubernetes-pod-resources-socket", "", "")
 	flagSet.String("kubernetes-gpu-identifier", "", "")
