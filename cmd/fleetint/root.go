@@ -90,7 +90,7 @@ func App() *cli.App {
 				},
 				&cli.StringFlag{
 					Name:   "workload-attribution-source",
-					Usage:  "workload attribution source [hpc] (disabled when unset)",
+					Usage:  "workload attribution source [hpc, kubernetes] (disabled when unset)",
 					EnvVar: "FLEETINT_WORKLOAD_ATTRIBUTION_SOURCE",
 				},
 				&cli.StringFlag{
@@ -103,6 +103,23 @@ func App() *cli.App {
 					Usage:  "GPU identifier used by HPC mapping filenames [dcgm_index, uuid]",
 					Value:  config.HPCGPUIdentifierDCGMIndex,
 					EnvVar: "FLEETINT_HPC_GPU_IDENTIFIER",
+				},
+				&cli.StringSliceFlag{
+					Name:   "kubernetes-workload-label",
+					Usage:  "ordered pod label containing the canonical workload ID (repeat for fallback labels; required for the kubernetes workload source)",
+					EnvVar: "FLEETINT_KUBERNETES_WORKLOAD_LABELS",
+				},
+				&cli.StringFlag{
+					Name:   "kubernetes-pod-resources-socket",
+					Usage:  "path to the kubelet pod-resources socket",
+					Value:  config.DefaultKubernetesPodResourcesSocket,
+					EnvVar: "FLEETINT_KUBERNETES_POD_RESOURCES_SOCKET",
+				},
+				&cli.StringFlag{
+					Name:   "kubernetes-gpu-identifier",
+					Usage:  "GPU identifier returned by the Kubernetes device plugin [uuid, device_name]",
+					Value:  config.KubernetesGPUIdentifierUUID,
+					EnvVar: "FLEETINT_KUBERNETES_GPU_IDENTIFIER",
 				},
 				&cli.DurationFlag{
 					Name:  "retention-period",

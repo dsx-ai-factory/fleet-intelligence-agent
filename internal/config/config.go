@@ -26,6 +26,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 
 	pkgconfigcommon "github.com/NVIDIA/fleet-intelligence-sdk/pkg/config/common"
 )
@@ -37,10 +38,16 @@ type ConfigEntry struct {
 }
 
 const (
-	WorkloadSourceHPC = "hpc"
+	WorkloadSourceHPC        = "hpc"
+	WorkloadSourceKubernetes = "kubernetes"
 
 	HPCGPUIdentifierDCGMIndex = "dcgm_index"
 	HPCGPUIdentifierUUID      = "uuid"
+
+	KubernetesGPUIdentifierDeviceName = "device_name"
+	KubernetesGPUIdentifierUUID       = "uuid"
+
+	DefaultKubernetesPodResourcesSocket = "/var/lib/kubelet/pod-resources/kubelet.sock"
 )
 
 // Config provides configuration for the health metrics exporter
@@ -89,14 +96,24 @@ type Config struct {
 
 // WorkloadAttributionConfig selects one workload assignment source.
 type WorkloadAttributionConfig struct {
-	Source string             `json:"source"`
-	HPC    *HPCWorkloadConfig `json:"hpc,omitempty"`
+	Source     string                    `json:"source"`
+	HPC        *HPCWorkloadConfig        `json:"hpc,omitempty"`
+	Kubernetes *KubernetesWorkloadConfig `json:"kubernetes,omitempty"`
 }
 
 // HPCWorkloadConfig configures scheduler-maintained GPU-to-job mapping files.
 type HPCWorkloadConfig struct {
 	JobMappingDir string `json:"job_mapping_dir"`
 	GPUIdentifier string `json:"gpu_identifier,omitempty"`
+}
+
+// KubernetesWorkloadConfig configures pod-label-based workload attribution.
+// WorkloadLabels is ordered: the first configured label present on a pod is
+// used as that pod's normalized workload ID.
+type KubernetesWorkloadConfig struct {
+	WorkloadLabels     []string `json:"workload_labels"`
+	PodResourcesSocket string   `json:"pod_resources_socket,omitempty"`
+	GPUIdentifier      string   `json:"gpu_identifier,omitempty"`
 }
 
 // InventoryConfig holds configuration for the periodic inventory loop.
@@ -259,11 +276,23 @@ func (cfg *WorkloadAttributionConfig) Validate() error {
 			(cfg.HPC.JobMappingDir != "" || cfg.HPC.GPUIdentifier != "") {
 			return fmt.Errorf("workload_attribution.hpc configuration requires source %q", WorkloadSourceHPC)
 		}
+		if cfg != nil && cfg.Kubernetes != nil &&
+			(len(cfg.Kubernetes.WorkloadLabels) > 0 ||
+				cfg.Kubernetes.PodResourcesSocket != "" ||
+				cfg.Kubernetes.GPUIdentifier != "") {
+			return fmt.Errorf("workload_attribution.kubernetes configuration requires source %q", WorkloadSourceKubernetes)
+		}
 		return nil
 	}
 
-	if cfg.Source != WorkloadSourceHPC {
+	if cfg.Source != WorkloadSourceHPC && cfg.Source != WorkloadSourceKubernetes {
 		return fmt.Errorf("unsupported workload_attribution source %q", cfg.Source)
+	}
+	if cfg.Source == WorkloadSourceKubernetes {
+		return cfg.validateKubernetes()
+	}
+	if cfg.Kubernetes != nil {
+		return fmt.Errorf("workload_attribution.kubernetes configuration requires source %q", WorkloadSourceKubernetes)
 	}
 	if cfg.HPC == nil || cfg.HPC.JobMappingDir == "" {
 		return fmt.Errorf("workload_attribution.hpc.job_mapping_dir is required when source is %q", WorkloadSourceHPC)
@@ -284,11 +313,64 @@ func (cfg *WorkloadAttributionConfig) Validate() error {
 	return nil
 }
 
+func (cfg *WorkloadAttributionConfig) validateKubernetes() error {
+	if cfg.HPC != nil {
+		return fmt.Errorf("workload_attribution.hpc configuration requires source %q", WorkloadSourceHPC)
+	}
+	if cfg.Kubernetes == nil || len(cfg.Kubernetes.WorkloadLabels) == 0 {
+		return fmt.Errorf("workload_attribution.kubernetes.workload_labels is required when source is %q", WorkloadSourceKubernetes)
+	}
+	seen := make(map[string]struct{}, len(cfg.Kubernetes.WorkloadLabels))
+	for _, label := range cfg.Kubernetes.WorkloadLabels {
+		if strings.TrimSpace(label) != label || label == "" {
+			return fmt.Errorf("workload_attribution.kubernetes.workload_labels must contain non-empty Kubernetes label names")
+		}
+		if problems := k8svalidation.IsQualifiedName(label); len(problems) > 0 {
+			return fmt.Errorf("invalid Kubernetes workload label %q: %s", label, strings.Join(problems, "; "))
+		}
+		if _, found := seen[label]; found {
+			return fmt.Errorf("workload_attribution.kubernetes.workload_labels contains duplicate label %q", label)
+		}
+		seen[label] = struct{}{}
+	}
+	if !filepath.IsAbs(cfg.Kubernetes.KubernetesPodResourcesSocket()) {
+		return fmt.Errorf("workload_attribution.kubernetes.pod_resources_socket must be an absolute path")
+	}
+	gpuIdentifier := cfg.Kubernetes.KubernetesGPUIdentifier()
+	if gpuIdentifier != KubernetesGPUIdentifierDeviceName && gpuIdentifier != KubernetesGPUIdentifierUUID {
+		return fmt.Errorf(
+			"unsupported workload_attribution.kubernetes.gpu_identifier %q; supported values are %q and %q",
+			gpuIdentifier,
+			KubernetesGPUIdentifierDeviceName,
+			KubernetesGPUIdentifierUUID,
+		)
+	}
+	return nil
+}
+
 // HPCGPUIdentifier returns the configured mapping filename identifier, using
 // the dcgm-exporter-compatible numeric DCGM index when it is unset.
 func (cfg *HPCWorkloadConfig) HPCGPUIdentifier() string {
 	if cfg == nil || cfg.GPUIdentifier == "" {
 		return HPCGPUIdentifierDCGMIndex
+	}
+	return cfg.GPUIdentifier
+}
+
+// KubernetesPodResourcesSocket returns the configured kubelet pod-resources
+// socket, using the standard kubelet path when it is unset.
+func (cfg *KubernetesWorkloadConfig) KubernetesPodResourcesSocket() string {
+	if cfg == nil || cfg.PodResourcesSocket == "" {
+		return DefaultKubernetesPodResourcesSocket
+	}
+	return cfg.PodResourcesSocket
+}
+
+// KubernetesGPUIdentifier returns the identifier format exposed by the
+// NVIDIA device plugin through the kubelet pod-resources API.
+func (cfg *KubernetesWorkloadConfig) KubernetesGPUIdentifier() string {
+	if cfg == nil || cfg.GPUIdentifier == "" {
+		return KubernetesGPUIdentifierUUID
 	}
 	return cfg.GPUIdentifier
 }

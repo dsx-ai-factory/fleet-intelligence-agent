@@ -481,13 +481,125 @@ func TestValidateWorkloadAttribution(t *testing.T) {
 		require.ErrorContains(t, cfg.Validate(), `requires source "hpc"`)
 	})
 
-	t.Run("rejects unimplemented source", func(t *testing.T) {
+	t.Run("disabled rejects Kubernetes settings", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{
+				Kubernetes: &KubernetesWorkloadConfig{WorkloadLabels: []string{"job-name"}},
+			},
+		}
+		require.ErrorContains(t, cfg.Validate(), `requires source "kubernetes"`)
+	})
+
+	t.Run("Kubernetes with ordered workload labels", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{
+				Source: WorkloadSourceKubernetes,
+				Kubernetes: &KubernetesWorkloadConfig{WorkloadLabels: []string{
+					"jobset.sigs.k8s.io/jobset-name",
+					"training.kubeflow.org/job-name",
+				}},
+			},
+		}
+		require.NoError(t, cfg.Validate())
+		require.Equal(t, DefaultKubernetesPodResourcesSocket, cfg.WorkloadAttribution.Kubernetes.KubernetesPodResourcesSocket())
+		require.Equal(t, KubernetesGPUIdentifierUUID, cfg.WorkloadAttribution.Kubernetes.KubernetesGPUIdentifier())
+	})
+
+	t.Run("Kubernetes requires workload labels", func(t *testing.T) {
 		cfg := &Config{
 			Address:             ":8080",
 			RetentionPeriod:     metav1.Duration{Duration: time.Hour},
-			WorkloadAttribution: &WorkloadAttributionConfig{Source: "kubernetes"},
+			WorkloadAttribution: &WorkloadAttributionConfig{Source: WorkloadSourceKubernetes},
 		}
-		require.ErrorContains(t, cfg.Validate(), `unsupported workload_attribution source "kubernetes"`)
+		require.ErrorContains(t, cfg.Validate(), "workload_labels is required")
+	})
+
+	t.Run("Kubernetes rejects HPC settings", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{
+				Source:     WorkloadSourceKubernetes,
+				HPC:        &HPCWorkloadConfig{JobMappingDir: "/scheduler/gpu-job-mapping"},
+				Kubernetes: &KubernetesWorkloadConfig{WorkloadLabels: []string{"job-name"}},
+			},
+		}
+		require.ErrorContains(t, cfg.Validate(), `requires source "hpc"`)
+	})
+
+	t.Run("HPC rejects Kubernetes settings", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{
+				Source:     WorkloadSourceHPC,
+				HPC:        &HPCWorkloadConfig{JobMappingDir: "/scheduler/gpu-job-mapping"},
+				Kubernetes: &KubernetesWorkloadConfig{WorkloadLabels: []string{"job-name"}},
+			},
+		}
+		require.ErrorContains(t, cfg.Validate(), `requires source "kubernetes"`)
+	})
+
+	t.Run("Kubernetes rejects invalid workload label", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{
+				Source: WorkloadSourceKubernetes,
+				Kubernetes: &KubernetesWorkloadConfig{
+					WorkloadLabels: []string{"not a label"},
+				},
+			},
+		}
+		require.ErrorContains(t, cfg.Validate(), "invalid Kubernetes workload label")
+	})
+
+	t.Run("Kubernetes socket must be absolute", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{
+				Source: WorkloadSourceKubernetes,
+				Kubernetes: &KubernetesWorkloadConfig{
+					WorkloadLabels:     []string{"job-name"},
+					PodResourcesSocket: "kubelet.sock",
+				},
+			},
+		}
+		require.ErrorContains(t, cfg.Validate(), "pod_resources_socket must be an absolute path")
+	})
+
+	t.Run("Kubernetes rejects duplicate workload labels", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{
+				Source: WorkloadSourceKubernetes,
+				Kubernetes: &KubernetesWorkloadConfig{
+					WorkloadLabels: []string{"job-name", "job-name"},
+				},
+			},
+		}
+		require.ErrorContains(t, cfg.Validate(), `contains duplicate label "job-name"`)
+	})
+
+	t.Run("Kubernetes rejects unsupported GPU identifier", func(t *testing.T) {
+		cfg := &Config{
+			Address:         ":8080",
+			RetentionPeriod: metav1.Duration{Duration: time.Hour},
+			WorkloadAttribution: &WorkloadAttributionConfig{
+				Source: WorkloadSourceKubernetes,
+				Kubernetes: &KubernetesWorkloadConfig{
+					WorkloadLabels: []string{"job-name"},
+					GPUIdentifier:  "linux_minor",
+				},
+			},
+		}
+		require.ErrorContains(t, cfg.Validate(), `unsupported workload_attribution.kubernetes.gpu_identifier "linux_minor"`)
 	})
 
 	t.Run("rejects unsupported HPC GPU identifier", func(t *testing.T) {

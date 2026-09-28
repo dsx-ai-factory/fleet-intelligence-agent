@@ -38,30 +38,35 @@ using custom images, installers, or container deployments, preserve or mount
 this directory from persistent host storage and restrict access because it
 contains enrollment credentials.
 
-## Attribute GPU health to Slurm jobs
+## Attribute GPU health to workloads
 
-Fleet Intelligence Agent can send GPU-to-job identity alongside its normal GPU
-telemetry using a stable metric and label contract.
+Fleet Intelligence Agent can send GPU-to-workload identity alongside its normal
+GPU telemetry using a stable metric and label contract. Workload attribution is
+opt-in and supports two sources:
 
-The feature uses scheduler-maintained mapping files inspired by the
-[dcgm-exporter HPC job-mapping convention](https://github.com/NVIDIA/dcgm-exporter#how-to-include-hpc-jobs-in-metric-labels).
-FleetInt converts each active GPU or MIG-instance/job relationship into a
-normalized metric:
+- Slurm/HPC mapping files maintained by scheduler hooks
+- Kubernetes workload names selected from configured pod labels
+
+The integration is based on
+[dcgm-exporter's workload-label approaches](https://docs.nvidia.com/datacenter/dcgm/latest/installation/install-dcgm-exporter.html#add-workload-labels),
+with cluster-specific identifiers normalized for the Fleet Intelligence backend.
+
+Both sources produce the normalized workload identity metric without adding
+workload labels to every GPU telemetry series:
 
 ```promql
-fleetint_gpu_workload_info{uuid="GPU-abc",gpu="0",workload_source="hpc",workload_id="123456"} 1
+fleetint_gpu_workload_info{gpud_component="workload-attribution",uuid="GPU-abc",gpu="0",workload_source="hpc",workload_id="123456"} 1
 ```
 
-MIG mappings preserve the scheduler-provided GPU instance as the optional
-`gpu_instance_id` label.
+Kubernetes attribution also reports the concrete pod/container allocation:
 
-Workload attribution is opt-in. The cluster administrator configures Slurm
-Prolog/Epilog hooks to maintain the files, then configures FleetInt with the
-mapping directory and filename identifier. Existing GPU metrics are unchanged;
-the identity metric is exported through the agent's normal telemetry path.
+```promql
+fleetint_gpu_pod_info{gpud_component="workload-attribution",uuid="GPU-abc",gpu="0",pod_namespace="ml",pod_name="training-42-worker-0",container_name="trainer"} 1
+```
 
-See [Send Slurm workload identity to Fleet Intelligence](docs/configuration.md#send-slurm-workload-identity-to-fleet-intelligence)
-for setup and verification instructions.
+See the [Kubernetes](docs/configuration.md#send-kubernetes-workload-identity-to-fleet-intelligence)
+and [Slurm](docs/configuration.md#send-slurm-workload-identity-to-fleet-intelligence)
+setup instructions.
 
 ## Supported Platforms
 

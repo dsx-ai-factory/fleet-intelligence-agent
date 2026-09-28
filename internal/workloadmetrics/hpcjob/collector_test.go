@@ -121,6 +121,27 @@ func TestCollectorResolvesUUIDFilename(t *testing.T) {
 	require.Equal(t, "123", metrics[0].Labels["workload_id"])
 }
 
+func TestCollectorSkipsInvalidMetricLabels(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(NewCollector(staticReader{mapping: Mapping{
+		gpuJobMapping("0", "", "invalid"),
+		gpuJobMapping("1", "", "valid"),
+	}}, staticGPUUUIDProvider(map[string]string{
+		"0": "GPU-\xff",
+		"1": "GPU-valid",
+	})))
+
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 1)
+	require.Len(t, families[0].GetMetric(), 1)
+	labels := make(map[string]string)
+	for _, label := range families[0].GetMetric()[0].GetLabel() {
+		labels[label.GetName()] = label.GetValue()
+	}
+	require.Equal(t, "GPU-valid", labels["uuid"])
+}
+
 func TestCollectorPreservesGPUInstanceID(t *testing.T) {
 	const uuid = "GPU-2cf69c7e-0d83-51f3-6d41-d3f7a6b08cb7"
 	tests := []struct {

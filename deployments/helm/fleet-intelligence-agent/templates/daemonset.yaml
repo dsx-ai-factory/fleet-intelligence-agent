@@ -16,14 +16,30 @@
 {{- $workloadSource := default "" .Values.workloadAttribution.source -}}
 {{- $hpcJobMappingDir := dig "hpc" "jobMappingDir" "" .Values.workloadAttribution -}}
 {{- $hpcGPUIdentifier := dig "hpc" "gpuIdentifier" "dcgm_index" .Values.workloadAttribution -}}
-{{- if and $workloadSource (ne $workloadSource "hpc") -}}
-{{- fail (printf "unsupported workloadAttribution.source %q; currently supported value: hpc" $workloadSource) -}}
+{{- $kubernetesWorkloadLabels := dig "kubernetes" "workloadLabels" (list) .Values.workloadAttribution -}}
+{{- $kubernetesPodResourcesSocket := dig "kubernetes" "podResourcesSocket" "/var/lib/kubelet/pod-resources/kubelet.sock" .Values.workloadAttribution -}}
+{{- $kubernetesGPUIdentifier := dig "kubernetes" "gpuIdentifier" "uuid" .Values.workloadAttribution -}}
+{{- $createKubernetesRBAC := dig "kubernetes" "rbac" "create" true .Values.workloadAttribution -}}
+{{- if and $workloadSource (not (has $workloadSource (list "hpc" "kubernetes"))) -}}
+{{- fail (printf "unsupported workloadAttribution.source %q; supported values: hpc, kubernetes" $workloadSource) -}}
 {{- end -}}
 {{- if and (eq $workloadSource "hpc") $hpcJobMappingDir (not (hasPrefix "/" $hpcJobMappingDir)) -}}
 {{- fail "workloadAttribution.hpc.jobMappingDir must be an absolute path" -}}
 {{- end -}}
 {{- if and (eq $workloadSource "hpc") (not (has $hpcGPUIdentifier (list "dcgm_index" "uuid"))) -}}
 {{- fail "workloadAttribution.hpc.gpuIdentifier must be dcgm_index or uuid" -}}
+{{- end -}}
+{{- if and (eq $workloadSource "kubernetes") (not $kubernetesWorkloadLabels) -}}
+{{- fail "workloadAttribution.kubernetes.workloadLabels is required when source is kubernetes" -}}
+{{- end -}}
+{{- if and (eq $workloadSource "kubernetes") (not (hasPrefix "/" $kubernetesPodResourcesSocket)) -}}
+{{- fail "workloadAttribution.kubernetes.podResourcesSocket must be an absolute path" -}}
+{{- end -}}
+{{- if and (eq $workloadSource "kubernetes") (not (has $kubernetesGPUIdentifier (list "device_name" "uuid"))) -}}
+{{- fail "workloadAttribution.kubernetes.gpuIdentifier must be device_name or uuid" -}}
+{{- end }}
+{{- if and (eq $workloadSource "kubernetes") $createKubernetesRBAC (not .Values.serviceAccount.create) (not .Values.serviceAccount.name) -}}
+{{- fail "Kubernetes workload attribution with RBAC creation requires serviceAccount.create=true or serviceAccount.name" -}}
 {{- end }}
 apiVersion: apps/v1
 kind: DaemonSet
@@ -49,7 +65,7 @@ spec:
       {{- else if .Values.serviceAccount.create }}
       serviceAccountName: {{ include "fleet-intelligence-agent.fullname" . }}
       {{- end }}
-      automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
+      automountServiceAccountToken: {{ and (ne $workloadSource "kubernetes") .Values.serviceAccount.automountToken }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -157,6 +173,13 @@ spec:
             - {{ printf "--hpc-job-mapping-dir=%s" (required "workloadAttribution.hpc.jobMappingDir is required when source is hpc" $hpcJobMappingDir) | quote }}
             - {{ printf "--hpc-gpu-identifier=%s" $hpcGPUIdentifier | quote }}
             {{- end }}
+            {{- if eq $workloadSource "kubernetes" }}
+            {{- range $kubernetesWorkloadLabels }}
+            - {{ printf "--kubernetes-workload-label=%s" . | quote }}
+            {{- end }}
+            - {{ printf "--kubernetes-pod-resources-socket=%s" $kubernetesPodResourcesSocket | quote }}
+            - {{ printf "--kubernetes-gpu-identifier=%s" $kubernetesGPUIdentifier | quote }}
+            {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           env:
@@ -167,6 +190,10 @@ spec:
             {{- end }}
             {{- end }}
             - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
@@ -205,6 +232,14 @@ spec:
               mountPath: {{ $hpcJobMappingDir | quote }}
               readOnly: true
             {{- end }}
+            {{- if eq $workloadSource "kubernetes" }}
+            - name: pod-gpu-resources
+              mountPath: {{ dir $kubernetesPodResourcesSocket | quote }}
+              readOnly: true
+            - name: kubernetes-api-access
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+            {{- end }}
       volumes:
         - name: dev
           hostPath:
@@ -236,4 +271,27 @@ spec:
           hostPath:
             path: {{ $hpcJobMappingDir | quote }}
             type: DirectoryOrCreate
+        {{- end }}
+        {{- if eq $workloadSource "kubernetes" }}
+        - name: pod-gpu-resources
+          hostPath:
+            path: {{ dir $kubernetesPodResourcesSocket | quote }}
+            type: Directory
+        - name: kubernetes-api-access
+          projected:
+            defaultMode: 420
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace
         {{- end }}

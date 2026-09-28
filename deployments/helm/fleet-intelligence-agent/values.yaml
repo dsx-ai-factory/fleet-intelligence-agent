@@ -57,10 +57,8 @@ retentionPeriod: 24h
 components: all
 deployEnv: prod
 
-# Workload attribution is disabled when no source is configured. For HPC,
-# set source to hpc and provide hpc.jobMappingDir explicitly. HPC mapping
-# filenames use numeric DCGM indexes by default; set hpc.gpuIdentifier to uuid
-# when scheduler hooks create GPU UUID filenames.
+# Workload attribution is disabled when no source is configured. See the chart
+# README for HPC and Kubernetes examples.
 workloadAttribution: {}
 
 # Agent enrollment remains independent of the optional telemetry gateway.
@@ -116,6 +114,9 @@ affinity:
 serviceAccount:
   create: true
   name: ""
+  # Controls token mounting when Kubernetes workload attribution is disabled.
+  # The kubernetes workload source always mounts the token so the agent can
+  # read configured workload labels from pods through the Kubernetes API.
   automountToken: false
 
 # OTel gateway collector deployed alongside the agents in the same cluster.

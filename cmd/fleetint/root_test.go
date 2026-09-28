@@ -22,6 +22,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli"
+
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
 )
 
 func TestLogLevelDefaultsToWarn(t *testing.T) {
@@ -128,6 +130,91 @@ func TestHPCGPUIdentifierConfiguration(t *testing.T) {
 	})
 }
 
+func TestKubernetesWorkloadLabelConfiguration(t *testing.T) {
+	setOptionalEnv(t, "FLEETINT_KUBERNETES_WORKLOAD_LABELS", "jobset.sigs.k8s.io/jobset-name,training.kubeflow.org/job-name")
+	flag := stringSliceFlag(t, "kubernetes-workload-label")
+	flagSet := flagpkg.NewFlagSet("test", flagpkg.ContinueOnError)
+	require.NoError(t, flag.ApplyWithError(flagSet))
+	require.NoError(t, flagSet.Parse(nil))
+
+	value, ok := flagSet.Lookup("kubernetes-workload-label").Value.(*cli.StringSlice)
+	require.True(t, ok)
+	require.Equal(t, []string{
+		"jobset.sigs.k8s.io/jobset-name",
+		"training.kubeflow.org/job-name",
+	}, value.Value())
+}
+
+func TestConfigureKubernetesWorkloadAttribution(t *testing.T) {
+	cfg := &config.Config{}
+	configureWorkloadAttribution(cfg, &workloadAttributionOptions{
+		source: config.WorkloadSourceKubernetes,
+		kubernetesWorkloadLabels: []string{
+			"jobset.sigs.k8s.io/jobset-name",
+			"training.kubeflow.org/job-name",
+		},
+		kubernetesPodResourcesSocket: "/var/lib/kubelet/pod-resources/../pod-resources/kubelet.sock",
+		kubernetesGPUIdentifier:      config.KubernetesGPUIdentifierUUID,
+	})
+
+	require.Equal(t, config.WorkloadSourceKubernetes, cfg.WorkloadAttribution.Source)
+	require.Equal(t, []string{
+		"jobset.sigs.k8s.io/jobset-name",
+		"training.kubeflow.org/job-name",
+	}, cfg.WorkloadAttribution.Kubernetes.WorkloadLabels)
+	require.Equal(t, config.DefaultKubernetesPodResourcesSocket, cfg.WorkloadAttribution.Kubernetes.PodResourcesSocket)
+	require.Equal(t, config.KubernetesGPUIdentifierUUID, cfg.WorkloadAttribution.Kubernetes.GPUIdentifier)
+}
+
+func TestConfigureWorkloadAttributionDisabled(t *testing.T) {
+	cfg := &config.Config{}
+	configureWorkloadAttribution(cfg, &workloadAttributionOptions{})
+	require.Nil(t, cfg.WorkloadAttribution)
+}
+
+func TestConfigureHPCWorkloadAttribution(t *testing.T) {
+	cfg := &config.Config{}
+	configureWorkloadAttribution(cfg, &workloadAttributionOptions{
+		source:           config.WorkloadSourceHPC,
+		hpcJobMappingDir: "/scheduler/mappings/../job-mappings",
+		hpcGPUIdentifier: config.HPCGPUIdentifierUUID,
+	})
+
+	require.Equal(t, config.WorkloadSourceHPC, cfg.WorkloadAttribution.Source)
+	require.Equal(t, "/scheduler/job-mappings", cfg.WorkloadAttribution.HPC.JobMappingDir)
+	require.Equal(t, config.HPCGPUIdentifierUUID, cfg.WorkloadAttribution.HPC.GPUIdentifier)
+	require.Nil(t, cfg.WorkloadAttribution.Kubernetes)
+}
+
+func TestWorkloadAttributionOptionsFromContext(t *testing.T) {
+	flagSet := flagpkg.NewFlagSet("test", flagpkg.ContinueOnError)
+	flagSet.String("workload-attribution-source", "", "")
+	flagSet.String("hpc-job-mapping-dir", "", "")
+	flagSet.String("hpc-gpu-identifier", "", "")
+	workloadLabels := &cli.StringSlice{}
+	flagSet.Var(workloadLabels, "kubernetes-workload-label", "")
+	flagSet.String("kubernetes-pod-resources-socket", "", "")
+	flagSet.String("kubernetes-gpu-identifier", "", "")
+	require.NoError(t, flagSet.Parse([]string{
+		"--workload-attribution-source", "kubernetes",
+		"--kubernetes-workload-label", "jobset.sigs.k8s.io/jobset-name",
+		"--kubernetes-workload-label", "training.kubeflow.org/job-name",
+		"--kubernetes-pod-resources-socket", "/var/lib/kubelet/pod-resources/kubelet.sock",
+		"--kubernetes-gpu-identifier", "uuid",
+	}))
+
+	options := workloadAttributionOptionsFromContext(cli.NewContext(nil, flagSet, nil))
+	require.Equal(t, "kubernetes", options.source)
+	require.Empty(t, options.hpcJobMappingDir)
+	require.Empty(t, options.hpcGPUIdentifier)
+	require.Equal(t, []string{
+		"jobset.sigs.k8s.io/jobset-name",
+		"training.kubeflow.org/job-name",
+	}, options.kubernetesWorkloadLabels)
+	require.Equal(t, "/var/lib/kubelet/pod-resources/kubelet.sock", options.kubernetesPodResourcesSocket)
+	require.Equal(t, "uuid", options.kubernetesGPUIdentifier)
+}
+
 func hpcJobMappingDirFlag(t *testing.T) *cli.StringFlag {
 	t.Helper()
 
@@ -162,6 +249,25 @@ func stringFlag(t *testing.T, name string) *cli.StringFlag {
 			stringFlag, ok := commandFlag.(*cli.StringFlag)
 			if ok && stringFlag.Name == name {
 				return stringFlag
+			}
+		}
+	}
+
+	t.Fatalf("run command does not define --%s", name)
+	return nil
+}
+
+func stringSliceFlag(t *testing.T, name string) *cli.StringSliceFlag {
+	t.Helper()
+
+	for _, command := range App().Commands {
+		if command.Name != "run" {
+			continue
+		}
+		for _, commandFlag := range command.Flags {
+			flag, ok := commandFlag.(*cli.StringSliceFlag)
+			if ok && flag.Name == name {
+				return flag
 			}
 		}
 	}
