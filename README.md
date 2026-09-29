@@ -129,6 +129,9 @@ See [CONTRIBUTING.md](https://github.com/dsx-ai-factory/fleet-intelligence-agent
 Participation in this project is governed by the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 
+For questions, ideas, and community support, use
+[GitHub Discussions](https://github.com/dsx-ai-factory/fleet-intelligence-agent/discussions).
+
 Related: [leptonai/gpud](https://github.com/leptonai/gpud) (upstream dependency)
 
 ## License
