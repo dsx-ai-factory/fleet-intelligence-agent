@@ -17,12 +17,21 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	pkgmetadata "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metadata"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
 )
+
+func TestConfigureHealthExporterFromEnvDCGMHealthCheckInterval(t *testing.T) {
+	t.Setenv("FLEETINT_DCGM_HEALTH_CHECK_INTERVAL", "2m")
+	cfg := &config.Config{HealthExporter: &config.HealthExporterConfig{}}
+
+	require.NoError(t, configureHealthExporterFromEnv(cfg))
+	require.Equal(t, 2*time.Minute, cfg.HealthExporter.DCGMHealthCheckInterval.Duration)
+}
 
 func TestConfigureHealthExporterFromEnvCollectorEndpoint(t *testing.T) {
 	t.Setenv("FLEETINT_COLLECTOR_ENDPOINT", "http://fleetint-otel-gateway:4318")
