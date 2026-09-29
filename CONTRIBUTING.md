@@ -1,5 +1,9 @@
 # Contributing to Fleet Intelligence Agent
 
+## Code of Conduct
+
+All contributors must follow the project [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Issue Tracking
 
 Please start all enhancement, bugfix, or change requests by opening a GitHub issue. Include clear reproduction steps, expected behavior, and environment details. Issues will be triaged and prioritized by maintainers before code review.
