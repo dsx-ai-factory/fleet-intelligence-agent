@@ -26,14 +26,15 @@ Common values (defaults from `values.yaml`):
 | `env.DCGM_URLS` | `nvidia-dcgm.gpu-operator.svc:5555,nvidia-dcgm-dra.gpu-operator.svc:5555` | Ordered TCP endpoints tried when `DCGM_URL` is unset. |
 | `env.DCGM_URL_IS_UNIX_SOCKET` | `"false"` | Treat `DCGM_URL` as a unix socket path. |
 | `env.MALLOC_ARENA_MAX` | `4` | glibc arena cap to help constrain RSS for DCGM/cgo-heavy workloads. |
-| `env.FLEETINT_COLLECT_INTERVAL` | `"1m"` | Data collection interval (1s to 24h). |
+| `env.FLEETINT_COLLECT_INTERVAL` | `"1m"` | Data export interval (1s to 24h). |
 | `env.FLEETINT_INCLUDE_METRICS` | `"true"` | Include metrics in export. |
 | `env.FLEETINT_INCLUDE_EVENTS` | `"true"` | Include events in export. |
 | `env.FLEETINT_INCLUDE_MACHINEINFO` | `"true"` | Include machine info in export. |
 | `env.FLEETINT_INCLUDE_HEALTHCHECKS` | `"true"` | Include component health data in export. |
 | `env.FLEETINT_METRICS_LOOKBACK` | `"1m"` | Lookback window for metrics export. |
 | `env.FLEETINT_EVENTS_LOOKBACK` | `"1m"` | Lookback window for events export. |
-| `env.FLEETINT_CHECK_INTERVAL` | `"1m"` | Health check frequency (1s to 24h). |
+| `env.FLEETINT_CHECK_INTERVAL` | `"30s"` | Component evaluation and metrics-scrape frequency (1s to 24h). |
+| `env.FLEETINT_DCGM_HEALTH_CHECK_INTERVAL` | `"1m"` | DCGM passive-health polling frequency (1m to 24h). |
 | `env.FLEETINT_RETRY_MAX_ATTEMPTS` | `"3"` | Max retry attempts for failed exports. |
 | `env.FLEETINT_INVENTORY_ENABLED` | `"true"` | Enable or disable the inventory loop. |
 | `env.FLEETINT_INVENTORY_INTERVAL` | `"1h"` | Inventory loop interval override. Minimum: `5m`. |
