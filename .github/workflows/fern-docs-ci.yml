@@ -20,8 +20,13 @@ name: Fern Docs CI
 on:
   pull_request:
     paths:
+      - 'README.md'
+      - 'CONTRIBUTING.md'
+      - 'RELEASE.md'
       - 'docs/**'
       - 'fern/**'
+      - 'scripts/docs-fetch-versions.py'
+      - 'scripts/docs_fetch_versions_test.py'
       - '.github/workflows/fern-docs-ci.yml'
   workflow_dispatch: {}
   ## --- OPTION: NVIDIA copy-PR-bot trigger ---
@@ -75,6 +80,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Test versioned docs staging
+        run: python3 -m unittest scripts/docs_fetch_versions_test.py
 
       ## --- OPTION: filename convention check (warning) ---
       # - name: Warn on non-lowercase or underscore markdown filenames
