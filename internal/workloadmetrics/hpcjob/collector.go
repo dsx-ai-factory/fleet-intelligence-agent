@@ -97,6 +97,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 		}
 	}
 
+	invalidSeries := 0
 	for _, gpuJobMapping := range mappings {
 		gpuIndex, uuid, found := resolveGPU(
 			gpuJobMapping.PhysicalGPUIdentifier,
@@ -113,7 +114,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 			continue
 		}
 		for _, jobID := range gpuJobMapping.JobIDs {
-			ch <- prometheus.MustNewConstMetric(
+			metric, err := prometheus.NewConstMetric(
 				c.desc,
 				prometheus.GaugeValue,
 				1,
@@ -123,7 +124,18 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 				workloadSource,
 				jobID,
 			)
+			if err != nil {
+				invalidSeries++
+				continue
+			}
+			ch <- metric
 		}
+	}
+	if invalidSeries > 0 {
+		log.Logger.Infow(
+			"failed to construct HPC workload identity metrics; omitting invalid series",
+			"seriesCount", invalidSeries,
+		)
 	}
 }
 
