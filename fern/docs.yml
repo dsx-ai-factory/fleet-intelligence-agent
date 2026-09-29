@@ -46,6 +46,9 @@ navigation:
   - page: Development
     path: ../docs/development.md
     slug: development
+  - page: Release Process
+    path: ../RELEASE.md
+    slug: release
   - page: Contributing
     path: ../CONTRIBUTING.md
     slug: contributing

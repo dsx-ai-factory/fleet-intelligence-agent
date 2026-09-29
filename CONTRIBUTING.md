@@ -170,6 +170,11 @@ git commit --amend --signoff
 
 For more information about the DCO, see: https://developercertificate.org/
 
+## Releases
+
+Maintainers should follow the documented [release process](RELEASE.md). Release
+artifacts are built and published by CI from protected version tags.
+
 ## Pull Request Process
 
 1. **Fork the Repository**: Create a personal fork of the Fleet Intelligence Agent repository on GitHub.

@@ -23,6 +23,8 @@ Usage:
     python3 scripts/docs-fetch-versions.py --list
 """
 
+from __future__ import annotations
+
 import argparse
 import io
 import json
@@ -55,6 +57,7 @@ TITLE_MAP: dict[str, str] = {
     "install-rpm.md": "RPM Installation",
     "install-helm.md": "Helm Installation",
     "development.md": "Development",
+    "release.md": "Release Process",
     "contributing.md": "Contributing",
 }
 
@@ -68,14 +71,17 @@ PAGE_ORDER = [
     "install-rpm.md",
     "install-helm.md",
     "development.md",
+    "release.md",
     "contributing.md",
 ]
 
 # Root-level files mirrored into fern/docs.yml's HEAD navigation as pages
-# (Overview <- README.md, Contributing <- CONTRIBUTING.md). Mapped to the
-# staged filename so slugs match the HEAD nav (slug = filename stem).
+# (Overview <- README.md, Release Process <- RELEASE.md, and
+# Contributing <- CONTRIBUTING.md). Mapped to the staged filename so slugs
+# match the HEAD nav (slug = filename stem).
 ROOT_PAGES: list[tuple[str, str]] = [
     ("README.md", "overview.md"),
+    ("RELEASE.md", "release.md"),
     ("CONTRIBUTING.md", "contributing.md"),
 ]
 
@@ -114,6 +120,14 @@ def fix_mdx(content: str) -> str:
                 "../CONTRIBUTING.md",
                 "https://github.com/dsx-ai-factory/fleet-intelligence-agent/blob/main/CONTRIBUTING.md",
             )
+            # Root pages are renamed when staged, so links between them must
+            # use the staged filenames on the published site.
+            for source_name, staged_name in ROOT_PAGES:
+                if source_name != staged_name:
+                    line = line.replace(
+                        f"]({source_name}",
+                        f"]({staged_name}",
+                    )
         result.append(line)
     return "\n".join(result)
 
