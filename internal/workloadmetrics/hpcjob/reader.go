@@ -27,6 +27,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	"golang.org/x/sys/unix"
 )
 
@@ -189,9 +190,14 @@ func readJobIDs(directory *os.File, filename string) ([]string, error) {
 	limited := io.LimitReader(f, maxMappingFileSize)
 	scanner := bufio.NewScanner(limited)
 	seen := make(map[string]struct{})
+	invalidLineCount := 0
 	for scanner.Scan() {
 		jobID := strings.TrimSpace(scanner.Text())
-		if jobID == "" || len(jobID) > maxJobIDLength || !utf8.ValidString(jobID) {
+		if jobID == "" {
+			continue
+		}
+		if len(jobID) > maxJobIDLength || !utf8.ValidString(jobID) {
+			invalidLineCount++
 			continue
 		}
 		if _, found := seen[jobID]; found {
@@ -204,6 +210,13 @@ func readJobIDs(directory *os.File, filename string) ([]string, error) {
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
+	}
+	if invalidLineCount > 0 {
+		log.Logger.Infow(
+			"ignored invalid HPC job IDs in mapping file",
+			"mappingFile", filename,
+			"invalidLineCount", invalidLineCount,
+		)
 	}
 	jobIDs := make([]string, 0, len(seen))
 	for jobID := range seen {
