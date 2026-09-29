@@ -59,9 +59,26 @@ corresponding release branch:
 ```bash
 git switch release/1.5
 git pull --ff-only origin release/1.5
-git tag -a v1.5.0 -m "Release v1.5.0"
-git push origin v1.5.0
 ```
+
+Before creating the tag, push the release branch and wait for all required CI
+checks to pass for the exact commit at the branch tip. Verify that the passing
+workflow run's commit SHA matches `git rev-parse HEAD`; checks on `main` or an
+earlier release-branch commit do not qualify. Fetch the release branch again
+immediately before tagging and stop if its remote tip no longer matches `HEAD`.
+
+```bash
+git fetch origin release/1.5
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/release/1.5)" || {
+  echo "release branch advanced; update it and repeat CI verification"
+  exit 1
+}
+git tag -a v1.5.0 -m "Release v1.5.0"
+git push --atomic origin HEAD:release/1.5 v1.5.0
+```
+
+The atomic push prevents publishing the tag if the remote release branch
+advances after the comparison.
 
 Pushing the tag starts
 [the release workflow](https://github.com/dsx-ai-factory/fleet-intelligence-agent/blob/main/.github/workflows/release.yml).
