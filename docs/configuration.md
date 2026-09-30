@@ -229,7 +229,7 @@ These are the `fleetint run` flags supported by the CLI.
 | `--path`                   | Absolute path to the output directory for offline mode. Must not point inside restricted system directories. Required with `--offline-mode`. | empty                                                          | `FLEETINT_FLAGS="--path=/path ..."`          | not exposed by chart by default |
 | `--duration`               | Offline-mode collection duration in `HH:MM:SS` format. Required with `--offline-mode`.                                                       | empty                                                          | `FLEETINT_FLAGS="--duration=00:05:00 ..."`   | not exposed by chart by default |
 | `--format`                 | Offline-mode output format: `json` or `csv`.                                                                                                 | `json`                                                         | `FLEETINT_FLAGS="--format=csv ..."`          | not exposed by chart by default |
-| `--enable-fault-injection` | Enable the local fault-injection endpoint for testing.                                                                                       | `false`                                                        | `FLEETINT_FLAGS="--enable-fault-injection"`  | not exposed by chart by default |
+| `--enable-fault-injection` | Enable the local fault-injection endpoint for testing.                                                                                       | `false`                                                        | `FLEETINT_FLAGS="--enable-fault-injection"`  | `enableFaultInjection` |
 
 ## Component Selection
 

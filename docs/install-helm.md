@@ -165,6 +165,45 @@ kubectl describe pod -n "$NS" "$POD_NAME"
 kubectl logs -n "$NS" "$POD_NAME" --follow
 ```
 
+## Fault injection for testing
+
+Fault injection is disabled by default. To enable it on an existing release:
+
+```bash
+helm upgrade fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
+  --version "$CHART_VERSION" \
+  --namespace "$NS" \
+  --reuse-values \
+  --set enableFaultInjection=true
+
+kubectl rollout status daemonset/fleet-intelligence-agent -n "$NS"
+```
+
+Enabling the endpoint does not inject faults automatically. Access remains
+localhost-only. Set `POD_NAME` to the target agent pod after the rollout, then run:
+
+```bash
+kubectl exec -n "$NS" "$POD_NAME" -c fleet-intelligence-agent -- \
+  fleetint inject \
+  --server-url=http://127.0.0.1:15133 \
+  --component=cpu \
+  --fault-type=component-error \
+  --fault-message="Helm fault injection test"
+
+# Clear the injected component fault after testing.
+kubectl exec -n "$NS" "$POD_NAME" -c fleet-intelligence-agent -- \
+  fleetint inject \
+  --server-url=http://127.0.0.1:15133 \
+  --component=cpu \
+  --clear
+```
+
+Use a local `--server-url` matching your `listenAddress` and an enabled component.
+The example uses the chart's default listener, `127.0.0.1:15133`.
+
+To disable the endpoint, repeat the Helm upgrade with
+`--set enableFaultInjection=false`; `--reuse-values` preserves the setting if omitted.
+
 ## Troubleshooting
 
 **Pods not starting:**

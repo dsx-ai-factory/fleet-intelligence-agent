@@ -58,6 +58,10 @@ retentionPeriod: 24h
 components: all
 deployEnv: prod
 
+# Enable the localhost-only fault injection endpoint for testing.
+# This does not inject faults automatically.
+enableFaultInjection: false
+
 # Workload attribution is disabled when no source is configured. For HPC,
 # set source to hpc and provide hpc.jobMappingDir explicitly. HPC mapping
 # filenames use numeric DCGM indexes by default; set hpc.gpuIdentifier to uuid
