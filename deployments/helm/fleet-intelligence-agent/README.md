@@ -46,6 +46,7 @@ Common values (defaults from `values.yaml`):
 | `listenAddress` | `0.0.0.0:15133` | Listen address. |
 | `retentionPeriod` | `24h` | Retention period for stored metrics and events. |
 | `components` | `all` | Enabled components. |
+| `enableFaultInjection` | `false` | Enable the localhost-only fault injection endpoint for testing; does not inject faults automatically. |
 | `workloadAttribution.source` | unset | Workload assignment source. Currently supported value: `hpc`. Leaving it unset disables workload attribution. |
 | `workloadAttribution.hpc.jobMappingDir` | `""` | Host mapping directory mounted read-only when the source is `hpc`; an explicit absolute path is required. |
 | `workloadAttribution.hpc.gpuIdentifier` | `dcgm_index` | Mapping filename identifier: `dcgm_index` or `uuid`. |
@@ -72,6 +73,13 @@ Common values (defaults from `values.yaml`):
 | `serviceAccount.create` | `true` | Create ServiceAccount. |
 | `serviceAccount.name` | `""` | ServiceAccount name. |
 | `serviceAccount.automountToken` | `false` | Automount service account token. |
+
+### Fault injection for testing
+
+Set `enableFaultInjection: true` to add `--enable-fault-injection` to the agent
+arguments. When false or omitted, fault injection remains disabled.
+See [Fault injection for testing](../../../docs/install-helm.md#fault-injection-for-testing)
+for enabling the option and injecting or clearing a fault from inside an agent pod.
 
 ### Slurm workload identity
 

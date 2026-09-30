@@ -150,6 +150,9 @@ spec:
             - {{ printf "--listen-address=%s" .Values.listenAddress | quote }}
             - {{ printf "--retention-period=%s" .Values.retentionPeriod | quote }}
             - {{ printf "--components=%s" .Values.components | quote }}
+            {{- if .Values.enableFaultInjection }}
+            - "--enable-fault-injection"
+            {{- end }}
             {{- with $workloadSource }}
             - {{ printf "--workload-attribution-source=%s" . | quote }}
             {{- end }}
