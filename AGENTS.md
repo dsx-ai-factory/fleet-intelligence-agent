@@ -109,7 +109,7 @@ real semantics such as chronology, priority, ranking, or topology.
 ## Contribution Workflow
 
 - Start changes from `main` on a focused feature branch.
-- Keep commits atomic and use the `type: description` commit format documented
-  in [CONTRIBUTING.md](CONTRIBUTING.md).
+- Keep commits atomic and use `type(scope): description` for commits and PR titles
+  (scope optional), as documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 - Sign every commit for DCO compliance with `git commit -s`.
 - Include verification results and any residual risk in the pull request.

@@ -188,49 +188,59 @@ artifacts are built and published by CI from protected version tags.
 
 4. **Test Your Changes**: Ensure all tests pass and add new tests for your changes if applicable.
 
-5. **Squash Commits**: Before finalizing your pull request, squash multiple commits into a single, clean commit:
-   ```bash
-   # Interactive rebase to squash commits (replace N with number of commits)
-   git rebase -i HEAD~N
-   
-   # Or squash all commits in your feature branch
-   git rebase -i main
-   ```
-   Choose "squash" (or "s") for commits you want to combine.
+5. **Submit Pull Request**: Follow the commit and PR conventions below, including DCO sign-offs, a standalone description, linked issues, validation, and breaking-change notes.
 
-6. **Sign-off Final Commit**: Make sure your final squashed commit is signed off according to the DCO requirements:
-   ```bash
-   # If you need to add sign-off to your final commit
-   git commit --amend --signoff
-   ```
-   Your final commit should have:
-   - A properly formatted commit message (see format below)
-   - Proper DCO sign-off
-   - A single logical change
+6. **Code Review**: Address feedback from maintainers. Maintainers squash merge approved PRs according to the policy below.
 
-   **Commit Message Format:**
-   ```
-   feat: add GPU temperature monitoring
+## Commit and Pull Request Conventions
 
-   - Implement temperature threshold checking
-   - Add Prometheus metrics for temperature alerts
-   - Include unit tests for temperature validation
+Use the same format for commit subjects and pull request titles:
 
-   Signed-off-by: Your Name <your.email@example.com>
-   ```
-   
-   Format: `type: brief description`
-   - **Type**: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `chore`
-   - **Description**: Clear, imperative mood summary (e.g., "Add feature" not "Added feature")
+```text
+<type>(<scope>): <description>
+```
 
-7. **Submit Pull Request**: Create a pull request against the main branch with:
-   - A clear title in the same default format as commits, for example `feat: add GPU temperature monitoring`
-   - A description with a concise summary of the change
-   - If there is a related GitHub issue, reference it in the PR body using a format like `[#123]`
-   - Summary of changes made
-   - Any breaking changes highlighted
+- Allowed types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `chore`, `revert`.
+- Scope is optional and lowercase, for example `cli`, `inventory`, or `deps`.
+- Write a concise, imperative description, for example `fix(inventory): handle missing chassis`.
+- For breaking changes, add `!` after the type/scope, for example `feat(cli)!: remove deprecated flag`, and explain the impact and migration in the PR body.
+- Sign off every commit with `git commit -s`, using your real name and a valid email address, to comply with the DCO.
+- Name branches `<type>/<short-dash-separated-name>`, for example `fix/missing-chassis` or `docs/configuration-guide`. Use one of the allowed types above.
+- Target `main` unless maintainers specify a release branch.
 
-8. **Code Review**: Address any feedback from maintainers during the review process.
+PR descriptions must explain the behavior change, link related GitHub issues
+(use `Closes #123` when appropriate), report validation and remaining limitations,
+and highlight breaking changes. Add relevant tests and documentation, follow the
+PR template, and ensure CI passes. PR titles describe the final user-visible
+result and may appear in release notes.
+
+Maintainers should **squash merge** each focused PR, using the PR title as the
+final commit subject. Contributors may keep separate review commits; they do not
+need to squash before review. Preserve all contributors' DCO `Signed-off-by:`
+trailers in the final squash commit and verify the final message before merging.
+
+### Local validation
+
+Install the optional commit-format hook from the repository root:
+
+```bash
+make setup-git-hooks
+```
+
+Run the shared subject-validation tests or check a proposed PR title:
+
+```bash
+make test-commit-conventions
+sh .git-hooks/commit-msg --subject "fix(inventory): handle missing chassis"
+```
+
+The hook allows Git-generated merge/revert subjects and temporary
+`fixup!`, `squash!`, and `amend!` commits locally. PR titles must always follow
+the format above. The **Contribution conventions / PR title** GitHub Actions check
+runs when a PR is opened, edited, or updated. Maintainers should require that
+check in branch protection and enable squash merging in repository settings.
+The hook checks subject formatting; contributors remain responsible for DCO
+sign-offs.
 
 ## Coding Standards
 
