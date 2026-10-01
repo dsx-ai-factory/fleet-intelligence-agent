@@ -184,12 +184,3 @@ clean: ## clean up binaries and build artifacts
 package-snapshot: ## package snapshot
 	@echo "Packaging snapshot..."
 	@goreleaser release --snapshot --clean --config .goreleaser.yaml
-
-.PHONY: setup-git-hooks
-setup-git-hooks: ## Configure the local commit-format hook
-	git config core.hooksPath .git-hooks
-	chmod +x .git-hooks/commit-msg
-
-.PHONY: test-commit-conventions
-test-commit-conventions: ## Validate commit subjects and PR titles
-	sh scripts/test-commit-conventions.sh

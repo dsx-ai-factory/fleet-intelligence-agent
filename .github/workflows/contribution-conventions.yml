@@ -14,13 +14,13 @@ jobs:
     name: PR title
     runs-on: ubuntu-latest
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Test subject validation
-        run: sh scripts/test-commit-conventions.sh
       - name: Validate PR title
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
-        run: sh .git-hooks/commit-msg --subject "$PR_TITLE"
+        shell: bash
+        run: |
+          pattern='^(feat|fix|perf|refactor|docs|chore|test|revert)(\([a-z0-9._/-]+\))?!?: [^[:space:]].*$'
+          if [[ "$PR_TITLE" == *$'\n'* || ! "$PR_TITLE" =~ $pattern ]]; then
+            echo "::error::Expected PR title: type(scope): description (scope optional; use ! for breaking changes)."
+            exit 1
+          fi

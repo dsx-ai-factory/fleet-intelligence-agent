@@ -219,28 +219,15 @@ final commit subject. Contributors may keep separate review commits; they do not
 need to squash before review. Preserve all contributors' DCO `Signed-off-by:`
 trailers in the final squash commit and verify the final message before merging.
 
-### Local validation
+### PR title validation
 
-Install the optional commit-format hook from the repository root:
-
-```bash
-make setup-git-hooks
-```
-
-Run the shared subject-validation tests or check a proposed PR title:
-
-```bash
-make test-commit-conventions
-sh .git-hooks/commit-msg --subject "fix(inventory): handle missing chassis"
-```
-
-The hook allows Git-generated merge/revert subjects and temporary
-`fixup!`, `squash!`, and `amend!` commits locally. PR titles must always follow
-the format above. The **Contribution conventions / PR title** GitHub Actions check
-runs when a PR is opened, edited, or updated. Maintainers should require that
-check in branch protection and enable squash merging in repository settings.
-The hook checks subject formatting; contributors remain responsible for DCO
-sign-offs.
+The **Contribution conventions / PR title** GitHub Actions check validates PR
+titles when a PR is opened, edited, or updated. Maintainers should require this
+check in branch protection and configure squash merging to use the PR title as
+the final commit subject. Local commit-format hooks are optional; individual
+commit messages do not become target-branch subjects when squash merging.
+Contributors must still sign off every commit, and maintainers must preserve
+those sign-offs in the final squash commit.
 
 ## Coding Standards
 
