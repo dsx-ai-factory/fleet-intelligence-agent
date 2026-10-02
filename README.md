@@ -1,5 +1,7 @@
 # NVIDIA Fleet Intelligence Agent
 
+![OSS Health: 71.5/100 Proficient](https://img.shields.io/badge/OSS%20Health-71.5%2F100%20Proficient-yellow)
+
 NVIDIA Fleet Intelligence Agent gives GPU infrastructure operators a single,
 lightweight agent for collecting hardware health, system telemetry, and
 attestation data. It helps teams detect node-level problems and export
