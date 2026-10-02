@@ -28,6 +28,18 @@ Built on top of [leptonai/gpud](https://github.com/leptonai/gpud).
 - Non-intrusive: Read-only operations, no system modifications
 - Production-ready: 24/7 datacenter operation
 
+## How It Works
+
+The agent discovers GPU and system components, collects their telemetry and
+health signals, and evaluates the resulting component state. It can optionally
+expose that state through an HTTP API and Prometheus endpoint, send it to a
+remote OpenTelemetry endpoint, or write it to local files. Bare-metal and
+Kubernetes deployments use the same collection and evaluation pipeline, with
+deployment-specific access to NVIDIA DCGM and host resources.
+
+See [Architecture](docs/architecture.md) for component boundaries, deployment
+models, data flow, and failure behavior.
+
 ## Persistent Local State
 
 The agent stores its node identity, enrollment metadata, and retained metrics and
