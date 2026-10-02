@@ -38,6 +38,42 @@ make lint  # run linting (golangci-lint if available)
 make test  # run unit tests with coverage
 ```
 
+### Adding a monitoring component
+
+Monitoring components are built into the agent; they are not loaded as runtime
+plugins. To add one:
+
+1. Add the implementation under
+   `third_party/fleet-intelligence-sdk/components/`, using a component with
+   similar dependencies as a reference. Implement the complete
+   `components.Component` interface and expose a constructor with the
+   `components.InitFunc` signature. The component name must be globally unique.
+2. Add the component name, constructor, and intentional `EnabledByDefault`
+   value to `internal/registry.All()`. This registry supplies both the daemon
+   and one-time scans, so a second registration path is not needed.
+3. Add contract-focused tests beside the implementation. Cover initialization,
+   supported and unsupported hosts, health transitions and recovery, dependency
+   failures, and repeated cleanup where applicable. State shared with pollers or
+   callbacks must be synchronized and pass the race detector.
+4. Update the component list in `docs/configuration.md`. Update architecture or
+   configuration documentation when the component introduces a new dependency,
+   data source, metric contract, or user-facing option.
+
+Before submitting the change, run the component package tests, the registry and
+runtime integration tests, and the project test target. In the first command,
+replace `cpu` with the new component's package path:
+
+```bash
+(cd third_party/fleet-intelligence-sdk && go test -race ./components/cpu/...)
+go test -race ./internal/registry ./internal/server ./internal/scan
+make test
+```
+
+The change is ready for review when the component has a unique registered name,
+works through both `fleetint run` and `fleetint scan`, handles partial failures
+and shutdown cleanly, produces deterministic output, and is included in the
+component-selection documentation.
+
 ## Testing
 
 We highly recommend writing tests for new features or bug fixes and ensuring all tests pass before submitting a PR.
