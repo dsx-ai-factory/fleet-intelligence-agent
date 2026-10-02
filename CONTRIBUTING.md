@@ -8,6 +8,18 @@ All contributors must follow the project [Code of Conduct](CODE_OF_CONDUCT.md).
 
 Please start all enhancement, bugfix, or change requests by opening a GitHub issue. Include clear reproduction steps, expected behavior, and environment details. Issues will be triaged and prioritized by maintainers before code review.
 
+### Issue prioritization
+
+Maintainers assign issue priority based on impact, severity, and alignment with
+the project roadmap. The `Priority` field in GitHub Projects is the
+authoritative priority; custom labels are not used to communicate priority.
+
+Contributors can help maintainers evaluate or revisit priority by adding
+concrete evidence to the issue, including affected environments, the scope of
+the impact, severity details, and any constraints or unavailable workarounds.
+If new information changes the impact, severity, or roadmap context, comment on
+the issue and ask the maintainers to reevaluate its priority.
+
 ## Development
 
 ### Prerequisites
