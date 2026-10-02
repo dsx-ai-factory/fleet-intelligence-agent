@@ -1,0 +1,31 @@
+version: 2
+
+updates:
+  - package-ecosystem: gomod
+    directories:
+      - /
+      - /otelcol/auth/sakauth
+      - /third_party/fleet-intelligence-sdk
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore(deps)
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci(deps)
+
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /otelcol
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore(deps)
