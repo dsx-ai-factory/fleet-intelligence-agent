@@ -23,7 +23,7 @@ the issue and ask the maintainers to reevaluate its priority.
 ## Development
 
 ### Prerequisites
-- Go 1.26.6+ (see `go.mod`)
+- Go 1.26.10+ (see `go.mod`)
 - Make
 - golangci-lint (optional locally, required in CI)
 

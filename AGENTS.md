@@ -66,7 +66,7 @@ recovery.
 
 ## Development Commands
 
-The project requires Go 1.26.6 or newer.
+The project requires Go 1.26.10 or newer.
 
 ```bash
 make fleetint          # Build the fleetint binary

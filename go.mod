@@ -1,6 +1,6 @@
 module github.com/dsx-ai-factory/fleet-intelligence-agent
 
-go 1.26.6
+go 1.26.10
 
 require (
 	github.com/NVIDIA/fleet-intelligence-sdk v0.0.0-00010101000000-000000000000
