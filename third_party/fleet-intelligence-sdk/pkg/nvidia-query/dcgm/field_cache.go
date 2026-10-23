@@ -36,25 +36,44 @@ type FieldValueCache struct {
 	mu         sync.RWMutex
 	values     map[uint]map[dcgm.Short]dcgm.FieldValue_v1 // deviceID -> fieldID -> value
 	lastUpdate time.Time
-	lastError  error
+	// lastError records setup failures, which affect every field. Read failures
+	// are tracked separately in fieldErrors because groups recover independently.
+	lastError error
+	// fieldErrors retains failures until the affected fields are read again;
+	// a successful faster group must not clear a slower group's error.
+	fieldErrors map[dcgm.Short]error
 
-	fieldGroupID   dcgm.FieldHandle
+	// schedule replaces the single field-group handle with independently paced groups.
+	// It is initialized after enabled components register their fields.
+	schedule *FieldSchedule
+	// intervals retains profile settings for deferred setup and retries; it does not register fields.
+	intervals      CollectionIntervals
 	fieldGroupName string
 	pollInterval   time.Duration
-	started        bool
 	startOnce      sync.Once
+	// registrationMu serializes setup, deadline updates, reads, reconnect, and cleanup.
 	registrationMu sync.Mutex
 }
 
 // NewFieldValueCache creates a placeholder cache. Call SetupFieldWatching() after components register fields.
 func NewFieldValueCache(ctx context.Context, instance Instance, pollInterval time.Duration) *FieldValueCache {
+	return NewFieldValueCacheWithIntervals(ctx, instance, pollInterval, CollectionIntervals{})
+}
+
+// NewFieldValueCacheWithIntervals applies named profile minimums to registered fields.
+func NewFieldValueCacheWithIntervals(ctx context.Context, instance Instance, pollInterval time.Duration, intervals CollectionIntervals) *FieldValueCache {
 	cctx, ccancel := context.WithCancel(ctx)
+	if pollInterval <= 0 {
+		pollInterval = 30 * time.Second
+	}
 
 	fc := &FieldValueCache{
 		ctx:            cctx,
+		intervals:      intervals,
 		cancel:         ccancel,
 		instance:       instance,
 		values:         make(map[uint]map[dcgm.Short]dcgm.FieldValue_v1),
+		fieldErrors:    make(map[dcgm.Short]error),
 		fieldGroupName: "fleetint-default-gpu-fields",
 		pollInterval:   pollInterval,
 	}
@@ -85,9 +104,12 @@ func (fc *FieldValueCache) SetupFieldWatchingWithName(fieldGroupName string) err
 func (fc *FieldValueCache) ensureFieldWatchingSetup() error {
 	fc.registrationMu.Lock()
 	defer fc.registrationMu.Unlock()
+	return fc.setupLocked()
+}
 
-	if fc.fieldGroupID.GetHandle() != 0 {
-		return nil
+func (fc *FieldValueCache) setupLocked() error {
+	if fc.ctx.Err() != nil {
+		return context.Canceled
 	}
 
 	if fc.instance == nil || !fc.instance.DCGMExists() {
@@ -95,48 +117,30 @@ func (fc *FieldValueCache) ensureFieldWatchingSetup() error {
 		return nil
 	}
 
-	watchedFields := fc.instance.GetWatchedFields()
-	if len(watchedFields) == 0 {
-		log.Logger.Debugw("no fields registered, skipping field watching setup")
-		return nil
+	// The schedule retains the selected fields across setup retries and reconnects.
+	if fc.schedule == nil {
+		watchedFields := fc.instance.GetWatchedFields()
+		if len(watchedFields) == 0 {
+			log.Logger.Debugw("no fields registered, skipping field watching setup")
+			return nil
+		}
+		fc.schedule = NewFieldSchedule(watchedFields, fc.pollInterval, fc.intervals)
 	}
 
 	fc.mu.RLock()
 	fieldGroupName := fc.fieldGroupName
 	fc.mu.RUnlock()
 
-	fieldGroupID, err := dcgm.FieldGroupCreate(fieldGroupName, watchedFields)
-	if err != nil {
-		setupErr := fmt.Errorf("failed to create DCGM field group: %w", err)
-		// Store error so GetResult() returns it to components
+	if err := fc.schedule.Setup(fieldGroupName, fc.instance.GetGroupHandle()); err != nil {
 		fc.mu.Lock()
-		fc.lastError = setupErr
+		fc.lastError = err
 		fc.mu.Unlock()
-		return setupErr
-	}
-	fc.fieldGroupID = fieldGroupID
-
-	updateFreqMicroseconds := int64(fc.pollInterval / time.Microsecond)
-	maxKeepAge := fc.pollInterval.Seconds() * 2
-	maxKeepSamples := int32(3)
-
-	err = dcgm.WatchFieldsWithGroupEx(fieldGroupID, fc.instance.GetGroupHandle(),
-		updateFreqMicroseconds, maxKeepAge, maxKeepSamples)
-	if err != nil {
-		dcgm.FieldGroupDestroy(fieldGroupID)
-		setupErr := fmt.Errorf("failed to set up DCGM field watching: %w", err)
-		// Store error so GetResult() returns it to components
-		fc.mu.Lock()
-		fc.lastError = setupErr
-		fc.mu.Unlock()
-		return setupErr
+		return err
 	}
 
-	log.Logger.Infow("set up DCGM field watching with centralized field group",
-		"updateFreq", fc.pollInterval,
-		"maxKeepAge", maxKeepAge,
-		"numFields", len(watchedFields))
-
+	fc.mu.Lock()
+	fc.lastError = nil
+	fc.mu.Unlock()
 	return nil
 }
 
@@ -144,10 +148,6 @@ func (fc *FieldValueCache) ensureFieldWatchingSetup() error {
 func (fc *FieldValueCache) Start() error {
 	var startErr error
 	fc.startOnce.Do(func() {
-		fc.registrationMu.Lock()
-		fc.started = true
-		fc.registrationMu.Unlock()
-
 		if err := fc.Poll(); err != nil {
 			log.Logger.Warnw("initial poll failed", "error", err)
 		}
@@ -160,30 +160,28 @@ func (fc *FieldValueCache) Start() error {
 	return startErr
 }
 
-// Stop stops polling and destroys the field group.
+// Stop cancels polling and releases all field groups after any in-flight poll.
 func (fc *FieldValueCache) Stop() {
 	fc.cancel()
 
 	fc.registrationMu.Lock()
-	fieldGroupID := fc.fieldGroupID
-	fc.fieldGroupID = dcgm.FieldHandle{}
-	fc.registrationMu.Unlock()
-
-	if fc.instance != nil && fc.instance.DCGMExists() && fieldGroupID.GetHandle() != 0 {
-		if err := dcgm.FieldGroupDestroy(fieldGroupID); err != nil {
-			log.Logger.Warnw("failed to destroy field group", "error", err)
-		}
+	defer fc.registrationMu.Unlock()
+	if fc.schedule != nil {
+		_ = fc.schedule.Close()
 	}
 }
 
 func (fc *FieldValueCache) resetAfterReconnect() {
 	fc.registrationMu.Lock()
-	fc.fieldGroupID = dcgm.FieldHandle{}
-	fc.registrationMu.Unlock()
+	if fc.schedule != nil {
+		fc.schedule.Reset()
+	}
+	defer fc.registrationMu.Unlock()
 
 	fc.mu.Lock()
 	fc.values = make(map[uint]map[dcgm.Short]dcgm.FieldValue_v1)
 	fc.lastError = nil
+	clear(fc.fieldErrors)
 	fc.lastUpdate = time.Time{}
 	fc.mu.Unlock()
 }
@@ -200,12 +198,18 @@ func (fc *FieldValueCache) pollLoop() {
 			if err := fc.Poll(); err != nil {
 				log.Logger.Warnw("field polling failed", "error", err)
 			}
+			ticker.Reset(fc.pollInterval)
 		}
 	}
 }
 
 // Poll queries DCGM and updates the cache. Used by background polling and scan mode.
 func (fc *FieldValueCache) Poll() error {
+	fc.registrationMu.Lock()
+	defer fc.registrationMu.Unlock()
+	if fc.ctx.Err() != nil {
+		return context.Canceled
+	}
 	if fc.instance == nil {
 		return fmt.Errorf("DCGM instance is nil")
 	}
@@ -226,27 +230,36 @@ func (fc *FieldValueCache) Poll() error {
 		}
 	}
 
-	if err := fc.ensureFieldWatchingSetup(); err != nil {
+	if err := fc.setupLocked(); err != nil {
 		return err
 	}
 
-	watchedFields := fc.instance.GetWatchedFields()
+	if fc.schedule == nil {
+		return nil
+	}
+	watchedFields := fc.schedule.Due(time.Now())
 	if len(watchedFields) == 0 {
-		log.Logger.Debugw("no fields registered with DCGM, skipping field poll")
+		log.Logger.Debugw("no fields due, skipping field poll")
 		return nil
 	}
 
+	defer func() { fc.schedule.Complete(watchedFields, time.Now()) }()
 	devices := fc.instance.GetDevices()
-	newValues := make(map[uint]map[dcgm.Short]dcgm.FieldValue_v1)
+	newValues := make(map[uint][]dcgm.FieldValue_v1, len(devices))
 	var pollErr error
+	readComplete := len(devices) > 0
 
 	for _, device := range devices {
-		fieldValues, err := dcgm.GetLatestValuesForFields(device.ID, watchedFields)
+		if err := fc.ctx.Err(); err != nil {
+			return err
+		}
+		fieldValues, err := fc.instance.GetLatestValuesForFields(device.ID, watchedFields)
 		if err != nil {
 			exitForRestartIfRequired("field_cache", err, "deviceID", device.ID)
 
 			// Check if this is a transient error (benign, don't store)
 			if IsTransientError(err) {
+				readComplete = false
 				log.Logger.Infow("DCGM transient error, will retry",
 					"component", "field_cache",
 					"deviceID", device.ID,
@@ -268,20 +281,36 @@ func (fc *FieldValueCache) Poll() error {
 			continue
 		}
 
-		deviceValues := make(map[dcgm.Short]dcgm.FieldValue_v1)
-		for _, fieldValue := range fieldValues {
-			deviceValues[fieldValue.FieldID] = fieldValue
-		}
-		newValues[device.ID] = deviceValues
+		newValues[device.ID] = fieldValues
 	}
 
 	fc.mu.Lock()
-	fc.values = newValues
+	// Publish the complete poll under one lock. Retain fields that are not due
+	// without copying their values, and remove due samples even when reads fail.
+	for _, device := range devices {
+		deviceValues := fc.values[device.ID]
+		for _, field := range watchedFields {
+			delete(deviceValues, field)
+		}
+		if deviceValues == nil && len(newValues[device.ID]) > 0 {
+			deviceValues = make(map[dcgm.Short]dcgm.FieldValue_v1, len(newValues[device.ID]))
+			fc.values[device.ID] = deviceValues
+		}
+		for _, fieldValue := range newValues[device.ID] {
+			deviceValues[fieldValue.FieldID] = fieldValue
+		}
+	}
 	fc.lastUpdate = time.Now()
-	fc.lastError = pollErr
+	for _, field := range watchedFields {
+		if pollErr != nil {
+			fc.fieldErrors[field] = pollErr
+		} else if readComplete {
+			delete(fc.fieldErrors, field)
+		}
+	}
 	fc.mu.Unlock()
 
-	log.Logger.Debugw("field values cached", "devices", len(newValues), "fields", len(watchedFields))
+	log.Logger.Debugw("field values cached", "devices", len(devices), "fields", len(watchedFields))
 	if pollErr != nil {
 		return fmt.Errorf("DCGM error during field polling: %w", pollErr)
 	}
@@ -316,7 +345,13 @@ func (fc *FieldValueCache) getResult(fields []dcgm.Short, preserveFieldErrors bo
 	fc.mu.RLock()
 	defer fc.mu.RUnlock()
 
-	// Check lastError first - it contains more specific error information
+	for _, field := range fields {
+		if err := fc.fieldErrors[field]; err != nil {
+			return nil, err
+		}
+	}
+
+	// Setup errors apply to every requested field.
 	if fc.lastError != nil {
 		return nil, fc.lastError
 	}

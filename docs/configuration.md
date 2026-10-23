@@ -51,7 +51,9 @@ These environment variables are read by `fleetint run` at startup.
 | `FLEETINT_INCLUDE_HEALTHCHECKS` | Include component data and health details in export payloads.                                            | `true`                                                                   | `/etc/default/fleetint` | `env.FLEETINT_INCLUDE_HEALTHCHECKS` |
 | `FLEETINT_METRICS_LOOKBACK`     | Lookback window for metrics included in each export.                                                     | `1m`                                                                     | `/etc/default/fleetint` | `env.FLEETINT_METRICS_LOOKBACK`     |
 | `FLEETINT_EVENTS_LOOKBACK`      | Lookback window for events included in each export.                                                      | `1m`                                                                     | `/etc/default/fleetint` | `env.FLEETINT_EVENTS_LOOKBACK`      |
-| `FLEETINT_CHECK_INTERVAL`       | Component evaluation and metric-scrape interval. Valid range: `1s` to `24h`.                              | `30s`                                                                    | `/etc/default/fleetint` | `env.FLEETINT_CHECK_INTERVAL`       |
+| `FLEETINT_CHECK_INTERVAL`       | Standard interval for component checks, metric scrapes, and standard DCGM collection. Valid range: `1s` to `24h`.                              | `30s`                                                                    | `/etc/default/fleetint` | `env.FLEETINT_CHECK_INTERVAL`       |
+| `FLEETINT_DCGM_EXTENDED_INTERVAL` | Minimum collection interval for extended DCGM fields. A longer standard interval still applies. Valid range: `1s` to `24h`. | `60s` | `/etc/default/fleetint` | `env.FLEETINT_DCGM_EXTENDED_INTERVAL` |
+| `FLEETINT_DCGM_FIELD_PROFILES` | Field assignments, as comma-separated `ID=profile` or `FIRST-LAST=profile` entries. Assignments do not enable fields. | unset (built-in assignments below) | `/etc/default/fleetint` | `env.FLEETINT_DCGM_FIELD_PROFILES` |
 | `FLEETINT_DCGM_HEALTH_CHECK_INTERVAL` | DCGM passive-health polling interval. Valid range: `1m` to `24h`.                                  | `1m`                                                                     | `/etc/default/fleetint` | `env.FLEETINT_DCGM_HEALTH_CHECK_INTERVAL` |
 | `FLEETINT_RETRY_MAX_ATTEMPTS`   | Maximum retry attempts for failed exports. Minimum: `0`.                                                 | `3`                                                                      | `/etc/default/fleetint` | `env.FLEETINT_RETRY_MAX_ATTEMPTS`   |
 | `FLEETINT_WORKLOAD_ATTRIBUTION_SOURCE` | Workload assignment source. Currently supported value: `hpc`. Unset disables workload attribution. | unset | `/etc/default/fleetint` | `workloadAttribution.source` |
@@ -72,6 +74,100 @@ Notes:
   supplies ordered TCP fallback endpoints. `DCGM_URL_IS_UNIX_SOCKET` applies
   only to `DCGM_URL`.
 - `MALLOC_ARENA_MAX` is a Linux process-level tuning parameter (not a Fleet Intelligence setting) that caps the number of glibc memory arenas to constrain RSS growth in cgo-heavy workloads such as DCGM integration.
+
+### DCGM field collection minimums
+
+Most users need no configuration. The defaults are:
+
+| Field class | Default interval | Setting |
+| --- | --- | --- |
+| Standard fields | `30s` | `FLEETINT_CHECK_INTERVAL` |
+| Extended fields | At least `60s` | `FLEETINT_DCGM_EXTENDED_INTERVAL` |
+
+The **standard interval** is `FLEETINT_CHECK_INTERVAL`. It controls component
+checks, metric scrapes, and standard DCGM field collection. It also applies
+to non-DCGM components.
+
+The **extended interval setting** is `FLEETINT_DCGM_EXTENDED_INTERVAL`.
+Extended fields use the longer of this setting and the standard interval.
+
+For example, these settings use `10s` for standard fields and a `60s` minimum
+for extended fields:
+
+```bash
+FLEETINT_CHECK_INTERVAL="10s"
+FLEETINT_DCGM_EXTENDED_INTERVAL="60s"
+```
+
+Or use Helm values:
+
+```yaml
+env:
+  FLEETINT_CHECK_INTERVAL: "10s"
+  FLEETINT_DCGM_EXTENDED_INTERVAL: "60s"
+```
+
+| Standard interval | Extended interval setting | Effective extended minimum |
+| --- | --- | --- |
+| `30s` | `60s` | `60s` |
+| `10s` | `60s` | `60s` |
+| `90s` | `60s` | `90s` |
+| `10s` | `10s` | `10s` |
+
+Both settings use Go duration syntax. The valid range is `1s` to `24h`.
+Values can be raised or lowered. The `30s` standard default is an agent
+setting, not a recommendation for every DCGM field. Shorter intervals
+increase collection frequency and collection overhead.
+
+Reads occur on standard-interval check cycles. They can occur after a deadline. For example,
+a `40s` standard interval and a `60s` extended minimum can produce reads every `80s`.
+Each DCGM read batch sets its next deadlines after the batch finishes. DCGM polling
+waits one standard interval after each cycle. This also enforces the minimum when
+sequential device reads have different durations.
+Checks and scrapes between reads use the last published values. Missed cycles
+do not cause a burst of reads. Failed reads also wait for the next deadline. A stored read error remains until
+the affected interval group completes a successful read.
+The shared GPU cache recreates watches after reconnect. It clears cached
+values and retains read deadlines within the running process.
+
+**Advanced: change field assignments**
+
+By default, field IDs `1200–1219` and `1404–1419`, inclusive, are extended.
+All other collected fields are standard. Most users should keep this mapping.
+
+To change selected assignments, use `FLEETINT_DCGM_FIELD_PROFILES`:
+
+```bash
+FLEETINT_DCGM_FIELD_PROFILES="1110=extended"
+```
+
+In Helm, set `env.FLEETINT_DCGM_FIELD_PROFILES` to the same string. This example
+assigns CPU field `1110` to the extended interval. Other fields keep their
+default assignments. The assignment does not enable field `1110` or its component.
+
+Assignments use `ID=standard`, `ID=extended`, or an inclusive range such as
+`1200-1219=standard`. IDs must be decimal integers from `1` to `65535`.
+Omitted IDs keep their built-in assignment. Profile names are case-sensitive.
+Unknown names, overlapping entries, reversed ranges, and invalid IDs cause
+startup to fail. An unset or empty mapping uses all built-in assignments.
+Restart the agent to apply changes.
+
+Only the `standard` and `extended` classes are supported. Customers cannot add
+classes or configure individual field durations. Each collection path uses at
+most two DCGM field groups. Equal effective intervals share one group. This
+bounds group use even when many fields have explicit assignments. DCGM permits
+64 field groups in one HostEngine and 128 field IDs per group. DCGM itself and
+other clients also use this capacity. Setup rejects an oversized field group
+and reports native resource-allocation failures. It does not use a faster
+fallback interval. See the [DCGM field-group limits](https://docs.nvidia.com/datacenter/dcgm/latest/dcgm-api/dcgm-api-data-structs.html).
+
+These settings apply only to fields selected by enabled components and their
+existing hardware checks. They never add a field to collection. They apply to
+`fleetint run`, including offline mode. One-time scans use their existing standard
+interval and the default extended interval and assignments. Export intervals,
+metric names, labels, and payload formats remain unchanged. The shared GPU
+cache keeps slower values between reads. Passive DCGM health checks and device
+identity queries keep their existing behavior.
 
 ### Send Slurm workload identity to Fleet Intelligence
 

@@ -33,6 +33,7 @@ import (
 	nvidiainfiniband "github.com/NVIDIA/fleet-intelligence-sdk/components/accelerator/nvidia/infiniband"
 	infinibandtypes "github.com/NVIDIA/fleet-intelligence-sdk/components/accelerator/nvidia/infiniband/types"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 	"github.com/gin-gonic/gin"
 	"github.com/urfave/cli"
 	"go.uber.org/zap"
@@ -182,6 +183,15 @@ func configureHealthExporterFromEnv(cfg *config.Config) error {
 		return fmt.Errorf("health exporter config is nil")
 	}
 	he := cfg.HealthExporter
+	if err := setDurationFromEnv("FLEETINT_DCGM_EXTENDED_INTERVAL", &he.DCGMExtendedInterval, "set extended DCGM field interval from env", "dcgm_extended_interval", time.Second, 24*time.Hour); err != nil {
+		return err
+	}
+	if value, ok := os.LookupEnv("FLEETINT_DCGM_FIELD_PROFILES"); ok {
+		if _, err := nvidiadcgm.ParseFieldProfiles(value); err != nil {
+			return fmt.Errorf("invalid FLEETINT_DCGM_FIELD_PROFILES: %w", err)
+		}
+		he.DCGMFieldProfiles = value
+	}
 
 	if err := setBoolFromEnv("FLEETINT_INCLUDE_METRICS", &he.IncludeMetrics, "set health exporter include metrics from env", "include_metrics"); err != nil {
 		return err
@@ -404,6 +414,8 @@ func runCommand(cliContext *cli.Context) error {
 		// Create health exporter configuration for offline mode
 		cfg.HealthExporter = &config.HealthExporterConfig{
 			OfflineMode:             true,
+			DCGMExtendedInterval:    cfg.HealthExporter.DCGMExtendedInterval,
+			DCGMFieldProfiles:       cfg.HealthExporter.DCGMFieldProfiles,
 			OutputPath:              offlineModePath,
 			Duration:                offlineModeDuration,
 			OutputFormat:            offlineModeOutputFormat,

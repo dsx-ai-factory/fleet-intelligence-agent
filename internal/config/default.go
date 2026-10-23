@@ -112,6 +112,7 @@ func Default(ctx context.Context, opts ...OpOption) (*Config, error) {
 			MetricsLookback:         metav1.Duration{Duration: 1 * time.Minute},
 			EventsLookback:          metav1.Duration{Duration: 1 * time.Minute},
 			HealthCheckInterval:     metav1.Duration{Duration: 30 * time.Second}, // Default 30 seconds for component health checks and metric scraping
+			DCGMExtendedInterval:    metav1.Duration{Duration: time.Minute},      // Extended DCGM fields default to a 60-second minimum.
 			DCGMHealthCheckInterval: metav1.Duration{Duration: 1 * time.Minute},  // Default 1 minute for DCGM passive health checks
 			RetryMaxAttempts:        3,                                           // Retry up to 3 times
 			OutputFormat:            "json",                                      // Default to JSON format for offline mode
