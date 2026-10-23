@@ -34,10 +34,13 @@ type GPUdInstance struct {
 
 	KernelModulesToCheck []string
 
-	DCGMInstance         nvidiadcgm.Instance
-	DCGMHealthCache      *nvidiadcgm.HealthCache     // Shared cache for DCGM health check results
-	DCGMFieldValueCache  *nvidiadcgm.FieldValueCache // Shared cache for DCGM field values (GPU devices only)
-	DCGMGroupNames       DCGMGroupNames
+	DCGMInstance        nvidiadcgm.Instance
+	DCGMHealthCache     *nvidiadcgm.HealthCache     // Shared cache for DCGM health check results
+	DCGMFieldValueCache *nvidiadcgm.FieldValueCache // Shared cache for DCGM field values (GPU devices only)
+	DCGMGroupNames      DCGMGroupNames
+	// DCGMIntervals passes the extended minimum and field assignments to collectors.
+	// Standard fields use HealthCheckInterval. Assignments never enable fields.
+	DCGMIntervals        nvidiadcgm.CollectionIntervals
 	NVIDIAToolOverwrites nvidiacommon.ToolOverwrites
 	// GPUHardwarePresent is the startup hardware-presence result. DCGM inventory
 	// is checked first, with independent PCI detection used when it is empty.

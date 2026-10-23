@@ -17,7 +17,10 @@ package prof
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
@@ -25,6 +28,8 @@ import (
 	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics/scraper"
 	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
+	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNew(t *testing.T) {
@@ -238,6 +243,10 @@ func TestSetupFailureHandling(t *testing.T) {
 	}
 
 	t.Logf("Setup failure correctly returned Degraded: %s", summary)
+	states := c.LastHealthStates()
+	require.NoError(t, c.Close())
+	require.Same(t, result, c.Check())
+	require.Equal(t, states, c.LastHealthStates())
 }
 
 func TestCheckAttemptsDeferredSetupAfterDCGMReconnect(t *testing.T) {
@@ -259,6 +268,7 @@ func TestCheckAttemptsDeferredSetupAfterDCGMReconnect(t *testing.T) {
 		t.Fatal("profiling field setup was attempted while DCGM was unavailable")
 	}
 
+	c.setupDegradedReason = "previous field setup failure"
 	mockInstance.dcgmExists = true
 	result := comp.Check()
 	if !c.fieldSetupComplete {
@@ -306,4 +316,158 @@ func TestNoWatchedFieldsReturnsHealthy(t *testing.T) {
 	}
 
 	t.Logf("No watched fields correctly returned Healthy: %s", result.Summary())
+}
+
+func TestCheckEnforcesFieldIntervalsOnFailuresAndShutdown(t *testing.T) {
+	// synctest advances time without wall-clock waits and exercises the public
+	// Check method; production code needs no injectable clock.
+	synctest.Test(t, func(t *testing.T) {
+		// Construct without a live session; inject the already established watch state.
+		comp, err := New(&components.GPUdInstance{RootCtx: context.Background(), HealthCheckInterval: 30 * time.Second})
+		require.NoError(t, err)
+		c := comp.(*component)
+		inst := &mockDCGMInstance{dcgmExists: true, devices: []nvidiadcgm.DeviceInfo{{ID: 0}}}
+		c.dcgmInstance = inst
+		c.schedule = nvidiadcgm.NewFieldSchedule([]dcgm.Short{100, 1200}, 30*time.Second, nvidiadcgm.CollectionIntervals{})
+		c.fieldSetupComplete = true
+		c.watchedFields = []dcgm.Short{100, 1200}
+
+		var reads [][]dcgm.Short
+		c.readFields = func(_ dcgm.Field_Entity_Group, _ uint, fields []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+			reads = append(reads, append([]dcgm.Short(nil), fields...))
+			return nil, fmt.Errorf("read failed")
+		}
+		c.Check()
+		c.Check()
+		require.Equal(t, [][]dcgm.Short{{100, 1200}}, reads)
+		require.Equal(t, 1, inst.deviceQueries, "a check with no fields due must not copy the device inventory")
+		time.Sleep(30 * time.Second)
+		c.Check()
+		require.Equal(t, []dcgm.Short{100}, reads[1])
+		time.Sleep(30 * time.Second)
+		c.Check()
+		require.Equal(t, []dcgm.Short{100, 1200}, reads[2])
+		require.NoError(t, c.Close())
+		require.NoError(t, c.Close())
+		time.Sleep(time.Hour)
+		c.Check()
+		require.Len(t, reads, 3)
+		require.Equal(t, 3, inst.deviceQueries)
+	})
+}
+
+func TestCloseWaitsForActiveCheck(t *testing.T) {
+	comp, err := New(&components.GPUdInstance{RootCtx: context.Background()})
+	require.NoError(t, err)
+	c := comp.(*component)
+	previous := &checkResult{ts: time.Unix(100, 0).UTC(), health: apiv1.HealthStateTypeDegraded, reason: "previous check failed", err: context.DeadlineExceeded}
+	c.lastCheckResult = previous
+	states := previous.HealthStates()
+	c.dcgmInstance = &mockDCGMInstance{dcgmExists: true, devices: []nvidiadcgm.DeviceInfo{{ID: 0}}}
+	c.fieldSetupComplete = true
+	c.watchedFields = []dcgm.Short{dcgm.DCGM_FI_PROF_SM_ACTIVE}
+	entered, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+		close(entered)
+		<-release
+		return nil, nil
+	}
+	checked := make(chan components.CheckResult, 1)
+	go func() { checked <- c.Check() }()
+	<-entered
+	closed := make(chan error, 1)
+	go func() { closed <- c.Close() }()
+	<-c.ctx.Done()
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned before the active check finished: %v", err)
+	default:
+	}
+	unblock()
+	require.Equal(t, states, (<-checked).HealthStates(), "an interrupted check must preserve the prior assessment")
+	require.NoError(t, <-closed)
+	require.NoError(t, c.Close())
+	require.Equal(t, states, c.Check().HealthStates())
+	require.Equal(t, states, c.LastHealthStates())
+}
+
+func TestStoppedBeforeFirstCheckReturnsInitializing(t *testing.T) {
+	comp, err := New(&components.GPUdInstance{RootCtx: context.Background()})
+	require.NoError(t, err)
+	c := comp.(*component)
+	require.NoError(t, c.Close())
+	for range 2 {
+		result := c.Check()
+		require.Equal(t, apiv1.HealthStateTypeInitializing, result.HealthStateType())
+		require.Equal(t, "collector stopped before a check completed", result.Summary())
+		require.Nil(t, c.lastCheckResult, "a stopped call must not publish a health assessment")
+	}
+}
+
+func TestProfilingFailurePersistsUntilAffectedIntervalRecovers(t *testing.T) {
+	for _, fields := range [][]dcgm.Short{{1200}, {100, 1200}} {
+		t.Run(fmt.Sprint(fields), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				comp, err := New(&components.GPUdInstance{RootCtx: context.Background(), HealthCheckInterval: 30 * time.Second})
+				require.NoError(t, err)
+				c := comp.(*component)
+				defer func() { require.NoError(t, c.Close()) }()
+				c.dcgmInstance = &mockDCGMInstance{dcgmExists: true, devices: []nvidiadcgm.DeviceInfo{{ID: 0}}}
+				c.fieldSetupComplete = true
+				c.watchedFields = fields
+				c.schedule = nvidiadcgm.NewFieldSchedule(fields, 30*time.Second, nvidiadcgm.CollectionIntervals{})
+				failure := fmt.Errorf("dcgm request failed with error code %d", dcgm.DCGM_ST_NVML_ERROR)
+				c.readFields = func(_ dcgm.Field_Entity_Group, _ uint, due []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+					for _, field := range due {
+						if field == 1200 {
+							return nil, failure
+						}
+					}
+					return nil, nil
+				}
+				require.Equal(t, apiv1.HealthStateTypeUnhealthy, c.Check().HealthStateType())
+				time.Sleep(30 * time.Second)
+				require.Equal(t, apiv1.HealthStateTypeUnhealthy, c.Check().HealthStateType(), "standard-only or no-due checks must retain the slow error")
+				time.Sleep(30 * time.Second)
+				failure = fmt.Errorf("dcgm request failed with error code %d", dcgm.DCGM_ST_NO_DATA)
+				require.Equal(t, apiv1.HealthStateTypeUnhealthy, c.Check().HealthStateType(), "transient data absence is not verified recovery")
+				time.Sleep(60 * time.Second)
+				failure = nil
+				require.Equal(t, apiv1.HealthStateTypeHealthy, c.Check().HealthStateType())
+			})
+		})
+	}
+}
+
+func TestCheckReadSpacingAfterSlowBatch(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		comp, err := New(&components.GPUdInstance{RootCtx: context.Background(), HealthCheckInterval: 30 * time.Second})
+		require.NoError(t, err)
+		c := comp.(*component)
+		c.dcgmInstance = &mockDCGMInstance{dcgmExists: true, devices: []nvidiadcgm.DeviceInfo{{ID: 1}, {ID: 2}}}
+		c.fieldSetupComplete = true
+		c.schedule = nvidiadcgm.NewFieldSchedule([]dcgm.Short{100, 1200}, 30*time.Second, nvidiadcgm.CollectionIntervals{})
+		c.watchedFields = []dcgm.Short{100, 1200}
+		defer func() { require.NoError(t, c.Close()) }()
+		var reads [][]dcgm.Short
+		c.readFields = func(_ dcgm.Field_Entity_Group, _ uint, fields []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+			reads = append(reads, append([]dcgm.Short(nil), fields...))
+			if len(reads) == 1 {
+				time.Sleep(10 * time.Second)
+			}
+			return nil, nil
+		}
+		c.Check()
+		time.Sleep(20 * time.Second)
+		c.Check()
+		require.Len(t, reads, 2, "the second entity was read only 20 seconds ago")
+		time.Sleep(10 * time.Second)
+		c.Check()
+		require.Equal(t, [][]dcgm.Short{{100}, {100}}, reads[2:])
+		time.Sleep(30 * time.Second)
+		c.Check()
+		require.Equal(t, [][]dcgm.Short{{100, 1200}, {100, 1200}}, reads[4:])
+	})
 }

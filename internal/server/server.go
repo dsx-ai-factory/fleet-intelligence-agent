@@ -239,6 +239,10 @@ func shouldEnableComponent(name string, enabledByDefault bool, config *config.Co
 
 // New creates a new simplified health server for metrics export only
 func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config) (retServer *Server, retErr error) {
+	dcgmIntervals, err := config.HealthExporter.DCGMCollectionIntervals()
+	if err != nil {
+		return nil, fmt.Errorf("invalid DCGM collection configuration: %w", err)
+	}
 	// Initialize database connections
 	dbRW, dbRO, err := initializeDatabases(ctx, config)
 	if err != nil {
@@ -330,7 +334,7 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 	dcgmHealthCache := nvidiadcgm.NewHealthCache(ctx, dcgmInstance, dcgmHealthCheckInterval)
 	log.Logger.Infow("DCGM health check cache configured", "healthCheckInterval", dcgmHealthCheckInterval)
 
-	dcgmFieldValueCache := nvidiadcgm.NewFieldValueCache(ctx, dcgmInstance, healthCheckInterval)
+	dcgmFieldValueCache := nvidiadcgm.NewFieldValueCacheWithIntervals(ctx, dcgmInstance, healthCheckInterval, dcgmIntervals)
 	log.Logger.Infow("DCGM field value cache created", "healthCheckInterval", healthCheckInterval)
 	s.gpudInstance = &components.GPUdInstance{
 		RootCtx:              ctx,
@@ -338,6 +342,7 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 		DCGMInstance:         dcgmInstance,
 		DCGMHealthCache:      dcgmHealthCache,
 		DCGMFieldValueCache:  dcgmFieldValueCache,
+		DCGMIntervals:        dcgmIntervals,
 		DCGMGroupNames:       dcgmGroupNames,
 		NVIDIAToolOverwrites: config.NvidiaToolOverwrites,
 		GPUHardwarePresent:   gpuHardwarePresent,
