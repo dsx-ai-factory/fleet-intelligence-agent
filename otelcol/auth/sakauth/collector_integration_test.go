@@ -199,11 +199,16 @@ service:
 	stopCollector := func() {
 		stopOnce.Do(func() {
 			cancel()
+			// Cancellation or a forced kill can return an expected exit error.
+			var waitErr error
 			select {
-			case <-waitCh:
+			case waitErr = <-waitCh:
 			case <-time.After(5 * time.Second):
 				_ = cmd.Process.Kill()
-				<-waitCh
+				waitErr = <-waitCh
+			}
+			if waitErr != nil {
+				t.Logf("collector stopped: %v", waitErr)
 			}
 			_ = logFile.Close()
 		})
