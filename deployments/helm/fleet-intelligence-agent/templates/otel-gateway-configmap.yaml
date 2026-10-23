@@ -30,6 +30,10 @@ metadata:
   name: {{ include "fleet-intelligence-agent.fullname" . }}-otel-gateway
   labels:
     {{- include "fleet-intelligence-agent.labels" . | nindent 4 }}
+  {{- with include "fleet-intelligence-agent.metadata" (list .Values.commonAnnotations) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
 data:
   config.yaml: |
     extensions:

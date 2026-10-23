@@ -22,8 +22,11 @@ kind: Deployment
 metadata:
   name: {{ include "fleet-intelligence-agent.fullname" . }}-otel-gateway
   labels:
-    {{- include "fleet-intelligence-agent.labels" . | nindent 4 }}
-    app.kubernetes.io/component: otel-gateway
+    {{- include "fleet-intelligence-agent.gatewayLabels" . | nindent 4 }}
+  {{- with include "fleet-intelligence-agent.metadata" (list .Values.commonAnnotations .Values.otelGateway.annotations) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
 spec:
   replicas: {{ .Values.otelGateway.replicas }}
   strategy:
@@ -38,13 +41,15 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "fleet-intelligence-agent.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: otel-gateway
+        {{- include "fleet-intelligence-agent.metadata" (list (include "fleet-intelligence-agent.selectorLabels" .) "app.kubernetes.io/component: otel-gateway" .Values.otelGateway.podLabels) | nindent 8 }}
       annotations:
         # Force pod restart when the collector config changes.
         checksum/config: {{ include (print $.Template.BasePath "/otel-gateway-configmap.yaml") . | sha256sum }}
         {{- if not .Values.otelGateway.enroll.existingSecret }}
         checksum/sak-secret: {{ include (print $.Template.BasePath "/otel-gateway-secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with omit (.Values.otelGateway.podAnnotations | default dict) "checksum/config" "checksum/sak-secret" }}
+        {{- include "fleet-intelligence-agent.metadata" (list .) | nindent 8 }}
         {{- end }}
     spec:
       automountServiceAccountToken: false

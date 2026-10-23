@@ -17,6 +17,11 @@ Common values (defaults from `values.yaml`):
 | `image.tag` | `""` | Image tag (empty uses chart `appVersion`). |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy. |
 | `imagePullSecrets` | `[]` | Optional image pull secrets (set when pulling from private registries). |
+| `commonLabels` | `{}` | Labels added to every resource (not pods). |
+| `commonAnnotations` | `{}` | Annotations added to every resource (not pods). |
+| `podLabels` | `{}` | Agent pod labels. |
+| `podAnnotations` | `{}` | Agent pod annotations. |
+| `daemonset.annotations` | `{}` | DaemonSet annotations. |
 | `hostPID` | `true` | Use host PID namespace. |
 | `runtimeClassName` | `nvidia` | RuntimeClass for NVIDIA runtime. |
 | `securityContext.privileged` | `true` | Run privileged. |
@@ -73,6 +78,30 @@ Common values (defaults from `values.yaml`):
 | `serviceAccount.create` | `true` | Create ServiceAccount. |
 | `serviceAccount.name` | `""` | ServiceAccount name. |
 | `serviceAccount.automountToken` | `false` | Automount service account token. |
+| `serviceAccount.annotations` | `{}` | ServiceAccount annotations, e.g. for workload identity. |
+| `otelGateway.annotations` | `{}` | Gateway Deployment annotations. |
+| `otelGateway.podLabels` | `{}` | Gateway pod labels. |
+| `otelGateway.podAnnotations` | `{}` | Gateway pod annotations. |
+| `otelGateway.service.annotations` | `{}` | Gateway Service annotations. |
+
+### Custom labels and annotations
+
+```yaml
+commonLabels:
+  team: sre
+podAnnotations:
+  prometheus.io/scrape: true
+```
+
+`commonLabels` and `commonAnnotations` apply to every resource's metadata but
+not to pod templates; use `podLabels`, `podAnnotations`, and their
+`otelGateway` equivalents for pods. Resource-specific annotations take
+precedence over `commonAnnotations`; set a key to `null` to drop it. Labels the
+chart sets itself and the gateway's `checksum/config` and `checksum/sak-secret`
+annotations cannot be overridden. Values are rendered as strings.
+
+The gateway's checksum annotations hash the whole ConfigMap and Secret, so
+changing `commonLabels` or `commonAnnotations` restarts the gateway pods.
 
 ### Fault injection for testing
 
