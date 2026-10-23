@@ -251,7 +251,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push fleet-intelligence-agent image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -265,7 +265,7 @@ jobs:
             BUILD_TIMESTAMP=${{ steps.version.outputs.build_timestamp }}
 
       - name: Build and push fleetint-otelcol image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./otelcol/Dockerfile
