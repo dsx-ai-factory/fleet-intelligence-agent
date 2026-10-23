@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -798,6 +800,7 @@ func TestDefaultWithHealthExporter(t *testing.T) {
 		assert.Equal(t, metav1.Duration{Duration: 1 * time.Minute}, cfg.HealthExporter.EventsLookback)
 		assert.Equal(t, metav1.Duration{Duration: 30 * time.Second}, cfg.HealthExporter.HealthCheckInterval)
 		assert.Equal(t, metav1.Duration{Duration: time.Minute}, cfg.HealthExporter.DCGMHealthCheckInterval)
+		assert.Equal(t, metav1.Duration{Duration: time.Minute}, cfg.HealthExporter.DCGMExtendedInterval)
 		assert.Equal(t, 3, cfg.HealthExporter.RetryMaxAttempts)
 		assert.Equal(t, "json", cfg.HealthExporter.OutputFormat)
 		assert.Equal(t, "", cfg.HealthExporter.MetricsEndpoint)
@@ -1083,4 +1086,34 @@ func TestInventoryAgentConfig(t *testing.T) {
 	assert.Equal(t, 30*time.Second, (*Config)(nil).HealthCheckInterval())
 	assert.Equal(t, time.Minute, (*Config)(nil).DCGMHealthCheckInterval())
 	assert.Equal(t, int64(30), (*Config)(nil).MetricScrapeIntervalSeconds())
+}
+
+func TestDCGMCollectionProfileValidation(t *testing.T) {
+	cfg := &Config{Address: ":8080", RetentionPeriod: metav1.Duration{Duration: time.Hour}, HealthExporter: &HealthExporterConfig{DCGMExtendedInterval: metav1.Duration{Duration: time.Minute}, DCGMFieldProfiles: "1110=extended"}}
+	require.NoError(t, cfg.Validate())
+	for _, value := range []time.Duration{0, time.Second, 10 * time.Second, 24 * time.Hour} {
+		cfg.HealthExporter.DCGMExtendedInterval.Duration = value
+		require.NoError(t, cfg.Validate())
+	}
+	for _, value := range []time.Duration{-time.Second, 999 * time.Millisecond, 25 * time.Hour} {
+		cfg.HealthExporter.DCGMExtendedInterval.Duration = value
+		require.ErrorContains(t, cfg.Validate(), "dcgm_extended_interval")
+	}
+	cfg.HealthExporter.DCGMExtendedInterval.Duration = 0
+	for _, value := range []string{"1110=custom", "1110=60s", "1200-1219=standard,1201=extended"} {
+		cfg.HealthExporter.DCGMFieldProfiles = value
+		require.ErrorContains(t, cfg.Validate(), "dcgm_field_profiles")
+	}
+}
+
+func TestDCGMCollectionIntervalResolution(t *testing.T) {
+	defaults, err := (*HealthExporterConfig)(nil).DCGMCollectionIntervals()
+	require.NoError(t, err)
+	require.Equal(t, time.Minute, defaults.Extended)
+	require.Empty(t, defaults.FieldProfiles)
+	cfg := &HealthExporterConfig{DCGMExtendedInterval: metav1.Duration{Duration: 10 * time.Second}, DCGMFieldProfiles: "1110=extended"}
+	intervals, err := cfg.DCGMCollectionIntervals()
+	require.NoError(t, err)
+	require.Equal(t, 10*time.Second, intervals.Extended)
+	require.Equal(t, nvidiadcgm.ExtendedProfile, intervals.FieldProfiles[1110])
 }

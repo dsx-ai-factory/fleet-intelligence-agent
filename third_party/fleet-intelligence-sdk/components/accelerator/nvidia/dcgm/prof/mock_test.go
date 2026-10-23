@@ -22,8 +22,9 @@ import (
 
 // mockDCGMInstance is a minimal mock for testing prof component behavior
 type mockDCGMInstance struct {
-	dcgmExists bool
-	devices    []nvidiadcgm.DeviceInfo
+	dcgmExists    bool
+	devices       []nvidiadcgm.DeviceInfo
+	deviceQueries int
 }
 
 func (m *mockDCGMInstance) DCGMExists() bool {
@@ -68,6 +69,7 @@ func (m *mockDCGMInstance) GetGroupHandle() dcgm.GroupHandle {
 }
 
 func (m *mockDCGMInstance) GetDevices() []nvidiadcgm.DeviceInfo {
+	m.deviceQueries++
 	return append([]nvidiadcgm.DeviceInfo(nil), m.devices...)
 }
 

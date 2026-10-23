@@ -17,7 +17,10 @@ package cpu
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
@@ -25,6 +28,8 @@ import (
 	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics/scraper"
 	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
+	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNew(t *testing.T) {
@@ -177,88 +182,287 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-// TestSetupFailureHandling verifies that when CPU group creation, field group
-// creation, or field watching setup fails during New(), the component returns
-// Degraded state on Check().
-func TestSetupFailureHandling(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	mockInstance := &mockDCGMInstance{dcgmExists: false}
-
-	gpudInst := &components.GPUdInstance{
-		RootCtx:             ctx,
-		DCGMInstance:        mockInstance,
-		HealthCheckInterval: time.Minute,
-	}
-
-	comp, err := New(gpudInst)
-	if err != nil {
-		t.Fatalf("New() failed: %v", err)
-	}
-
-	// Manually set setupDegradedReason to simulate a setup failure
+func TestCompletedCPUSetupWithNoEntitiesReturnsHealthy(t *testing.T) {
+	comp, err := New(&components.GPUdInstance{RootCtx: context.Background(), DCGMInstance: &mockDCGMInstance{dcgmExists: true}})
+	require.NoError(t, err)
 	c := comp.(*component)
-	c.setupDegradedReason = "failed to create DCGM CPU group: mock error"
-
-	// Enable DCGMExists so Check() proceeds past early guards
-	mockInstance.dcgmExists = true
-
-	// Check should return Degraded with the setup error reason
-	result := comp.Check()
-	if result == nil {
-		t.Fatal("Check() returned nil")
+	defer func() { require.NoError(t, c.Close()) }()
+	// Empty discovery is a completed setup outcome. Checks must not try to read.
+	c.fieldSetupComplete = true
+	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+		t.Fatal("no CPU fields should be read after empty discovery")
+		return nil, nil
 	}
-
-	healthType := result.HealthStateType()
-	if healthType != apiv1.HealthStateTypeDegraded {
-		t.Errorf("HealthStateType() = %v, want %v", healthType, apiv1.HealthStateTypeDegraded)
+	for range 2 {
+		result := c.Check()
+		require.Equal(t, apiv1.HealthStateTypeHealthy, result.HealthStateType())
+		require.Equal(t, "no CPU entities available", result.Summary())
 	}
-
-	summary := result.Summary()
-	if summary != "failed to create DCGM CPU group: mock error" {
-		t.Errorf("Summary() = %q, want setup error message", summary)
-	}
-
-	t.Logf("Setup failure correctly returned Degraded: %s", summary)
 }
 
-// TestNoCPUEntitiesReturnsHealthy verifies that when no CPU entities are
-// available (hardware doesn't support CPU monitoring), the component returns
-// Healthy (not Degraded).
-func TestNoCPUEntitiesReturnsHealthy(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	mockInstance := &mockDCGMInstance{dcgmExists: true}
-
-	gpudInst := &components.GPUdInstance{
-		RootCtx:             ctx,
-		DCGMInstance:        mockInstance,
-		HealthCheckInterval: time.Minute,
-	}
-
-	comp, err := New(gpudInst)
-	if err != nil {
-		t.Fatalf("New() failed: %v", err)
-	}
-
-	// Component should have no CPU entities (GetEntityGroupEntities would fail in real scenario)
+func TestCloseWaitsForActiveCheck(t *testing.T) {
+	comp, err := New(&components.GPUdInstance{RootCtx: context.Background()})
+	require.NoError(t, err)
 	c := comp.(*component)
-	if len(c.cpuEntities) != 0 {
-		t.Fatalf("Expected no CPU entities, got %d", len(c.cpuEntities))
+	previous := &checkResult{ts: time.Unix(100, 0).UTC(), health: apiv1.HealthStateTypeDegraded, reason: "previous check failed", err: context.DeadlineExceeded}
+	c.lastCheckResult = previous
+	states := previous.HealthStates()
+	c.dcgmInstance = &mockDCGMInstance{dcgmExists: true}
+	c.fieldSetupComplete = true
+	c.cpuEntities = []uint{0}
+	c.cpuGroupHandle.SetHandle(1)
+	entered, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+		close(entered)
+		<-release
+		// The synthetic watch has no native CPU group to destroy. Clear its
+		// handle while Check still holds setupMu, before Close can run cleanup.
+		c.cpuGroupHandle = dcgm.GroupHandle{}
+		return nil, nil
 	}
-
-	// Check should return Healthy (not Degraded) because no CPUs is a valid state
-	result := comp.Check()
-	if result == nil {
-		t.Fatal("Check() returned nil")
+	checked := make(chan components.CheckResult, 1)
+	go func() { checked <- c.Check() }()
+	<-entered
+	closed := make(chan error, 1)
+	go func() { closed <- c.Close() }()
+	<-c.ctx.Done()
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned before the active check finished: %v", err)
+	default:
 	}
+	unblock()
+	require.Equal(t, states, (<-checked).HealthStates(), "an interrupted check must preserve the prior assessment")
+	require.NoError(t, <-closed)
+	require.NoError(t, c.Close())
+	require.Equal(t, states, c.Check().HealthStates())
+	require.Equal(t, states, c.LastHealthStates())
+}
 
-	healthType := result.HealthStateType()
-	if healthType != apiv1.HealthStateTypeHealthy {
-		t.Errorf("HealthStateType() = %v, want %v", healthType, apiv1.HealthStateTypeHealthy)
+// This integration test exercises native CPU group setup and retry. It needs
+// a connected DCGM session with CPU monitoring support.
+func TestCPUDeferredSetupAndRecovery(t *testing.T) {
+	inst, err := nvidiadcgm.New()
+	require.NoError(t, err)
+	defer inst.Shutdown()
+	if !inst.DCGMExists() {
+		t.Skip("DCGM is not available")
 	}
+	entities, err := dcgm.GetEntityGroupEntities(dcgm.FE_CPU)
+	if err != nil || len(entities) == 0 {
+		t.Skip("DCGM CPU monitoring is not available")
+	}
+	availability := &mockDCGMInstance{}
+	comp, err := New(&components.GPUdInstance{
+		RootCtx: context.Background(), DCGMInstance: availability,
+		DCGMGroupNames: components.DCGMGroupNames{
+			CPUGroup:      fmt.Sprintf("test-cpu-retry-%d", time.Now().UnixNano()),
+			CPUFieldGroup: fmt.Sprintf("test-cpu-fields-%d", time.Now().UnixNano()),
+		},
+	})
+	require.NoError(t, err)
+	c := comp.(*component)
+	defer func() { require.NoError(t, c.Close()) }()
+	require.Equal(t, "DCGM library is not loaded", c.Check().Summary())
+	require.False(t, c.fieldSetupComplete)
+	availability.dcgmExists = true
+	// DCGM permits at most 128 fields per group. Rejecting an oversized
+	// schedule exercises rollback after the native CPU group was populated.
+	var oversized []dcgm.Short
+	for id := 1; id <= 129; id++ {
+		oversized = append(oversized, dcgm.Short(id))
+	}
+	c.schedule = nvidiadcgm.NewFieldSchedule(oversized, time.Minute, nvidiadcgm.CollectionIntervals{})
+	reads := 0
+	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+		reads++
+		return nil, nil
+	}
+	result := c.Check()
+	require.Equal(t, apiv1.HealthStateTypeDegraded, result.HealthStateType())
+	require.Contains(t, result.Summary(), "failed to set up DCGM CPU field watching")
+	require.False(t, c.fieldSetupComplete)
+	require.Zero(t, reads)
+	require.Zero(t, c.cpuGroupHandle.GetHandle())
+	c.schedule = nvidiadcgm.NewFieldSchedule(cpuLevelFields, time.Minute, nvidiadcgm.CollectionIntervals{})
 
-	t.Logf("No CPU entities correctly returned Healthy: %s", result.Summary())
+	require.Equal(t, apiv1.HealthStateTypeHealthy, c.Check().HealthStateType())
+	require.True(t, c.fieldSetupComplete)
+	require.Empty(t, c.setupDegradedReason)
+	require.Equal(t, len(entities), reads)
+	handle := c.cpuGroupHandle
+	c.Check()
+	require.Equal(t, handle, c.cpuGroupHandle, "successful setup must not recreate resources")
+	require.Equal(t, len(entities), reads, "an immediate check must respect read deadlines")
+}
+
+func TestCheckEnforcesFieldIntervalsOnFailuresAndShutdown(t *testing.T) {
+	// synctest advances time without wall-clock waits and exercises the public
+	// Check method; production code needs no injectable clock.
+	synctest.Test(t, func(t *testing.T) {
+		// Construct without a live session; inject the already established watch state.
+		comp, err := New(&components.GPUdInstance{RootCtx: context.Background(), HealthCheckInterval: 30 * time.Second})
+		require.NoError(t, err)
+		c := comp.(*component)
+		c.dcgmInstance = &mockDCGMInstance{dcgmExists: true}
+		c.schedule = nvidiadcgm.NewFieldSchedule([]dcgm.Short{100, 1200}, 30*time.Second, nvidiadcgm.CollectionIntervals{})
+		c.cpuGroupHandle.SetHandle(1)
+		c.cpuEntities = []uint{0}
+		c.fieldSetupComplete = true
+
+		var reads [][]dcgm.Short
+		c.readFields = func(_ dcgm.Field_Entity_Group, _ uint, fields []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+			reads = append(reads, append([]dcgm.Short(nil), fields...))
+			return nil, fmt.Errorf("read failed")
+		}
+		c.Check()
+		c.Check()
+		require.Equal(t, [][]dcgm.Short{{100, 1200}}, reads)
+		time.Sleep(30 * time.Second)
+		c.Check()
+		require.Equal(t, []dcgm.Short{100}, reads[1])
+		time.Sleep(30 * time.Second)
+		c.Check()
+		require.Equal(t, []dcgm.Short{100, 1200}, reads[2])
+		// Clear synthetic device handle before cleanup; no real DCGM resources exist.
+		c.cpuGroupHandle = dcgm.GroupHandle{}
+		require.NoError(t, c.Close())
+		require.NoError(t, c.Close())
+		time.Sleep(time.Hour)
+		c.Check()
+		require.Len(t, reads, 3)
+	})
+}
+
+func TestCPUSetupDefersUntilChecksAndStopsAfterClose(t *testing.T) {
+	inst := &mockDCGMInstance{dcgmExists: true}
+	comp, err := New(&components.GPUdInstance{
+		RootCtx: context.Background(), DCGMInstance: inst,
+		DCGMGroupNames: components.DCGMGroupNames{CPUGroup: "custom-cpu", CPUFieldGroup: "custom-fields"},
+	})
+	require.NoError(t, err)
+	c := comp.(*component)
+	require.False(t, c.fieldSetupComplete, "New must defer native setup")
+	require.Empty(t, c.cpuEntities)
+	require.Zero(t, c.cpuGroupHandle.GetHandle())
+	require.Equal(t, "custom-cpu", c.cpuGroupName)
+	require.Equal(t, "custom-fields", c.fieldGroupName)
+	inst.dcgmExists = false
+	previous := c.Check()
+	require.Equal(t, "DCGM library is not loaded", previous.Summary())
+	require.False(t, c.fieldSetupComplete)
+	require.NoError(t, c.Close())
+	inst.dcgmExists = true
+	require.Same(t, previous, c.Check())
+	require.False(t, c.fieldSetupComplete)
+	require.Empty(t, c.cpuEntities)
+	require.Zero(t, c.cpuGroupHandle.GetHandle())
+	require.NoError(t, c.Close())
+}
+
+func TestCollectionProfilesApplyToCPUFields(t *testing.T) {
+	comp, err := New(&components.GPUdInstance{
+		RootCtx: context.Background(), HealthCheckInterval: 5 * time.Second,
+		DCGMIntervals: nvidiadcgm.CollectionIntervals{
+			Extended: 10 * time.Second,
+			FieldProfiles: map[dcgm.Short]nvidiadcgm.FieldProfile{
+				dcgm.DCGM_FI_DEV_CPU_TEMP_CURRENT: nvidiadcgm.ExtendedProfile,
+				999:                               nvidiadcgm.ExtendedProfile,
+			},
+		},
+	})
+	require.NoError(t, err)
+	c := comp.(*component)
+	defer func() { require.NoError(t, c.Close()) }()
+	now := time.Unix(100, 0)
+	initial := c.schedule.Due(now)
+	require.ElementsMatch(t, cpuLevelFields, initial)
+	require.NotContains(t, initial, dcgm.Short(999), "assignments must not enable fields")
+	fast := c.schedule.Due(now.Add(5 * time.Second))
+	require.Len(t, fast, len(cpuLevelFields)-1)
+	require.NotContains(t, fast, dcgm.DCGM_FI_DEV_CPU_TEMP_CURRENT)
+	require.ElementsMatch(t, cpuLevelFields, c.schedule.Due(now.Add(10*time.Second)))
+}
+
+func TestCPUDiscoveryFailureIsDegradedAndRetryable(t *testing.T) {
+	// Exercise the native failure path without adding production test hooks.
+	// A live session with successful CPU discovery cannot exercise this case.
+	_, discoveryErr := dcgm.GetEntityGroupEntities(dcgm.FE_CPU)
+	if discoveryErr == nil {
+		t.Skip("CPU discovery succeeds; this test requires a discovery failure")
+	}
+	comp, err := New(&components.GPUdInstance{
+		RootCtx: context.Background(), DCGMInstance: &mockDCGMInstance{dcgmExists: true},
+	})
+	require.NoError(t, err)
+	c := comp.(*component)
+	defer func() { require.NoError(t, c.Close()) }()
+	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+		t.Fatal("fields must not be read after failed CPU discovery")
+		return nil, nil
+	}
+	var previous components.CheckResult
+	for range 2 {
+		// A new attempt must replace the prior setup error, rather than simply
+		// returning a stale health result without retrying discovery.
+		c.setupDegradedReason = "previous setup failure"
+		result := c.Check()
+		previous = result
+		require.Equal(t, apiv1.HealthStateTypeDegraded, result.HealthStateType())
+		require.Contains(t, result.Summary(), "failed to discover DCGM CPU entities:")
+		require.False(t, c.fieldSetupComplete)
+		require.Empty(t, c.cpuEntities)
+		require.Zero(t, c.cpuGroupHandle.GetHandle())
+	}
+	states := c.LastHealthStates()
+	require.NoError(t, c.Close())
+	require.Same(t, previous, c.Check())
+	require.Equal(t, states, c.LastHealthStates())
+}
+
+func TestStoppedBeforeFirstCheckReturnsInitializing(t *testing.T) {
+	comp, err := New(&components.GPUdInstance{RootCtx: context.Background()})
+	require.NoError(t, err)
+	c := comp.(*component)
+	require.NoError(t, c.Close())
+	for range 2 {
+		result := c.Check()
+		require.Equal(t, apiv1.HealthStateTypeInitializing, result.HealthStateType())
+		require.Equal(t, "collector stopped before a check completed", result.Summary())
+		require.Nil(t, c.lastCheckResult, "a stopped call must not publish a health assessment")
+	}
+}
+
+func TestCheckReadSpacingAfterSlowBatch(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		comp, err := New(&components.GPUdInstance{RootCtx: context.Background(), HealthCheckInterval: 30 * time.Second})
+		require.NoError(t, err)
+		c := comp.(*component)
+		c.dcgmInstance = &mockDCGMInstance{dcgmExists: true}
+		c.fieldSetupComplete = true
+		c.schedule = nvidiadcgm.NewFieldSchedule([]dcgm.Short{100, 1200}, 30*time.Second, nvidiadcgm.CollectionIntervals{})
+		c.cpuEntities = []uint{1, 2}
+		c.cpuGroupHandle.SetHandle(1)
+		defer func() { c.cpuGroupHandle = dcgm.GroupHandle{}; require.NoError(t, c.Close()) }()
+		var reads [][]dcgm.Short
+		c.readFields = func(_ dcgm.Field_Entity_Group, _ uint, fields []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+			reads = append(reads, append([]dcgm.Short(nil), fields...))
+			if len(reads) == 1 {
+				time.Sleep(10 * time.Second)
+			}
+			return nil, nil
+		}
+		c.Check()
+		time.Sleep(20 * time.Second)
+		c.Check()
+		require.Len(t, reads, 2, "the second entity was read only 20 seconds ago")
+		time.Sleep(10 * time.Second)
+		c.Check()
+		require.Equal(t, [][]dcgm.Short{{100}, {100}}, reads[2:])
+		time.Sleep(30 * time.Second)
+		c.Check()
+		require.Equal(t, [][]dcgm.Short{{100, 1200}, {100, 1200}}, reads[4:])
+	})
 }
