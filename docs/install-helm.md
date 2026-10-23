@@ -134,6 +134,27 @@ DCGM_URL='<dcgm-hostengine-address>'
 --set env.DCGM_URL="$DCGM_URL"
 ```
 
+## Custom labels and annotations
+
+Add annotations and labels in your Helm values file without patching the chart:
+
+```yaml
+commonLabels:
+  team: sre
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/fleetint
+podAnnotations:
+  prometheus.io/scrape: true
+  prometheus.io/port: 15133
+```
+
+`commonLabels` and `commonAnnotations` apply to resource metadata, not pods.
+Use `podLabels` and `podAnnotations` for agent pods, or
+`otelGateway.podLabels` and `otelGateway.podAnnotations` for gateway pods. See
+the [chart values reference](../deployments/helm/fleet-intelligence-agent/README.md#custom-labels-and-annotations)
+for precedence rules.
+
 ## Verifying deployment
 
 After installation, verify the agent is running correctly:

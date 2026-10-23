@@ -31,6 +31,10 @@ metadata:
   name: {{ include "fleet-intelligence-agent.fullname" . }}
   labels:
     {{- include "fleet-intelligence-agent.labels" . | nindent 4 }}
+  {{- with include "fleet-intelligence-agent.metadata" (list .Values.commonAnnotations .Values.daemonset.annotations) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
 spec:
   selector:
     matchLabels:
@@ -38,7 +42,11 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "fleet-intelligence-agent.selectorLabels" . | nindent 8 }}
+        {{- include "fleet-intelligence-agent.metadata" (list (include "fleet-intelligence-agent.selectorLabels" .) .Values.podLabels) | nindent 8 }}
+      {{- with include "fleet-intelligence-agent.metadata" (list .Values.podAnnotations) }}
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
     spec:
       hostPID: {{ .Values.hostPID }}
       {{- with .Values.runtimeClassName }}

@@ -20,6 +20,20 @@ image:
 
 imagePullSecrets: []
 
+# Labels and annotations added to every resource the chart renders. Pods use
+# podLabels/podAnnotations and otelGateway.podLabels/podAnnotations instead.
+# Keys the chart already sets on a resource are not overridden.
+commonLabels: {}
+commonAnnotations: {}
+
+# Agent DaemonSet pod template labels and annotations.
+podLabels: {}
+podAnnotations: {}
+
+daemonset:
+  # DaemonSet annotations; these take precedence over commonAnnotations.
+  annotations: {}
+
 hostPID: true
 runtimeClassName: nvidia
 
@@ -122,6 +136,8 @@ serviceAccount:
   create: true
   name: ""
   automountToken: false
+  # e.g. eks.amazonaws.com/role-arn for workload identity.
+  annotations: {}
 
 # OTel gateway collector deployed alongside the agents in the same cluster.
 # When enabled:
@@ -143,6 +159,12 @@ otelGateway:
   replicas: 2
   terminationGracePeriodSeconds: 30
 
+  # Deployment annotations; these take precedence over commonAnnotations.
+  annotations: {}
+  podLabels: {}
+  # Merged with the chart's checksum/* annotations.
+  podAnnotations: {}
+
   # Enrollment credentials for gateway→backend authentication.
   # The gateway is the only component that holds these; agents never see them.
   enroll:
@@ -162,6 +184,7 @@ otelGateway:
 
   service:
     port: 4318
+    annotations: {}
 
   # Restrict unauthenticated OTLP ingress to this Helm release's pods.
   # Requires a CNI plugin that enforces Kubernetes NetworkPolicy.
