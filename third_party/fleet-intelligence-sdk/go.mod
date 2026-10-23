@@ -1,6 +1,6 @@
 module github.com/NVIDIA/fleet-intelligence-sdk
 
-go 1.26.0
+go 1.26.10
 
 require (
 	github.com/NVIDIA/go-dcgm v0.0.0-20260214140307-ad5d86fe3d32
