@@ -75,24 +75,33 @@ func validateDmidecodeUUID(id string) error {
 	return nil
 }
 
-const machineIDPath = "/etc/machine-id"
-
-// GetOSMachineID returns the OS machine ID from /etc/machine-id as reported.
-// It returns an empty string when the file does not exist and never falls back
-// to another identifier.
-func GetOSMachineID() (string, error) {
-	return getOSMachineID(machineIDPath)
+// machineIDPaths are the systemd and legacy D-Bus locations of the same OS
+// machine ID.
+// ref. https://github.com/google/cadvisor/blob/854445c010e0b634fcd855a20681ae986da235df/machine/info.go#L39
+var machineIDPaths = []string{
+	"/etc/machine-id",
+	"/var/lib/dbus/machine-id",
 }
 
-func getOSMachineID(machineIDPath string) (string, error) {
-	content, err := os.ReadFile(machineIDPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
+// GetOSMachineID returns the OS machine ID as reported, from /etc/machine-id or
+// its legacy D-Bus location /var/lib/dbus/machine-id. It returns an empty
+// string when neither exists and never substitutes another identifier.
+func GetOSMachineID() (string, error) {
+	return getOSMachineID(machineIDPaths)
+}
+
+func getOSMachineID(files []string) (string, error) {
+	for _, path := range files {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			continue
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(content)), nil
 	}
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(content)), nil
+	return "", nil
 }
 
 // GetOSName reads the os name from the /etc/os-release file.

@@ -93,46 +93,64 @@ func TestGetOSMachineID(t *testing.T) {
 	}()
 
 	// Create test files
-	machineIDPath := filepath.Join(tempDir, "machine_id")
+	firstFilePath := filepath.Join(tempDir, "first_id")
+	secondFilePath := filepath.Join(tempDir, "second_id")
 	noPermFilePath := filepath.Join(tempDir, "no_perm_id")
 
 	// Write content to test files
-	if err := os.WriteFile(machineIDPath, []byte("  machine-id-123\n"), 0644); err != nil {
+	if err := os.WriteFile(firstFilePath, []byte("machine-id-123\n"), 0644); err != nil {
+		t.Fatalf("Failed to write to test file: %v", err)
+	}
+	if err := os.WriteFile(secondFilePath, []byte("  machine-id-456  "), 0644); err != nil {
 		t.Fatalf("Failed to write to test file: %v", err)
 	}
 	if err := os.WriteFile(noPermFilePath, []byte("no-perm-id"), 0000); err != nil {
 		t.Fatalf("Failed to write to test file: %v", err)
 	}
 
+	nonExistentPath := filepath.Join(tempDir, "does_not_exist")
+
 	tests := []struct {
 		name     string
-		path     string
+		files    []string
 		expected string
 		wantErr  bool
 	}{
 		{
-			name:     "File exists",
-			path:     machineIDPath,
+			name:     "First file exists",
+			files:    []string{firstFilePath, secondFilePath},
 			expected: "machine-id-123",
 			wantErr:  false,
 		},
 		{
-			name:     "File does not exist",
-			path:     filepath.Join(tempDir, "does_not_exist"),
+			name:     "Skip non-existent file",
+			files:    []string{nonExistentPath, secondFilePath},
+			expected: "machine-id-456",
+			wantErr:  false,
+		},
+		{
+			name:     "No files exist",
+			files:    []string{nonExistentPath, nonExistentPath + "2"},
 			expected: "",
 			wantErr:  false,
 		},
 		{
 			name:     "Permission denied",
-			path:     noPermFilePath,
+			files:    []string{noPermFilePath},
 			expected: "",
 			wantErr:  true,
+		},
+		{
+			name:     "Empty file list",
+			files:    []string{},
+			expected: "",
+			wantErr:  false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := getOSMachineID(tc.path)
+			got, err := getOSMachineID(tc.files)
 
 			if (err != nil) != tc.wantErr {
 				t.Errorf("getOSMachineID() error = %v, wantErr %v", err, tc.wantErr)
@@ -148,7 +166,9 @@ func TestGetOSMachineID(t *testing.T) {
 
 func TestGetOSMachineIDWithTestData(t *testing.T) {
 	// Test using the sample file in testdata directory
-	id, err := getOSMachineID("testdata/machine_id_sample")
+	files := []string{"testdata/machine_id_sample"}
+
+	id, err := getOSMachineID(files)
 	if err != nil {
 		t.Fatalf("Failed to get machine ID from test file: %v", err)
 	}
