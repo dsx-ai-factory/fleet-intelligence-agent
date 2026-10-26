@@ -22,11 +22,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
-	"github.com/prometheus/procfs/sysfs"
 
+	pkghost "github.com/NVIDIA/fleet-intelligence-sdk/pkg/host"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 )
 
@@ -36,12 +35,12 @@ type State interface {
 }
 
 var (
-	readHardwareUUID = readDMIProductUUID
+	readHardwareUUID = func() (string, error) { return nodeUUIDFromSystemUUID(pkghost.SystemUUID()) }
 	newNodeUUID      = uuid.NewString
 )
 
 // EnsureNodeUUID returns the persisted node UUID, or initializes and persists it
-// from DMI sysfs with a random UUID fallback.
+// from the reported system UUID with a random UUID fallback.
 func EnsureNodeUUID(ctx context.Context, state State) (string, error) {
 	if state == nil {
 		return "", errors.New("node identity state is required")
@@ -70,34 +69,18 @@ func EnsureNodeUUID(ctx context.Context, state State) (string, error) {
 	return nodeUUID, nil
 }
 
-func readDMIProductUUID() (string, error) {
-	return readDMIProductUUIDFromFS("/sys")
-}
-
-func readDMIProductUUIDFromFS(root string) (string, error) {
-	fs, err := sysfs.NewFS(root)
+// nodeUUIDFromSystemUUID accepts the system UUID reported in inventory as the
+// node UUID unless it is missing or an all-zero/all-f placeholder.
+func nodeUUIDFromSystemUUID(systemUUID string) (string, error) {
+	if systemUUID == "" {
+		return "", errors.New("system UUID not found")
+	}
+	parsedUUID, err := uuid.Parse(systemUUID)
 	if err != nil {
-		return "", fmt.Errorf("failed to open sysfs: %w", err)
+		return "", fmt.Errorf("invalid system UUID %q: %w", systemUUID, err)
 	}
-
-	dmi, err := fs.DMIClass()
-	if err != nil {
-		return "", fmt.Errorf("failed to read DMI class: %w", err)
+	if parsedUUID == uuid.Nil || parsedUUID == uuid.Max {
+		return "", fmt.Errorf("system UUID %q is a placeholder", systemUUID)
 	}
-	if dmi.ProductUUID == nil {
-		return "", errors.New("DMI product UUID not found")
-	}
-
-	nodeUUID := strings.TrimSpace(*dmi.ProductUUID)
-	if nodeUUID == "" {
-		return "", errors.New("DMI product UUID is empty")
-	}
-	parsedUUID, err := uuid.Parse(nodeUUID)
-	if err != nil {
-		return "", fmt.Errorf("invalid DMI product UUID %q: %w", nodeUUID, err)
-	}
-	if parsedUUID == uuid.Nil {
-		return "", errors.New("DMI product UUID is unset")
-	}
-	return nodeUUID, nil
+	return systemUUID, nil
 }

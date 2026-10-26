@@ -18,8 +18,6 @@ package nodeidentity
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -55,14 +53,6 @@ func (s *fakeState) GetOrCreateNodeUUID(_ context.Context, create func() (string
 	return value, created, nil
 }
 
-func writeTestDMIProductUUID(t *testing.T, root, id string) {
-	t.Helper()
-
-	dmiIDDir := filepath.Join(root, "class", "dmi", "id")
-	require.NoError(t, os.MkdirAll(dmiIDDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dmiIDDir, "product_uuid"), []byte(id), 0o644))
-}
-
 func overrideUUIDSources(t *testing.T, read func() (string, error), generate func() string) {
 	t.Helper()
 
@@ -76,47 +66,32 @@ func overrideUUIDSources(t *testing.T, read func() (string, error), generate fun
 	})
 }
 
-func TestReadDMIProductUUIDFromFS(t *testing.T) {
-	const validUUID = "4c4c4544-0053-5210-8038-c8c04f583034"
+func TestNodeUUIDFromSystemUUID(t *testing.T) {
+	const validUUID = "4C4C4544-0053-5210-8038-C8C04F583034"
 
-	t.Run("reads product uuid", func(t *testing.T) {
-		root := t.TempDir()
-		writeTestDMIProductUUID(t, root, validUUID+"\n")
-
-		id, err := readDMIProductUUIDFromFS(root)
+	t.Run("uses system uuid as reported", func(t *testing.T) {
+		id, err := nodeUUIDFromSystemUUID(validUUID)
 		require.NoError(t, err)
 		assert.Equal(t, validUUID, id)
 	})
 
-	t.Run("errors when product uuid is missing", func(t *testing.T) {
-		root := t.TempDir()
-		require.NoError(t, os.MkdirAll(filepath.Join(root, "class", "dmi", "id"), 0o755))
-
-		id, err := readDMIProductUUIDFromFS(root)
-		require.Error(t, err)
-		assert.Empty(t, id)
-		assert.Contains(t, err.Error(), "DMI product UUID not found")
-	})
-
-	t.Run("errors when product uuid is invalid", func(t *testing.T) {
-		root := t.TempDir()
-		writeTestDMIProductUUID(t, root, "Not Settable\n")
-
-		id, err := readDMIProductUUIDFromFS(root)
-		require.Error(t, err)
-		assert.Empty(t, id)
-		assert.Contains(t, err.Error(), "invalid DMI product UUID")
-	})
-
-	t.Run("errors when product uuid is zero", func(t *testing.T) {
-		root := t.TempDir()
-		writeTestDMIProductUUID(t, root, "00000000-0000-0000-0000-000000000000\n")
-
-		id, err := readDMIProductUUIDFromFS(root)
-		require.Error(t, err)
-		assert.Empty(t, id)
-		assert.Contains(t, err.Error(), "DMI product UUID is unset")
-	})
+	for _, tc := range []struct {
+		name       string
+		systemUUID string
+		wantErr    string
+	}{
+		{name: "missing", systemUUID: "", wantErr: "system UUID not found"},
+		{name: "invalid", systemUUID: "Not Settable", wantErr: "invalid system UUID"},
+		{name: "all-zero placeholder", systemUUID: "00000000-0000-0000-0000-000000000000", wantErr: "is a placeholder"},
+		{name: "all-f placeholder", systemUUID: "ffffffff-ffff-ffff-ffff-ffffffffffff", wantErr: "is a placeholder"},
+	} {
+		t.Run("rejects "+tc.name, func(t *testing.T) {
+			id, err := nodeUUIDFromSystemUUID(tc.systemUUID)
+			require.Error(t, err)
+			assert.Empty(t, id)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
 }
 
 func TestEnsureNodeUUID(t *testing.T) {

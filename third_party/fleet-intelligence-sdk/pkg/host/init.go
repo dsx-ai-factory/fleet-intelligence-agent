@@ -29,7 +29,6 @@ var (
 	currentPlatformVersion     string
 	currentBootTimeUnixSeconds uint64
 	currentBootID              string
-	currentMachineID           string
 	currentDmidecodeUUID       string
 	currentVirtEnv             VirtualizationEnvironment
 	currentSystemManufacturer  string
@@ -106,13 +105,6 @@ func loadInfo() {
 	currentBootID, err = GetBootID()
 	if err != nil {
 		log.Logger.Errorw("failed to get boot id", "error", err)
-	}
-
-	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
-	currentMachineID, err = GetMachineID(ctx)
-	cancel()
-	if err != nil {
-		log.Logger.Errorw("failed to get machine id", "error", err)
 	}
 
 	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
@@ -212,10 +204,6 @@ func BootTime() time.Time {
 
 func BootID() string {
 	return currentBootID
-}
-
-func MachineID() string {
-	return currentMachineID
 }
 
 func DmidecodeUUID() string {

@@ -93,64 +93,46 @@ func TestGetOSMachineID(t *testing.T) {
 	}()
 
 	// Create test files
-	firstFilePath := filepath.Join(tempDir, "first_id")
-	secondFilePath := filepath.Join(tempDir, "second_id")
+	machineIDPath := filepath.Join(tempDir, "machine_id")
 	noPermFilePath := filepath.Join(tempDir, "no_perm_id")
 
 	// Write content to test files
-	if err := os.WriteFile(firstFilePath, []byte("machine-id-123\n"), 0644); err != nil {
-		t.Fatalf("Failed to write to test file: %v", err)
-	}
-	if err := os.WriteFile(secondFilePath, []byte("  machine-id-456  "), 0644); err != nil {
+	if err := os.WriteFile(machineIDPath, []byte("  machine-id-123\n"), 0644); err != nil {
 		t.Fatalf("Failed to write to test file: %v", err)
 	}
 	if err := os.WriteFile(noPermFilePath, []byte("no-perm-id"), 0000); err != nil {
 		t.Fatalf("Failed to write to test file: %v", err)
 	}
 
-	nonExistentPath := filepath.Join(tempDir, "does_not_exist")
-
 	tests := []struct {
 		name     string
-		files    []string
+		path     string
 		expected string
 		wantErr  bool
 	}{
 		{
-			name:     "First file exists",
-			files:    []string{firstFilePath, secondFilePath},
+			name:     "File exists",
+			path:     machineIDPath,
 			expected: "machine-id-123",
 			wantErr:  false,
 		},
 		{
-			name:     "Skip non-existent file",
-			files:    []string{nonExistentPath, secondFilePath},
-			expected: "machine-id-456",
-			wantErr:  false,
-		},
-		{
-			name:     "No files exist",
-			files:    []string{nonExistentPath, nonExistentPath + "2"},
+			name:     "File does not exist",
+			path:     filepath.Join(tempDir, "does_not_exist"),
 			expected: "",
 			wantErr:  false,
 		},
 		{
 			name:     "Permission denied",
-			files:    []string{noPermFilePath},
+			path:     noPermFilePath,
 			expected: "",
 			wantErr:  true,
-		},
-		{
-			name:     "Empty file list",
-			files:    []string{},
-			expected: "",
-			wantErr:  false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := getOSMachineID(tc.files)
+			got, err := getOSMachineID(tc.path)
 
 			if (err != nil) != tc.wantErr {
 				t.Errorf("getOSMachineID() error = %v, wantErr %v", err, tc.wantErr)
@@ -166,9 +148,7 @@ func TestGetOSMachineID(t *testing.T) {
 
 func TestGetOSMachineIDWithTestData(t *testing.T) {
 	// Test using the sample file in testdata directory
-	files := []string{"testdata/machine_id_sample"}
-
-	id, err := getOSMachineID(files)
+	id, err := getOSMachineID("testdata/machine_id_sample")
 	if err != nil {
 		t.Fatalf("Failed to get machine ID from test file: %v", err)
 	}
@@ -193,8 +173,8 @@ func TestGetSystemUUID(t *testing.T) {
 		{name: "empty", content: ptr("\n"), wantErr: true},
 		{name: "not a UUID", content: ptr("Not Settable"), wantErr: true},
 		{name: "machine-id form", content: ptr("4c4c4544004a3410804cc7c04f313434"), wantErr: true},
-		{name: "all-zero placeholder", content: ptr("00000000-0000-0000-0000-000000000000"), wantErr: true},
-		{name: "all-f placeholder", content: ptr("FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"), wantErr: true},
+		{name: "all-zero placeholder is reported", content: ptr("00000000-0000-0000-0000-000000000000"), expected: "00000000-0000-0000-0000-000000000000"},
+		{name: "all-f placeholder is reported", content: ptr("FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"), expected: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"},
 	}
 
 	for i, tc := range testCases {

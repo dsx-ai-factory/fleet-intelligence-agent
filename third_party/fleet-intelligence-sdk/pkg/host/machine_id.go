@@ -14,23 +14,8 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/file"
-	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	"github.com/google/uuid"
 )
-
-// Returns the UUID of the machine host.
-// Returns an empty string if the UUID is not found.
-func GetMachineID(ctx context.Context) (string, error) {
-	// hw-based UUID first
-	uuid, err := GetDmidecodeUUID(ctx)
-	if err != nil {
-		log.Logger.Warnw("failed to get UUID from dmidecode, trying to read from file", "error", err)
-
-		// otherwise, try to read from file
-		return GetOSMachineID()
-	}
-	return uuid, nil
-}
 
 // Fetches the UUIF of the machine host, using the "dmidecode".
 // Returns an empty string if the UUID is not found.
@@ -90,30 +75,24 @@ func validateDmidecodeUUID(id string) error {
 	return nil
 }
 
-// ref. https://github.com/google/cadvisor/blob/854445c010e0b634fcd855a20681ae986da235df/machine/info.go#L39
-var machineIDPaths = []string{
-	"/etc/machine-id",
-	"/var/lib/dbus/machine-id",
-}
+const machineIDPath = "/etc/machine-id"
 
-// GetOSMachineID returns the OS-level UUID based on /etc/machine-id or /var/lib/dbus/machine-id.
-// Returns an empty string if the UUID is not found.
+// GetOSMachineID returns the OS machine ID from /etc/machine-id as reported.
+// It returns an empty string when the file does not exist and never falls back
+// to another identifier.
 func GetOSMachineID() (string, error) {
-	return getOSMachineID(machineIDPaths)
+	return getOSMachineID(machineIDPath)
 }
 
-func getOSMachineID(files []string) (string, error) {
-	for _, path := range files {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			continue
-		}
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return "", err
-		}
-		return strings.TrimSpace(string(content)), nil
+func getOSMachineID(machineIDPath string) (string, error) {
+	content, err := os.ReadFile(machineIDPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
 	}
-	return "", nil
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(content)), nil
 }
 
 // GetOSName reads the os name from the /etc/os-release file.
@@ -156,11 +135,12 @@ func getOSName(file string) (string, error) {
 
 const dmiDir = "/sys/class/dmi"
 
-// GetSystemUUID returns the DMI product UUID of the machine.
-// It returns an empty string and an error when the UUID is missing, invalid, or
-// an all-zero/all-f placeholder. It never falls back to another identifier such
-// as /etc/machine-id, because the backend uses this value as hardware identity
-// evidence.
+// GetSystemUUID returns the DMI product UUID of the machine as reported.
+// It returns an empty string and an error when the UUID is missing or is not a
+// standard 36-character UUID. It never falls back to another identifier such as
+// /etc/machine-id, because the backend uses this value as hardware identity
+// evidence. Placeholder values are reported unchanged; consumers that need a
+// usable identity must reject them.
 func GetSystemUUID() (string, error) {
 	return getSystemUUID(path.Join(dmiDir, "id", "product_uuid"))
 }
@@ -171,12 +151,8 @@ func getSystemUUID(productUUIDPath string) (string, error) {
 		return "", err
 	}
 	id := strings.TrimSpace(string(content))
-	parsed, err := uuid.Parse(id)
-	if err != nil || len(id) != 36 {
+	if _, err := uuid.Parse(id); err != nil || len(id) != 36 {
 		return "", fmt.Errorf("invalid DMI product UUID %q", id)
-	}
-	if parsed == uuid.Nil || parsed == uuid.Max {
-		return "", fmt.Errorf("DMI product UUID %q is a placeholder", id)
 	}
 	return id, nil
 }

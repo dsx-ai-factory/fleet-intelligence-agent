@@ -13,7 +13,6 @@ require (
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/prometheus/client_golang v1.23.0
-	github.com/prometheus/procfs v0.16.1
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli v1.22.17
 	go.opentelemetry.io/proto/otlp v1.8.0
@@ -76,6 +75,7 @@ require (
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.65.0 // indirect
+	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.59.1 // indirect
 	github.com/rivo/uniseg v0.4.4 // indirect
