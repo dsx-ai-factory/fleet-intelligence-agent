@@ -38,7 +38,7 @@ type GPUdInstance struct {
 	DCGMHealthCache     *nvidiadcgm.HealthCache     // Shared cache for DCGM health check results
 	DCGMFieldValueCache *nvidiadcgm.FieldValueCache // Shared cache for DCGM field values (GPU devices only)
 	DCGMGroupNames      DCGMGroupNames
-	// DCGMIntervals passes the extended minimum and field assignments to collectors.
+	// DCGMIntervals configures native sampling watches and field assignments.
 	// Standard fields use HealthCheckInterval. Assignments never enable fields.
 	DCGMIntervals        nvidiadcgm.CollectionIntervals
 	NVIDIAToolOverwrites nvidiacommon.ToolOverwrites

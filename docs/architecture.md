@@ -35,12 +35,13 @@ flowchart LR
 ### Runtime behavior
 
 - GPU/DCGM components read health and telemetry from DCGM/NVML-backed data paths.
-- Standard DCGM fields use the standard interval (`FLEETINT_CHECK_INTERVAL`). Extended fields use a
-  separate minimum, which defaults to 60 seconds. Field assignments are
-  configurable. The two classes bound each collection path to two field groups.
-  Each group uses a matching DCGM watch and a read deadline. Equal effective
-  intervals share one group. Slower fields remain cached between reads. The
-  shared GPU cache, profiling collector, and CPU collector use the same policy. See [DCGM field collection minimums](configuration.md#dcgm-field-collection-minimums).
+- Standard DCGM watches use the standard interval (`FLEETINT_CHECK_INTERVAL`).
+  Extended watches use a separate sampling interval, which defaults to 60 seconds.
+  Configurable field assignments bound each collection path to two field groups.
+  Equal effective intervals share one group. The shared GPU cache, profiling
+  collector, and CPU collector read all their selected fields from DCGM's cache
+  on the standard cycle. Extended fields can return the same sample on consecutive
+  reads. See [DCGM sampling intervals](configuration.md#dcgm-sampling-intervals).
 - CPU and profiling collectors set up watches from their checks after DCGM becomes
   available. Failed setup can retry on a later check. Successful setup or an empty
   entity inventory completes setup and prevents repeated allocation.

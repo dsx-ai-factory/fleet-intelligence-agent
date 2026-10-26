@@ -18,7 +18,6 @@ package dcgm
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,7 +43,7 @@ const (
 	ExtendedProfile FieldProfile = "extended"
 )
 
-// CollectionIntervals configures the extended minimum and field assignments.
+// CollectionIntervals configures native DCGM sampling intervals and field assignments.
 // Standard fields use the component interval supplied by the caller. Settings
 // never enable fields. A zero extended interval uses the 60s default.
 type CollectionIntervals struct {
@@ -108,39 +107,42 @@ func ParseFieldProfiles(value string) (map[dcgm.Short]FieldProfile, error) {
 	return result, nil
 }
 
-// FieldInterval returns the component interval for standard fields. Extended
-// fields use max(component interval, extended minimum). Field assignments do not
+// FieldInterval returns the native DCGM sampling interval. Standard fields use
+// the supplied standard interval. Extended fields use its maximum with the
+// extended minimum. Field assignments do not
 // enable collection. Unknown SDK profile names leave the built-in assignment intact.
-func FieldInterval(field dcgm.Short, requested time.Duration, intervals CollectionIntervals) time.Duration {
-	if requested <= 0 {
-		requested = defaultStandardInterval
+func FieldInterval(field dcgm.Short, standardInterval time.Duration, watchIntervals CollectionIntervals) time.Duration {
+	if standardInterval <= 0 {
+		standardInterval = defaultStandardInterval
 	}
 	profile := StandardProfile
 	if (field >= 1200 && field <= 1219) || (field >= 1404 && field <= 1419) {
 		profile = ExtendedProfile
 	}
-	if configured := intervals.FieldProfiles[field]; configured == StandardProfile || configured == ExtendedProfile {
+	if configured := watchIntervals.FieldProfiles[field]; configured == StandardProfile || configured == ExtendedProfile {
 		profile = configured
 	}
 	if profile == StandardProfile {
-		return requested
+		return standardInterval
 	}
-	extended := intervals.Extended
+	extended := watchIntervals.Extended
 	if extended <= 0 {
 		extended = defaultExtendedInterval
 	}
-	if extended > requested {
+	if extended > standardInterval {
 		return extended
 	}
-	return requested
+	return standardInterval
 }
 
-// FieldSchedule owns interval-specific watches. Its owner must serialize calls,
-// including Reset and Close, with reads and shutdown.
-type FieldSchedule struct {
-	// buckets partitions only enabled fields by effective interval, allowing
+// FieldWatches owns native DCGM field groups and their sampling intervals.
+// Its owner must serialize setup, reads, reconnect, and cleanup.
+type FieldWatches struct {
+	// The groups partition selected fields by effective sampling interval, allowing
 	// slower fields to use a longer DCGM watch without slowing faster fields.
-	buckets []fieldBucket
+	groups []fieldWatchGroup
+	// fields is the selected field list. It also backs each group's field slice.
+	fields []dcgm.Short
 	// group is the GPU or CPU entity group; unwatch must use the same group as setup.
 	group dcgm.GroupHandle
 
@@ -152,9 +154,9 @@ type FieldSchedule struct {
 	destroy func(dcgm.FieldHandle) error                                          // Releases an allocated group, including setup failures.
 }
 
-// fieldBucket owns the watch and read deadline for fields with one cadence.
-// Handles are session-specific; deadlines survive reconnect to prevent early retries.
-type fieldBucket struct {
+// fieldWatchGroup owns one native watch for fields with the same sampling interval.
+// Handles belong to the current DCGM session.
+type fieldWatchGroup struct {
 	// interval is the standard component interval, or a longer extended minimum.
 	interval time.Duration
 	// fields contains the sorted, deduplicated IDs assigned to this interval.
@@ -162,18 +164,15 @@ type fieldBucket struct {
 	// handle replaces the former single field-group handle with one per interval.
 	// Zero means no group is allocated in the current DCGM session.
 	handle dcgm.FieldHandle
-	// next is the earliest next read attempt. It advances even when a read fails.
-	// Zero permits an initial read; keeping it on reconnect prevents an early retry.
-	next time.Time
 	// watching distinguishes successful watch registration from group allocation
 	// so rollback unwatches only watches that actually started.
 	watching bool
 }
 
-// NewFieldSchedule groups selected fields by effective interval. The two supported
-// profiles bound each schedule to at most two field groups. Equal effective intervals
+// NewFieldWatches groups selected fields by effective DCGM sampling interval.
+// The two profiles bound each owner to at most two field groups. Equal intervals
 // share one group. Profile settings never add fields to collection.
-func NewFieldSchedule(fields []dcgm.Short, requested time.Duration, intervals CollectionIntervals) *FieldSchedule {
+func NewFieldWatches(fields []dcgm.Short, standardInterval time.Duration, watchIntervals CollectionIntervals) *FieldWatches {
 	grouped := make(map[time.Duration][]dcgm.Short)
 	seen := make(map[dcgm.Short]bool)
 	for _, field := range fields {
@@ -181,27 +180,33 @@ func NewFieldSchedule(fields []dcgm.Short, requested time.Duration, intervals Co
 			continue
 		}
 		seen[field] = true
-		interval := FieldInterval(field, requested, intervals)
+		interval := FieldInterval(field, standardInterval, watchIntervals)
 		grouped[interval] = append(grouped[interval], field)
 	}
-	s := &FieldSchedule{create: dcgm.FieldGroupCreate, watch: dcgm.WatchFieldsWithGroupEx, unwatch: dcgm.UnwatchFields, destroy: dcgm.FieldGroupDestroy}
+	s := &FieldWatches{create: dcgm.FieldGroupCreate, watch: dcgm.WatchFieldsWithGroupEx, unwatch: dcgm.UnwatchFields, destroy: dcgm.FieldGroupDestroy}
 	for interval, fields := range grouped {
 		sort.Slice(fields, func(i, j int) bool { return fields[i] < fields[j] })
-		s.buckets = append(s.buckets, fieldBucket{interval: interval, fields: fields})
+		s.groups = append(s.groups, fieldWatchGroup{interval: interval, fields: fields})
 	}
-	sort.Slice(s.buckets, func(i, j int) bool { return s.buckets[i].interval < s.buckets[j].interval })
+	sort.Slice(s.groups, func(i, j int) bool { return s.groups[i].interval < s.groups[j].interval })
+	s.fields = make([]dcgm.Short, 0, len(seen))
+	for i := range s.groups {
+		start := len(s.fields)
+		s.fields = append(s.fields, s.groups[i].fields...)
+		s.groups[i].fields = s.fields[start:]
+	}
 	return s
 }
 
 // Setup rolls back every created group and watch if any setup operation fails.
-func (s *FieldSchedule) Setup(name string, group dcgm.GroupHandle) error {
-	if len(s.buckets) == 0 {
+func (s *FieldWatches) Setup(name string, group dcgm.GroupHandle) error {
+	if len(s.groups) == 0 {
 		return nil
 	}
 	ready := true
 	// Reject an oversized group before creating any native resources. Field lists
 	// come from components, not configuration; future growth must respect this limit.
-	for _, bucket := range s.buckets {
+	for _, bucket := range s.groups {
 		if bucket.handle.GetHandle() == 0 || !bucket.watching {
 			ready = false
 		}
@@ -216,8 +221,8 @@ func (s *FieldSchedule) Setup(name string, group dcgm.GroupHandle) error {
 		return fmt.Errorf("clean up previous field groups: %w", err)
 	}
 	s.group = group
-	for i := range s.buckets {
-		b := &s.buckets[i]
+	for i := range s.groups {
+		b := &s.groups[i]
 		handle, err := s.create(fmt.Sprintf("%s-%d", name, i), b.fields)
 		if err != nil {
 			return errors.Join(fmt.Errorf("create field group: %w", err), s.Close())
@@ -231,47 +236,24 @@ func (s *FieldSchedule) Setup(name string, group dcgm.GroupHandle) error {
 	return nil
 }
 
-// Due advances deadlines before attempting reads, so failures cannot cause a
-// retry faster than the configured minimum. Late polls never catch up in bursts.
-func (s *FieldSchedule) Due(now time.Time) []dcgm.Short {
-	var fields []dcgm.Short
-	for i := range s.buckets {
-		b := &s.buckets[i]
-		if now.Before(b.next) {
-			continue
-		}
-		fields = append(fields, b.fields...)
-		b.next = now.Add(b.interval)
-	}
-	return fields
-}
+// Fields returns all selected fields, regardless of their sampling intervals.
+// The returned slice belongs to FieldWatches and must not be modified.
+func (s *FieldWatches) Fields() []dcgm.Short { return s.fields }
 
-// Complete moves the selected buckets' deadlines to the end of a read batch.
-// Pass the unchanged fields returned by Due. This keeps sequential device reads
-// at least one interval apart even when the batch duration varies.
-func (s *FieldSchedule) Complete(fields []dcgm.Short, now time.Time) {
-	for i := range s.buckets {
-		b := &s.buckets[i]
-		if slices.Contains(fields, b.fields[0]) {
-			b.next = now.Add(b.interval)
-		}
-	}
-}
-
-// Reset forgets handles from a lost session but preserves deadlines.
-func (s *FieldSchedule) Reset() {
-	for i := range s.buckets {
-		s.buckets[i].handle = dcgm.FieldHandle{}
-		s.buckets[i].watching = false
+// Reset forgets native handles from a lost session. Selected fields are retained.
+func (s *FieldWatches) Reset() {
+	for i := range s.groups {
+		s.groups[i].handle = dcgm.FieldHandle{}
+		s.groups[i].watching = false
 	}
 }
 
 // Close unwatches and destroys allocated groups. Failed operations retain their
-// handles so a later Close or Setup can retry. Read deadlines are retained.
-func (s *FieldSchedule) Close() error {
+// handles so a later Close or Setup can retry.
+func (s *FieldWatches) Close() error {
 	var errs []error
-	for i := range s.buckets {
-		b := &s.buckets[i]
+	for i := range s.groups {
+		b := &s.groups[i]
 		if b.handle.GetHandle() == 0 {
 			continue
 		}

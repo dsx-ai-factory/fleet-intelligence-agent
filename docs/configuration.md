@@ -52,7 +52,7 @@ These environment variables are read by `fleetint run` at startup.
 | `FLEETINT_METRICS_LOOKBACK`     | Lookback window for metrics included in each export.                                                     | `1m`                                                                     | `/etc/default/fleetint` | `env.FLEETINT_METRICS_LOOKBACK`     |
 | `FLEETINT_EVENTS_LOOKBACK`      | Lookback window for events included in each export.                                                      | `1m`                                                                     | `/etc/default/fleetint` | `env.FLEETINT_EVENTS_LOOKBACK`      |
 | `FLEETINT_CHECK_INTERVAL`       | Standard interval for component checks, metric scrapes, and standard DCGM collection. Valid range: `1s` to `24h`.                              | `30s`                                                                    | `/etc/default/fleetint` | `env.FLEETINT_CHECK_INTERVAL`       |
-| `FLEETINT_DCGM_EXTENDED_INTERVAL` | Minimum collection interval for extended DCGM fields. A longer standard interval still applies. Valid range: `1s` to `24h`. | `60s` | `/etc/default/fleetint` | `env.FLEETINT_DCGM_EXTENDED_INTERVAL` |
+| `FLEETINT_DCGM_EXTENDED_INTERVAL` | DCGM sampling interval for extended fields. A longer standard interval still applies. Valid range: `1s` to `24h`. | `60s` | `/etc/default/fleetint` | `env.FLEETINT_DCGM_EXTENDED_INTERVAL` |
 | `FLEETINT_DCGM_FIELD_PROFILES` | Field assignments, as comma-separated `ID=profile` or `FIRST-LAST=profile` entries. Assignments do not enable fields. | unset (built-in assignments below) | `/etc/default/fleetint` | `env.FLEETINT_DCGM_FIELD_PROFILES` |
 | `FLEETINT_DCGM_HEALTH_CHECK_INTERVAL` | DCGM passive-health polling interval. Valid range: `1m` to `24h`.                                  | `1m`                                                                     | `/etc/default/fleetint` | `env.FLEETINT_DCGM_HEALTH_CHECK_INTERVAL` |
 | `FLEETINT_RETRY_MAX_ATTEMPTS`   | Maximum retry attempts for failed exports. Minimum: `0`.                                                 | `3`                                                                      | `/etc/default/fleetint` | `env.FLEETINT_RETRY_MAX_ATTEMPTS`   |
@@ -75,17 +75,17 @@ Notes:
   only to `DCGM_URL`.
 - `MALLOC_ARENA_MAX` is a Linux process-level tuning parameter (not a Fleet Intelligence setting) that caps the number of glibc memory arenas to constrain RSS growth in cgo-heavy workloads such as DCGM integration.
 
-### DCGM field collection minimums
+### DCGM sampling intervals
 
 Most users need no configuration. The defaults are:
 
-| Field class | Default interval | Setting |
+| Field class | Default DCGM sampling interval | Setting |
 | --- | --- | --- |
 | Standard fields | `30s` | `FLEETINT_CHECK_INTERVAL` |
 | Extended fields | At least `60s` | `FLEETINT_DCGM_EXTENDED_INTERVAL` |
 
 The **standard interval** is `FLEETINT_CHECK_INTERVAL`. It controls component
-checks, metric scrapes, and standard DCGM field collection. It also applies
+checks, metric scrapes, and standard DCGM sampling. It also applies
 to non-DCGM components.
 
 The **extended interval setting** is `FLEETINT_DCGM_EXTENDED_INTERVAL`.
@@ -117,18 +117,20 @@ env:
 Both settings use Go duration syntax. The valid range is `1s` to `24h`.
 Values can be raised or lowered. The `30s` standard default is an agent
 setting, not a recommendation for every DCGM field. Shorter intervals
-increase collection frequency and collection overhead.
+increase DCGM sampling frequency and overhead.
 
-Reads occur on standard-interval check cycles. They can occur after a deadline. For example,
-a `40s` standard interval and a `60s` extended minimum can produce reads every `80s`.
-Each DCGM read batch sets its next deadlines after the batch finishes. DCGM polling
-waits one standard interval after each cycle. This also enforces the minimum when
-sequential device reads have different durations.
-Checks and scrapes between reads use the last published values. Missed cycles
-do not cause a burst of reads. Failed reads also wait for the next deadline. A stored read error remains until
-the affected interval group completes a successful read.
-The shared GPU cache recreates watches after reconnect. It clears cached
-values and retains read deadlines within the running process.
+DCGM watches control sampling. The agent reads all selected fields from DCGM's
+cache on each standard-interval cycle. With the defaults, standard watches use
+`30s`, extended watches use `60s`, and both classes are read from the cache every
+`30s`.
+
+A cached read does not request a new hardware sample. A field sampled every `60s`
+can return the same sample on consecutive `30s` reads. The shared agent cache
+preserves the field timestamps returned by DCGM. See the
+[DCGM cached-value APIs](https://docs.nvidia.com/datacenter/dcgm/latest/dcgm-api/dcgm-api-field-apis.html).
+
+After reconnect, the shared GPU cache clears its old values and recreates its
+native watches. It resumes cached reads on the standard interval.
 
 **Advanced: change field assignments**
 
@@ -165,9 +167,8 @@ These settings apply only to fields selected by enabled components and their
 existing hardware checks. They never add a field to collection. They apply to
 `fleetint run`, including offline mode. One-time scans use their existing standard
 interval and the default extended interval and assignments. Export intervals,
-metric names, labels, and payload formats remain unchanged. The shared GPU
-cache keeps slower values between reads. Passive DCGM health checks and device
-identity queries keep their existing behavior.
+metric names, labels, and payload formats remain unchanged. Passive DCGM health
+checks and device identity queries keep their existing behavior.
 
 ### Send Slurm workload identity to Fleet Intelligence
 

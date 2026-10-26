@@ -120,7 +120,7 @@ type AttestationConfig struct {
 
 // HealthExporterConfig holds configuration for the health data exporter
 type HealthExporterConfig struct {
-	// DCGMExtendedInterval is the minimum for extended DCGM fields. Standard
+	// DCGMExtendedInterval is the native sampling minimum for extended DCGM fields. Standard
 	// fields use HealthCheckInterval. A longer HealthCheckInterval also applies
 	// to extended fields. Zero selects the default minimum of 60s.
 	DCGMExtendedInterval metav1.Duration `json:"dcgm_extended_interval,omitempty"`
@@ -193,7 +193,7 @@ type HealthExporterConfig struct {
 	Duration time.Duration `json:"duration"`
 }
 
-// DCGMCollectionIntervals resolves the extended minimum and field assignments.
+// DCGMCollectionIntervals resolves native watch intervals and field assignments.
 // Standard fields use HealthCheckInterval, which the runtime supplies separately.
 // A nil receiver uses the built-in defaults.
 func (cfg *HealthExporterConfig) DCGMCollectionIntervals() (nvidiadcgm.CollectionIntervals, error) {

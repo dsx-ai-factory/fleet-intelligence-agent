@@ -45,16 +45,16 @@ type component struct {
 	cancel context.CancelFunc
 
 	healthCheckInterval time.Duration
-	// readFields uses DCGM in production. Tests replace it to observe reads and
-	// inject failures without GPU hardware; it does not control collection timing.
+	// readFields reads DCGM's cached values. Tests replace it to exercise read
+	// failures and shutdown without GPU hardware.
 	readFields func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error)
 
 	dcgmInstance    nvidiadcgm.Instance
 	dcgmHealthCache *nvidiadcgm.HealthCache
 
 	cpuGroupHandle dcgm.GroupHandle // Dedicated group for CPUs
-	// schedule owns interval groups and deadlines for the selected CPU fields.
-	schedule *nvidiadcgm.FieldSchedule
+	// fieldWatches owns native sampling groups for the selected CPU fields.
+	fieldWatches *nvidiadcgm.FieldWatches
 	// setupMu serializes checks, setup, and cleanup. Close waits for an active
 	// check before it releases the field and CPU entity groups.
 	setupMu sync.Mutex
@@ -92,7 +92,7 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 		healthCheckInterval: healthCheckInterval,
 		dcgmInstance:        gpudInstance.DCGMInstance,
 		dcgmHealthCache:     gpudInstance.DCGMHealthCache,
-		schedule:            nvidiadcgm.NewFieldSchedule(cpuLevelFields, healthCheckInterval, gpudInstance.DCGMIntervals),
+		fieldWatches:        nvidiadcgm.NewFieldWatches(cpuLevelFields, healthCheckInterval, gpudInstance.DCGMIntervals),
 		fieldGroupName:      dcgmGroupNames.CPUFieldGroup,
 		cpuGroupName:        dcgmGroupNames.CPUGroup,
 	}
@@ -105,7 +105,7 @@ func (c *component) setupFieldWatchingIfReady() {
 	if c.ctx.Err() != nil || c.fieldSetupComplete || c.dcgmInstance == nil || !c.dcgmInstance.DCGMExists() {
 		return
 	}
-	if err := c.schedule.Close(); err != nil {
+	if err := c.fieldWatches.Close(); err != nil {
 		c.setupDegradedReason = fmt.Sprintf("failed to clean up DCGM CPU field watching: %v", err)
 		return
 	}
@@ -140,7 +140,7 @@ func (c *component) setupFieldWatchingIfReady() {
 	c.cpuGroupHandle = cpuGroupHandle
 	defer func() {
 		if !c.fieldSetupComplete {
-			if err := c.schedule.Close(); err != nil {
+			if err := c.fieldWatches.Close(); err != nil {
 				return
 			}
 			_ = c.cleanupCPUGroupLocked()
@@ -159,7 +159,7 @@ func (c *component) setupFieldWatchingIfReady() {
 		return
 	}
 	// Setup rolls back partial field groups and watches before CPU group cleanup.
-	if err := c.schedule.Setup(c.fieldGroupName, cpuGroupHandle); err != nil {
+	if err := c.fieldWatches.Setup(c.fieldGroupName, cpuGroupHandle); err != nil {
 		c.setupDegradedReason = fmt.Sprintf("failed to set up DCGM CPU field watching: %v", err)
 		return
 	}
@@ -208,7 +208,6 @@ func (c *component) Start() error {
 
 		for {
 			_ = c.Check()
-			ticker.Reset(c.healthCheckInterval)
 
 			select {
 			case <-c.ctx.Done():
@@ -245,8 +244,8 @@ func (c *component) Close() error {
 	c.cancel()
 	c.setupMu.Lock()
 	defer c.setupMu.Unlock()
-	if c.schedule != nil {
-		if err := c.schedule.Close(); err != nil {
+	if c.fieldWatches != nil {
+		if err := c.fieldWatches.Close(); err != nil {
 			return err
 		}
 	}
@@ -312,20 +311,12 @@ func (c *component) Check() (result components.CheckResult) {
 		return cr
 	}
 
-	// Query only fields whose interval has elapsed.
-	fields := cpuLevelFields
-	if c.schedule != nil {
-		fields = c.schedule.Due(time.Now())
-		if len(fields) > 0 {
-			defer func() { c.schedule.Complete(fields, time.Now()) }()
-		}
-	}
 	// Query and export DCGM CPU-level field values using cached entities
 	for _, cpuID := range c.cpuEntities {
-		if len(fields) == 0 || c.ctx.Err() != nil {
+		if c.ctx.Err() != nil {
 			break
 		}
-		fieldValues, err := c.readFields(dcgm.FE_CPU, cpuID, fields)
+		fieldValues, err := c.readFields(dcgm.FE_CPU, cpuID, cpuLevelFields)
 		if err != nil {
 			log.Logger.Warnw("failed to get CPU-level fields", "cpuID", cpuID, "error", err)
 			continue

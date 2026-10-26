@@ -38,9 +38,9 @@ Common values (defaults from `values.yaml`):
 | `env.FLEETINT_INCLUDE_HEALTHCHECKS` | `"true"` | Include component health data in export. |
 | `env.FLEETINT_METRICS_LOOKBACK` | `"1m"` | Lookback window for metrics export. |
 | `env.FLEETINT_EVENTS_LOOKBACK` | `"1m"` | Lookback window for events export. |
-| `env.FLEETINT_CHECK_INTERVAL` | `"30s"` | Standard interval for component checks, metric scrapes, and standard DCGM collection (1s to 24h). |
-| `env.FLEETINT_DCGM_EXTENDED_INTERVAL` | `"60s"` (agent default) | Extended DCGM minimum. A longer standard interval still applies. |
-| `env.FLEETINT_DCGM_FIELD_PROFILES` | unset | Field-to-profile assignments, such as `1110=extended`. Omitted fields keep built-in assignments. See [configuration](../../../docs/configuration.md#dcgm-field-collection-minimums). |
+| `env.FLEETINT_CHECK_INTERVAL` | `"30s"` | Standard interval for component checks, metric scrapes, and standard DCGM sampling (1s to 24h). |
+| `env.FLEETINT_DCGM_EXTENDED_INTERVAL` | `"60s"` (agent default) | Extended DCGM sampling interval. A longer standard interval still applies; cached reads use the standard interval. |
+| `env.FLEETINT_DCGM_FIELD_PROFILES` | unset | Field-to-profile assignments, such as `1110=extended`. Omitted fields keep built-in assignments. See [configuration](../../../docs/configuration.md#dcgm-sampling-intervals). |
 | `env.FLEETINT_DCGM_HEALTH_CHECK_INTERVAL` | `"1m"` | DCGM passive-health polling frequency (1m to 24h). |
 | `env.FLEETINT_RETRY_MAX_ATTEMPTS` | `"3"` | Max retry attempts for failed exports. |
 | `env.FLEETINT_INVENTORY_ENABLED` | `"true"` | Enable or disable the inventory loop. |

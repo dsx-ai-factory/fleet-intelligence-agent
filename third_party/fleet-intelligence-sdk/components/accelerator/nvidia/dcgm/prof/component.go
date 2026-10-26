@@ -46,8 +46,8 @@ type component struct {
 	cancel context.CancelFunc
 
 	healthCheckInterval time.Duration
-	// readFields uses DCGM in production. Tests replace it to observe reads and
-	// inject failures without GPU hardware; it does not control collection timing.
+	// readFields reads DCGM's cached values. Tests replace it to exercise read
+	// failures and shutdown without GPU hardware.
 	readFields func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error)
 
 	dcgmInstance    nvidiadcgm.Instance
@@ -62,14 +62,11 @@ type component struct {
 	// Track fields we're actually watching (post-validation)
 	watchedFields []dcgm.Short
 
-	// schedule owns interval groups and deadlines for hardware-validated fields.
-	schedule *nvidiadcgm.FieldSchedule
-	// intervals are retained because field selection happens during deferred
+	// fieldWatches owns native sampling groups for hardware-validated fields.
+	fieldWatches *nvidiadcgm.FieldWatches
+	// watchIntervals are retained because field selection happens during deferred
 	// setup; configuration alone never selects a field.
-	intervals nvidiadcgm.CollectionIntervals
-	// readErrors retains each interval group's failure until that group is read
-	// successfully. It is allocated only on failure and has at most two entries.
-	readErrors map[time.Duration]error
+	watchIntervals nvidiadcgm.CollectionIntervals
 
 	// setupDegradedReason is non-empty when field group creation or watching setup
 	// failed. Check() returns Degraded with this reason rather than querying fields
@@ -99,7 +96,7 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 		dcgmInstance:        gpudInstance.DCGMInstance,
 		dcgmHealthCache:     gpudInstance.DCGMHealthCache,
 		fieldGroupName:      dcgmGroupNames.ProfilingFieldGroup,
-		intervals:           gpudInstance.DCGMIntervals,
+		watchIntervals:      gpudInstance.DCGMIntervals,
 	}
 
 	return c, nil
@@ -111,8 +108,8 @@ func (c *component) setupFieldWatchingIfReady() {
 		return
 	}
 
-	if c.schedule != nil {
-		if err := c.schedule.Close(); err != nil {
+	if c.fieldWatches != nil {
+		if err := c.fieldWatches.Close(); err != nil {
 			c.setupDegradedReason = fmt.Sprintf("failed to clean up DCGM profiling field watching: %v", err)
 			return
 		}
@@ -150,10 +147,9 @@ func (c *component) setupFieldWatchingIfReady() {
 		"skippedFields", len(profFields)-len(validFields),
 		"deviceID", deviceID)
 
-	// Setup has not completed, so no read deadlines exist yet. Each retry
-	// uses the current hardware-validated fields.
-	c.schedule = nvidiadcgm.NewFieldSchedule(validFields, c.healthCheckInterval, c.intervals)
-	if err := c.schedule.Setup(c.fieldGroupName, dcgm.GroupAllGPUs()); err != nil {
+	// Each retry uses the current hardware-validated fields after cleanup.
+	c.fieldWatches = nvidiadcgm.NewFieldWatches(validFields, c.healthCheckInterval, c.watchIntervals)
+	if err := c.fieldWatches.Setup(c.fieldGroupName, dcgm.GroupAllGPUs()); err != nil {
 		c.setupDegradedReason = fmt.Sprintf("failed to set up DCGM profiling field watching: %v", err)
 		return
 	}
@@ -188,7 +184,6 @@ func (c *component) Start() error {
 
 		for {
 			_ = c.Check()
-			ticker.Reset(c.healthCheckInterval)
 
 			select {
 			case <-c.ctx.Done():
@@ -226,8 +221,8 @@ func (c *component) cleanup() error {
 }
 
 func (c *component) cleanupFieldGroupLocked() error {
-	if c.schedule != nil {
-		return c.schedule.Close()
+	if c.fieldWatches != nil {
+		return c.fieldWatches.Close()
 	}
 	return nil
 }
@@ -295,16 +290,7 @@ func (c *component) Check() (result components.CheckResult) {
 		return cr
 	}
 
-	if c.schedule != nil {
-		watchedFields = c.schedule.Due(time.Now())
-		if len(watchedFields) > 0 {
-			defer func() { c.schedule.Complete(watchedFields, time.Now()) }()
-		}
-	}
-	var devices []nvidiadcgm.DeviceInfo
-	if len(watchedFields) > 0 {
-		devices = c.dcgmInstance.GetDevices()
-	}
+	devices := c.dcgmInstance.GetDevices()
 	var readErr error
 	readComplete := len(devices) > 0
 	for _, device := range devices {
@@ -456,27 +442,18 @@ func (c *component) Check() (result components.CheckResult) {
 	if c.ctx.Err() != nil {
 		return cr
 	}
-	if readErr != nil || len(c.readErrors) > 0 {
-		if readErr != nil && c.readErrors == nil {
-			c.readErrors = make(map[time.Duration]error, 2)
-		}
-		for _, field := range watchedFields {
-			interval := nvidiadcgm.FieldInterval(field, c.healthCheckInterval, c.intervals)
-			if readErr != nil {
-				c.readErrors[interval] = readErr
-			} else if readComplete {
-				delete(c.readErrors, interval)
-			}
-		}
-		// Use the stable field order to select an error deterministically;
-		// unhealthy errors take priority over degraded errors.
-		for _, field := range c.watchedFields {
-			err := c.readErrors[nvidiadcgm.FieldInterval(field, c.healthCheckInterval, c.intervals)]
-			if err != nil && (cr.err == nil || nvidiadcgm.IsUnhealthyAPIError(err) && !nvidiadcgm.IsUnhealthyAPIError(cr.err)) {
-				cr.err = err
-			}
+	if readErr == nil && !readComplete {
+		// A transient or empty batch cannot verify recovery. Reuse the last
+		// completed result until a complete cached read succeeds.
+		c.lastMu.RLock()
+		previous := c.lastCheckResult
+		c.lastMu.RUnlock()
+		if previous != nil {
+			cr = previous
+			return cr
 		}
 	}
+	cr.err = readErr
 	if cr.err != nil {
 		if nvidiadcgm.IsUnhealthyAPIError(cr.err) {
 			cr.health = apiv1.HealthStateTypeUnhealthy
@@ -488,7 +465,7 @@ func (c *component) Check() (result components.CheckResult) {
 		return cr
 	}
 
-	// No interval group has a pending read error.
+	// The cached read completed without a non-transient API error.
 	cr.health = apiv1.HealthStateTypeHealthy
 	cr.reason = "profiling metrics collected successfully"
 
