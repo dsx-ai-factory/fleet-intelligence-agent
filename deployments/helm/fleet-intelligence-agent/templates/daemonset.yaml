@@ -31,7 +31,8 @@ metadata:
   name: {{ include "fleet-intelligence-agent.fullname" . }}
   labels:
     {{- include "fleet-intelligence-agent.labels" . | nindent 4 }}
-  {{- with include "fleet-intelligence-agent.metadata" (list .Values.commonAnnotations .Values.daemonset.annotations) }}
+  {{- $daemonset := .Values.daemonset | default dict }}
+  {{- with include "fleet-intelligence-agent.metadata" (list .Values.commonAnnotations $daemonset.annotations) }}
   annotations:
     {{- . | nindent 4 }}
   {{- end }}

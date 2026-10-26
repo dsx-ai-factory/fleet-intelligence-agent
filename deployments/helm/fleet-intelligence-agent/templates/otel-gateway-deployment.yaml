@@ -48,7 +48,11 @@ spec:
         {{- if not .Values.otelGateway.enroll.existingSecret }}
         checksum/sak-secret: {{ include (print $.Template.BasePath "/otel-gateway-secret.yaml") . | sha256sum }}
         {{- end }}
-        {{- with omit (.Values.otelGateway.podAnnotations | default dict) "checksum/config" "checksum/sak-secret" }}
+        {{- $podAnnotations := omit (.Values.otelGateway.podAnnotations | default dict) "checksum/config" }}
+        {{- if not .Values.otelGateway.enroll.existingSecret }}
+        {{- $podAnnotations = omit $podAnnotations "checksum/sak-secret" }}
+        {{- end }}
+        {{- with $podAnnotations }}
         {{- include "fleet-intelligence-agent.metadata" (list .) | nindent 8 }}
         {{- end }}
     spec:
