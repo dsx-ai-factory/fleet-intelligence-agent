@@ -81,6 +81,20 @@ func TestValidateNodeUpsertRequest(t *testing.T) {
 	})
 }
 
+func TestValidateNodeUpsertRequest_MissingSystemUUIDIsWarning(t *testing.T) {
+	req := &backendclient.NodeUpsertRequest{
+		Hostname:  "host",
+		MachineID: "machine-1",
+	}
+
+	require.Contains(t, ValidateNodeUpsertRequest(req), Issue{
+		Severity: SeverityWarning,
+		Category: "identity",
+		Field:    "systemUUID",
+		Message:  "field is required",
+	})
+}
+
 func TestValidateNodeUpsertRequest_GPUUUID(t *testing.T) {
 	t.Run("accepts NVIDIA GPU UUID format", func(t *testing.T) {
 		req := &backendclient.NodeUpsertRequest{

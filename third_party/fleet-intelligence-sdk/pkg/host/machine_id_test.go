@@ -5,6 +5,7 @@ package host
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -176,6 +177,48 @@ func TestGetOSMachineIDWithTestData(t *testing.T) {
 	if id != expected {
 		t.Errorf("getOSMachineID() = %q, want %q", id, expected)
 	}
+}
+
+func TestGetSystemUUID(t *testing.T) {
+	tmpDir := t.TempDir()
+	testCases := []struct {
+		name     string
+		content  *string
+		expected string
+		wantErr  bool
+	}{
+		{name: "valid UUID", content: ptr("4c4c4544-004a-3410-804c-c7c04f313434\n"), expected: "4c4c4544-004a-3410-804c-c7c04f313434"},
+		{name: "uppercase UUID is preserved", content: ptr("  4C4C4544-004A-3410-804C-C7C04F313434  "), expected: "4C4C4544-004A-3410-804C-C7C04F313434"},
+		{name: "missing file", wantErr: true},
+		{name: "empty", content: ptr("\n"), wantErr: true},
+		{name: "not a UUID", content: ptr("Not Settable"), wantErr: true},
+		{name: "machine-id form", content: ptr("4c4c4544004a3410804cc7c04f313434"), wantErr: true},
+		{name: "all-zero placeholder", content: ptr("00000000-0000-0000-0000-000000000000"), wantErr: true},
+		{name: "all-f placeholder", content: ptr("FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"), wantErr: true},
+	}
+
+	for i, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			productUUIDPath := filepath.Join(tmpDir, fmt.Sprintf("product_uuid_%d", i))
+			if tc.content != nil {
+				if err := os.WriteFile(productUUIDPath, []byte(*tc.content), 0o644); err != nil {
+					t.Fatalf("Failed to write test file: %v", err)
+				}
+			}
+
+			got, err := getSystemUUID(productUUIDPath)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("getSystemUUID() error = %v, wantErr %v", err, tc.wantErr)
+			}
+			if got != tc.expected {
+				t.Errorf("getSystemUUID() = %q, want %q", got, tc.expected)
+			}
+		})
+	}
+}
+
+func ptr(s string) *string {
+	return &s
 }
 
 func Test_getOSName(t *testing.T) {

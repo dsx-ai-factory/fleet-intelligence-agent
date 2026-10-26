@@ -76,7 +76,8 @@ func ValidateNodeUpsertRequest(req *backendclient.NodeUpsertRequest) []Issue {
 
 	requireNonEmpty(&issues, "identity", "hostname", req.Hostname, SeverityCritical)
 	requireNonEmpty(&issues, "identity", "machineId", req.MachineID, SeverityCritical)
-	requireNonEmpty(&issues, "identity", "systemUUID", req.SystemUUID, SeverityCritical)
+	// systemUUID is empty when the DMI product UUID is unavailable or a placeholder.
+	requireNonEmpty(&issues, "identity", "systemUUID", req.SystemUUID, SeverityWarning)
 
 	validateTimeSanity(&issues, "time", "uptime", req.Uptime)
 	validateTimeSanity(&issues, "time", "enrolledAt", req.EnrolledAt)

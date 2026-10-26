@@ -154,24 +154,29 @@ func getOSName(file string) (string, error) {
 	return name, nil
 }
 
-const (
-	dmiDir       = "/sys/class/dmi"
-	ppcDevTree   = "/proc/device-tree"
-	s390xDevTree = "/etc" // s390/s390x changes
-)
+const dmiDir = "/sys/class/dmi"
 
-// GetSystemUUID returns the system UUID of the machine.
-// ref. https://github.com/google/cadvisor/blob/master/utils/sysfs/sysfs.go#L442
+// GetSystemUUID returns the DMI product UUID of the machine.
+// It returns an empty string and an error when the UUID is missing, invalid, or
+// an all-zero/all-f placeholder. It never falls back to another identifier such
+// as /etc/machine-id, because the backend uses this value as hardware identity
+// evidence.
 func GetSystemUUID() (string, error) {
-	if id, err := os.ReadFile(path.Join(dmiDir, "id", "product_uuid")); err == nil {
-		return strings.TrimSpace(string(id)), nil
-	} else if id, err = os.ReadFile(path.Join(ppcDevTree, "system-id")); err == nil {
-		return strings.TrimSpace(strings.TrimRight(string(id), "\000")), nil
-	} else if id, err = os.ReadFile(path.Join(ppcDevTree, "vm,uuid")); err == nil {
-		return strings.TrimSpace(strings.TrimRight(string(id), "\000")), nil
-	} else if id, err = os.ReadFile(path.Join(s390xDevTree, "machine-id")); err == nil {
-		return strings.TrimSpace(string(id)), nil
-	} else {
+	return getSystemUUID(path.Join(dmiDir, "id", "product_uuid"))
+}
+
+func getSystemUUID(productUUIDPath string) (string, error) {
+	content, err := os.ReadFile(productUUIDPath)
+	if err != nil {
 		return "", err
 	}
+	id := strings.TrimSpace(string(content))
+	parsed, err := uuid.Parse(id)
+	if err != nil || len(id) != 36 {
+		return "", fmt.Errorf("invalid DMI product UUID %q", id)
+	}
+	if parsed == uuid.Nil || parsed == uuid.Max {
+		return "", fmt.Errorf("DMI product UUID %q is a placeholder", id)
+	}
+	return id, nil
 }
