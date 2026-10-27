@@ -92,7 +92,7 @@ func ToNodeUpsertRequest(s *inventory.Snapshot) *backendclient.NodeUpsertRequest
 			AttestationEnabled:          s.AgentConfig.AttestationEnabled,
 			AttestationIntervalSeconds:  s.AgentConfig.AttestationIntervalSeconds,
 		},
-		MachineID:               s.MachineID,
+		MachineID:               s.MachineID, //nolint:staticcheck // Preserve the deprecated OS machine ID wire field.
 		SystemUUID:              s.SystemUUID,
 		BootID:                  s.BootID,
 		Uptime:                  uptime,

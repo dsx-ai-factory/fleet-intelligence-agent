@@ -77,7 +77,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.15.0
           args: --timeout=5m
 
       # otelcol/auth/sakauth is a separate Go module, so the root run above does
@@ -85,7 +85,7 @@ jobs:
       - name: Run golangci-lint (sakauth module)
         uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.15.0
           working-directory: otelcol/auth/sakauth
           args: --timeout=5m
 
