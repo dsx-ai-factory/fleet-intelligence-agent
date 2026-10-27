@@ -94,6 +94,7 @@ func TestClient_UpsertNode(t *testing.T) {
 	resp, err := c.UpsertNode(context.Background(), "node-1", &NodeUpsertRequest{Hostname: "node-1"}, "jwt-token")
 	require.NoError(t, err)
 	require.Equal(t, &NodeUpsertResponse{
+		AgentUUID:   "node-1",
 		NodeUUID:    "node-1",
 		NodeGroup:   "resolved-group",
 		ComputeZone: "resolved-zone",
@@ -281,7 +282,7 @@ func TestClient_ResponseValidationAndErrors(t *testing.T) {
 
 		c := NewWithHTTPClient(mustParseURL(t, server.URL), server.Client())
 		_, err := c.UpsertNode(context.Background(), "node-1", &NodeUpsertRequest{}, "jwt-token")
-		require.ErrorContains(t, err, "missing nodeUUID")
+		require.ErrorContains(t, err, "missing agentUUID or legacy nodeUUID")
 	})
 
 	t.Run("mismatched node uuid in upsert response", func(t *testing.T) {
@@ -384,4 +385,28 @@ func mustParseURL(t *testing.T, raw string) *url.URL {
 	parsed, err := url.Parse(raw)
 	require.NoError(t, err)
 	return parsed
+}
+
+func TestClient_UpsertNodeIdentityAliases(t *testing.T) {
+	for _, tc := range []struct{ name, body, wantError string }{
+		{"preferred", `{"agentUUID":"source-1","nodeGroup":"","computeZone":""}`, ""},
+		{"legacy", `{"nodeUUID":"source-1","nodeGroup":"","computeZone":""}`, ""},
+		{"both", `{"agentUUID":"source-1","nodeUUID":"source-1","nodeGroup":"","computeZone":""}`, ""},
+		{"conflicting aliases", `{"agentUUID":"source-1","nodeUUID":"canonical-1","nodeGroup":"","computeZone":""}`, "disagree"},
+		{"wrong agent", `{"agentUUID":"source-2","nodeGroup":"","computeZone":""}`, "does not match"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(tc.body)) }))
+			defer server.Close()
+			c := NewWithHTTPClient(mustParseURL(t, server.URL), server.Client())
+			response, err := c.UpsertNode(context.Background(), "source-1", &NodeUpsertRequest{MachineID: "os-machine-id"}, "jwt")
+			if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, "source-1", response.AgentUUID)
+			require.Equal(t, response.AgentUUID, response.NodeUUID)
+		})
+	}
 }

@@ -18,7 +18,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
@@ -72,14 +74,16 @@ func metadataCommand(cliContext *cli.Context) error {
 	}
 	log.Logger.Debugw("successfully read metadata")
 
-	for k, v := range metadata {
-		fmt.Printf("%s: %s\n", k, maskMetadataValue(k, v))
-	}
+	writeMetadata(os.Stdout, metadata)
 
 	setKey := cliContext.String("set-key")
 	setValue := cliContext.String("set-value")
 	if setKey == "" || setValue == "" { // no update/insert needed
 		return nil
+	}
+	// Both names address one persisted value, including on older installations.
+	if setKey == "agent_uuid" {
+		setKey = pkgmetadata.MetadataKeyMachineID
 	}
 
 	// Check if we have write permission to the state file when setting metadata
@@ -109,6 +113,24 @@ func metadataCommand(cliContext *cli.Context) error {
 
 	fmt.Printf("%s successfully updated metadata\n", cmdutil.CheckMark)
 	return nil
+}
+
+// writeMetadata exposes the preferred agent identity name without migrating the
+// storage key used by enrollment, inventory, attestation, and telemetry.
+func writeMetadata(w io.Writer, metadata map[string]string) {
+	keys := make([]string, 0, len(metadata))
+	if value, ok := metadata[pkgmetadata.MetadataKeyMachineID]; ok {
+		fmt.Fprintf(w, "agent_uuid: %s\n", value)
+	}
+	for key := range metadata {
+		if key != "agent_uuid" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		fmt.Fprintf(w, "%s: %s\n", key, maskMetadataValue(key, metadata[key]))
+	}
 }
 
 func maskMetadataValue(key, value string) string {

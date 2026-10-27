@@ -146,7 +146,7 @@ func TestToNodeUpsertRequest(t *testing.T) {
 
 	require.NotNil(t, req)
 	require.Equal(t, "host-a", req.Hostname)
-	require.Equal(t, "machine-id", req.MachineID)
+	require.Equal(t, "machine-id", req.MachineID) //nolint:staticcheck // Preserve the deprecated OS machine ID contract.
 	require.NotNil(t, req.Uptime)
 	require.Equal(t, bootTime.UTC(), *req.Uptime)
 	require.Equal(t, int64(30), req.AgentConfig.TotalComponents)

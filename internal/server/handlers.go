@@ -235,6 +235,8 @@ func (g *globalHandler) machineInfo(c *gin.Context) {
 	}
 
 	info := gin.H{
+		"agent_uuid": g.gpudInstance.MachineID,
+		// Deprecated: machine_id is the agent UUID, not the OS machine ID.
 		"machine_id": g.gpudInstance.MachineID,
 		"service":    "fleetint",
 	}

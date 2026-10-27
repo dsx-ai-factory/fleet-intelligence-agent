@@ -105,6 +105,7 @@ func (c *client) UpsertNode(ctx context.Context, nodeUUID string, req *NodeUpser
 		return nil, fmt.Errorf("node upsert request cannot be nil")
 	}
 	var wireResp struct {
+		AgentUUID   string  `json:"agentUUID"`
 		NodeUUID    string  `json:"nodeUUID"`
 		ComputeZone *string `json:"computeZone"`
 		NodeGroup   *string `json:"nodeGroup"`
@@ -112,11 +113,18 @@ func (c *client) UpsertNode(ctx context.Context, nodeUUID string, req *NodeUpser
 	if err := c.doJSON(ctx, http.MethodPut, []string{"v1", "agent", "nodes", nodeUUID}, jwt, req, &wireResp); err != nil {
 		return nil, err
 	}
-	if wireResp.NodeUUID == "" {
-		return nil, fmt.Errorf("node upsert response missing nodeUUID field")
+	if wireResp.AgentUUID != "" && wireResp.NodeUUID != "" && wireResp.AgentUUID != wireResp.NodeUUID {
+		return nil, fmt.Errorf("node upsert response agentUUID and deprecated nodeUUID disagree")
 	}
-	if wireResp.NodeUUID != nodeUUID {
-		return nil, fmt.Errorf("node upsert response nodeUUID %q does not match requested nodeUUID %q", wireResp.NodeUUID, nodeUUID)
+	agentUUID := wireResp.AgentUUID
+	if agentUUID == "" {
+		agentUUID = wireResp.NodeUUID
+	}
+	if agentUUID == "" {
+		return nil, fmt.Errorf("node upsert response missing agentUUID or legacy nodeUUID field")
+	}
+	if agentUUID != nodeUUID {
+		return nil, fmt.Errorf("node upsert response agentUUID %q does not match requested nodeUUID %q", agentUUID, nodeUUID)
 	}
 	if wireResp.NodeGroup == nil {
 		return nil, fmt.Errorf("node upsert response missing nodeGroup field")
@@ -125,7 +133,8 @@ func (c *client) UpsertNode(ctx context.Context, nodeUUID string, req *NodeUpser
 		return nil, fmt.Errorf("node upsert response missing computeZone field")
 	}
 	return &NodeUpsertResponse{
-		NodeUUID:    wireResp.NodeUUID,
+		AgentUUID:   agentUUID,
+		NodeUUID:    agentUUID,
 		NodeGroup:   *wireResp.NodeGroup,
 		ComputeZone: *wireResp.ComputeZone,
 	}, nil

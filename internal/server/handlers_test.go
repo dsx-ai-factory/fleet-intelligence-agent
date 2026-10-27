@@ -563,7 +563,8 @@ func TestMachineInfo(t *testing.T) {
 				var response map[string]interface{}
 				err := json.Unmarshal(body, &response)
 				require.NoError(t, err)
-				assert.Equal(t, "test-machine-id", response["machine_id"])
+				assert.Equal(t, "test-machine-id", response["agent_uuid"])
+				assert.Equal(t, response["agent_uuid"], response["machine_id"])
 				assert.Equal(t, "fleetint", response["service"])
 				assert.Equal(t, false, response["nvidia_available"])
 			},

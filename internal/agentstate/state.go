@@ -40,10 +40,11 @@ type State interface {
 	GetSAK(ctx context.Context) (value string, ok bool, err error)
 	SetSAK(ctx context.Context, value string) error
 
-	// GetNodeUUID reads the committed node UUID without creating one.
+	// GetNodeUUID reads the committed agent UUID without creating one.
+	// The legacy accessor name does not refer to a backend canonical node UUID.
 	GetNodeUUID(ctx context.Context) (value string, ok bool, err error)
 	SetNodeUUID(ctx context.Context, value string) error
-	// GetOrCreateNodeUUID creates and commits the node UUID when no value exists.
+	// GetOrCreateNodeUUID creates and commits the agent UUID when no value exists.
 	GetOrCreateNodeUUID(ctx context.Context, create func() (string, error)) (value string, created bool, err error)
 
 	GetEnrollmentTime(ctx context.Context) (value time.Time, ok bool, err error)

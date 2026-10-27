@@ -13,9 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package nodeidentity initializes and persists the stable node UUID used by
+// Package nodeidentity initializes and persists the stable agent UUID used by
 // enrollment, inventory, attestation, and metrics workflows.
-// The persisted node UUID is stored in the legacy machine ID metadata key.
+// The persisted agent UUID is stored in the legacy machine_id metadata key.
+// It is separate from the backend canonical nodeUUID and the OS machine ID.
 package nodeidentity
 
 import (
@@ -39,7 +40,7 @@ var (
 	newNodeUUID      = uuid.NewString
 )
 
-// EnsureNodeUUID returns the persisted node UUID, or initializes and persists it
+// EnsureNodeUUID returns the persisted agent UUID, or initializes and persists it
 // from the reported system UUID with a random UUID fallback.
 func EnsureNodeUUID(ctx context.Context, state State) (string, error) {
 	if state == nil {
@@ -54,7 +55,7 @@ func EnsureNodeUUID(ctx context.Context, state State) (string, error) {
 				"error", err,
 				"generated_id", nodeUUID)
 		} else {
-			log.Logger.Infow("Initialized agent ID from hardware UUID", "machine_id", nodeUUID)
+			log.Logger.Infow("Initialized agent ID from hardware UUID", "agent_uuid", nodeUUID)
 		}
 		return nodeUUID, nil
 	})
@@ -62,9 +63,9 @@ func EnsureNodeUUID(ctx context.Context, state State) (string, error) {
 		return "", fmt.Errorf("failed to ensure node UUID: %w", err)
 	}
 	if created {
-		log.Logger.Infow("Persisted agent ID to database", "machine_id", nodeUUID)
+		log.Logger.Infow("Persisted agent ID to database", "agent_uuid", nodeUUID)
 	} else {
-		log.Logger.Infow("Using persisted agent ID from database", "machine_id", nodeUUID)
+		log.Logger.Infow("Using persisted agent ID from database", "agent_uuid", nodeUUID)
 	}
 	return nodeUUID, nil
 }

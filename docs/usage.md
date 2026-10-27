@@ -47,7 +47,7 @@ Shows detailed information about the machine:
 - CUDA runtime version
 - Operating system and kernel version
 - Network interfaces
-- System UUID and machine ID
+- Hardware system UUID and the deprecated OS machine ID
 
 ### View/Update Metadata
 
@@ -60,6 +60,19 @@ sudo fleetint metadata --set-key="key" --set-value="value"
 ```
 
 Used to view or update the agent's metadata store, including remote export configuration.
+
+`agent_uuid` identifies the in-band reporting source. On first initialization,
+the agent uses a valid SMBIOS/DMI system UUID, or generates a UUID when that
+value is unavailable or a placeholder. In both cases it persists the result and
+reuses it across starts. `machine_id` remains a deprecated metadata alias for
+the same agent UUID; both names address the existing persisted value.
+
+The backend assigns a separate canonical `nodeUUID` to the node. The hardware
+`systemUUID` has no fallback and may be absent. The deprecated inventory JSON
+`machineId` (and `machine-info` JSON `machineID`) is the OS identifier from
+`/etc/machine-id` or `/var/lib/dbus/machine-id`; it is not an agent UUID and does
+not establish node identity. Existing telemetry `machine_id` labels retain the
+agent UUID for compatibility.
 
 ### Compact State Database
 

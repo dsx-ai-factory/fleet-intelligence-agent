@@ -75,7 +75,7 @@ func ValidateNodeUpsertRequest(req *backendclient.NodeUpsertRequest) []Issue {
 	}
 
 	requireNonEmpty(&issues, "identity", "hostname", req.Hostname, SeverityCritical)
-	requireNonEmpty(&issues, "identity", "machineId", req.MachineID, SeverityCritical)
+	requireNonEmpty(&issues, "identity", "machineId", req.MachineID, SeverityCritical) //nolint:staticcheck // Preserve the deprecated OS machine ID contract.
 	// systemUUID is empty when the DMI product UUID is unavailable or a placeholder.
 	requireNonEmpty(&issues, "identity", "systemUUID", req.SystemUUID, SeverityWarning)
 
@@ -83,7 +83,7 @@ func ValidateNodeUpsertRequest(req *backendclient.NodeUpsertRequest) []Issue {
 	validateTimeSanity(&issues, "time", "enrolledAt", req.EnrolledAt)
 
 	validateLen(&issues, "length", "hostname", req.Hostname, 255)
-	validateLen(&issues, "length", "machineId", req.MachineID, 255)
+	validateLen(&issues, "length", "machineId", req.MachineID, 255) //nolint:staticcheck // Preserve the deprecated OS machine ID contract.
 	validateLen(&issues, "length", "systemUUID", req.SystemUUID, 255)
 	validateLen(&issues, "length", "bootID", req.BootID, 255)
 	validateLen(&issues, "length", "kernelVersion", req.KernelVersion, 255)

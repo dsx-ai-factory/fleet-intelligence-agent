@@ -103,7 +103,7 @@ func GetMachineInfo(devices []nvidiadcgm.DeviceInfo) (*MachineInfo, error) {
 		OSImage:                 gpudInfo.OSImage,
 		OperatingSystem:         gpudInfo.OperatingSystem,
 		SystemUUID:              gpudInfo.SystemUUID,
-		MachineID:               gpudInfo.MachineID,
+		MachineID:               gpudInfo.MachineID, //nolint:staticcheck // Preserve the deprecated OS machine ID contract.
 		BootID:                  gpudInfo.BootID,
 		Hostname:                gpudInfo.Hostname,
 		Uptime:                  gpudInfo.Uptime,

@@ -77,6 +77,19 @@ flowchart LR
 
 ## Data flow inside the agent
 
+### Identity
+
+The in-band source is identified by its persisted `agentUUID`. It is initialized
+from a valid SMBIOS/DMI system UUID or a generated fallback and then reused.
+`systemUUID` reports only hardware identity, with no fallback. The backend's
+canonical `nodeUUID` identifies the node that this source is associated with.
+
+The local metadata command exposes `agent_uuid` and its deprecated `machine_id`
+alias from one stored value. Inventory and attestation requests continue using
+that source UUID. Backend acknowledgements expose `agentUUID`; their deprecated
+`nodeUUID` field echoes the same source UUID. The deprecated inventory `machineId`
+field contains the OS machine ID and is not matching evidence.
+
 ```mermaid
 flowchart TD
   INPUT["GPU + DCGM + System signals"] --> COLLECT["Collectors"]

@@ -300,7 +300,8 @@ type MachineInfo struct {
 	OperatingSystem string `json:"operatingSystem,omitempty"`
 	// SystemUUID comes from https://github.com/google/cadvisor/blob/master/utils/sysfs/sysfs.go#L442
 	SystemUUID string `json:"systemUUID,omitempty"`
-	// MachineID is collected by GPUd. It comes from /etc/machine-id or /var/lib/dbus/machine-id
+	// Deprecated: MachineID is the OS machine ID from /etc/machine-id or /var/lib/dbus/machine-id.
+	// It is not the persisted agent UUID and must not be used for node identity.
 	MachineID string `json:"machineID,omitempty"`
 	// BootID is collected by GPUd.
 	BootID string `json:"bootID,omitempty"`
