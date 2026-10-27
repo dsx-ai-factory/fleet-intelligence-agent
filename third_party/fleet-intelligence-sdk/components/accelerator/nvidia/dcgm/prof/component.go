@@ -307,7 +307,6 @@ func (c *component) Check() (result components.CheckResult) {
 
 	devices := c.dcgmInstance.GetDevices()
 	var readErr error
-	readComplete := len(devices) > 0
 	for _, device := range devices {
 		if c.ctx.Err() != nil {
 			break
@@ -333,7 +332,6 @@ func (c *component) Check() (result components.CheckResult) {
 
 			// Check if this is a transient error (benign, skip)
 			if nvidiadcgm.IsTransientError(err) {
-				readComplete = false
 				log.Logger.Infow("DCGM transient error, will retry",
 					"component", "prof",
 					"deviceID", device.ID,
@@ -458,17 +456,6 @@ func (c *component) Check() (result components.CheckResult) {
 	if c.ctx.Err() != nil {
 		return cr
 	}
-	if readErr == nil && !readComplete {
-		// A transient or empty batch cannot verify recovery. Reuse the last
-		// completed result until a complete cached read succeeds.
-		c.lastMu.RLock()
-		previous := c.lastCheckResult
-		c.lastMu.RUnlock()
-		if previous != nil {
-			cr = previous
-			return cr
-		}
-	}
 	cr.err = readErr
 	if cr.err != nil {
 		if nvidiadcgm.IsUnhealthyAPIError(cr.err) {
@@ -481,7 +468,8 @@ func (c *component) Check() (result components.CheckResult) {
 		return cr
 	}
 
-	// The cached read completed without a non-transient API error.
+	// Profiling metrics are informational. Keep the existing Healthy result
+	// when reads are empty or skipped because of transient errors.
 	cr.health = apiv1.HealthStateTypeHealthy
 	cr.reason = "profiling metrics collected successfully"
 

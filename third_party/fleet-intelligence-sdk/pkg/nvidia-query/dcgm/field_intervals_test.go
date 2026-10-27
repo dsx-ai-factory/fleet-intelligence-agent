@@ -426,7 +426,7 @@ func TestFieldWatchesRetainsRollbackCleanupFailure(t *testing.T) {
 	require.ElementsMatch(t, *created, *destroyed)
 }
 
-func TestFieldCacheTransientReadDoesNotClearFailure(t *testing.T) {
+func TestFieldCacheTransientAndEmptyReadsClearFailure(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		inst := &intervalCacheInstance{mockDCGMInstance: mockDCGMInstance{dcgmExists: true, devices: []DeviceInfo{{ID: 1}}}, fields: []dcgm.Short{100}}
 		readErr := fmt.Errorf("read failed")
@@ -439,13 +439,22 @@ func TestFieldCacheTransientReadDoesNotClearFailure(t *testing.T) {
 		time.Sleep(30 * time.Second)
 		readErr = fmt.Errorf("dcgm request failed with error code %d", dcgm.DCGM_ST_NO_DATA)
 		require.NoError(t, fc.Poll(), "transient errors do not create a new poll error")
-		_, err := fc.GetResult(inst.fields)
-		require.ErrorContains(t, err, "read failed", "an unverified recovery must preserve the earlier failure")
+		values, err := fc.GetResult(inst.fields)
+		require.NoError(t, err, "transient errors do not retain the previous poll error")
+		require.Empty(t, values, "failed device reads do not retain stale samples")
 		time.Sleep(30 * time.Second)
+		readErr = fmt.Errorf("read failed")
+		require.Error(t, fc.Poll())
 		readErr = nil
 		require.NoError(t, fc.Poll())
 		_, err = fc.GetResult(inst.fields)
-		require.NoError(t, err)
+		require.NoError(t, err, "an empty value list clears the previous poll error")
+		readErr = fmt.Errorf("read failed")
+		require.Error(t, fc.Poll())
+		inst.devices = nil
+		require.NoError(t, fc.Poll())
+		_, err = fc.GetResult(inst.fields)
+		require.NoError(t, err, "a poll without devices clears the previous poll error")
 	})
 }
 

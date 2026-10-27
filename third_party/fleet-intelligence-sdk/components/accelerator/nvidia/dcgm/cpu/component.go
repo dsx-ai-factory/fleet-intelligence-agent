@@ -142,6 +142,8 @@ func (c *component) setupFieldWatchingIfReady() {
 		return
 	}
 	c.cpuGroupHandle = cpuGroupHandle
+	// On incomplete setup, release field watches and groups before the CPU
+	// entity group. If field cleanup fails, retain the CPU group for a retry.
 	defer func() {
 		if !c.fieldSetupComplete {
 			if err := c.fieldWatches.Close(); err != nil {
@@ -162,7 +164,8 @@ func (c *component) setupFieldWatchingIfReady() {
 	if c.ctx.Err() != nil {
 		return
 	}
-	// Setup rolls back partial field groups and watches before CPU group cleanup.
+	// Start sampling the CPU fields. On failure, the deferred cleanup above
+	// releases partial resources.
 	if err := c.fieldWatches.Setup(c.fieldGroupName, cpuGroupHandle); err != nil {
 		c.setupDegradedReason = fmt.Sprintf("failed to set up DCGM CPU field watching: %v", err)
 		return

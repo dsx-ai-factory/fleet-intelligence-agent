@@ -405,7 +405,7 @@ func TestStoppedBeforeFirstCheckReturnsInitializing(t *testing.T) {
 	}
 }
 
-func TestProfilingRetainsFailureUntilCompleteCachedRead(t *testing.T) {
+func TestProfilingTransientAndEmptyReadsReturnHealthy(t *testing.T) {
 	comp, err := New(&components.GPUdInstance{RootCtx: context.Background()})
 	require.NoError(t, err)
 	c := comp.(*component)
@@ -419,9 +419,14 @@ func TestProfilingRetainsFailureUntilCompleteCachedRead(t *testing.T) {
 		return nil, readErr
 	}
 	require.Equal(t, apiv1.HealthStateTypeUnhealthy, c.Check().HealthStateType())
-	states := c.LastHealthStates()
 	readErr = fmt.Errorf("dcgm request failed with error code %d", dcgm.DCGM_ST_NO_DATA)
-	require.Equal(t, states, c.Check().HealthStates(), "transient cache unavailability cannot verify recovery")
+	require.Equal(t, apiv1.HealthStateTypeHealthy, c.Check().HealthStateType(), "transient errors are skipped")
+	readErr = fmt.Errorf("dcgm request failed with error code %d", dcgm.DCGM_ST_NVML_ERROR)
+	require.Equal(t, apiv1.HealthStateTypeUnhealthy, c.Check().HealthStateType())
 	readErr = nil
-	require.Equal(t, apiv1.HealthStateTypeHealthy, c.Check().HealthStateType())
+	require.Equal(t, apiv1.HealthStateTypeHealthy, c.Check().HealthStateType(), "an empty value list is not an API error")
+	readErr = fmt.Errorf("dcgm request failed with error code %d", dcgm.DCGM_ST_NVML_ERROR)
+	require.Equal(t, apiv1.HealthStateTypeUnhealthy, c.Check().HealthStateType())
+	c.dcgmInstance = &mockDCGMInstance{dcgmExists: true}
+	require.Equal(t, apiv1.HealthStateTypeHealthy, c.Check().HealthStateType(), "no devices produces no read error")
 }

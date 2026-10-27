@@ -36,8 +36,8 @@ type FieldValueCache struct {
 	mu         sync.RWMutex
 	values     map[uint]map[dcgm.Short]dcgm.FieldValue_v1 // deviceID -> fieldID -> value
 	lastUpdate time.Time
-	// lastError records the last setup or cached-read error. A complete
-	// successful poll clears it; all selected fields are read together.
+	// lastError records setup or non-transient cached-read errors. A poll with
+	// no non-transient read error clears it, even if devices were skipped.
 	lastError error
 
 	// fieldWatches owns the DCGM sampling groups for registered fields.
@@ -96,17 +96,13 @@ func (fc *FieldValueCache) SetupFieldWatching() error {
 // SetupFieldWatchingWithName uses a custom base name for the sampling groups.
 // Each group gets a numeric suffix. Tests can use unique names to avoid conflicts.
 func (fc *FieldValueCache) SetupFieldWatchingWithName(fieldGroupName string) error {
+	fc.registrationMu.Lock()
+	defer fc.registrationMu.Unlock()
+
 	fc.mu.Lock()
 	fc.fieldGroupName = fieldGroupName
 	fc.mu.Unlock()
 
-	return fc.ensureFieldWatchingSetup()
-}
-
-// ensureFieldWatchingSetup serializes public setup calls with polling and cleanup.
-func (fc *FieldValueCache) ensureFieldWatchingSetup() error {
-	fc.registrationMu.Lock()
-	defer fc.registrationMu.Unlock()
 	return fc.setupLocked()
 }
 
@@ -213,8 +209,9 @@ func (fc *FieldValueCache) pollLoop() {
 
 // Poll reads all selected fields from DCGM's cache. Used by background polling and scan mode.
 // Reads do not force native sampling. Extended samples can therefore repeat across
-// polls, with their original DCGM timestamps. Results are published as one batch;
-// a successful batch with no skipped devices clears the previous collection error.
+// polls, with their original DCGM timestamps. Results are published as one batch.
+// Transient read errors are skipped. A poll without a non-transient read error
+// clears the previous collection error, including when no devices return values.
 func (fc *FieldValueCache) Poll() error {
 	fc.registrationMu.Lock()
 	defer fc.registrationMu.Unlock()
@@ -257,7 +254,6 @@ func (fc *FieldValueCache) Poll() error {
 	devices := fc.instance.GetDevices()
 	newValues := make(map[uint][]dcgm.FieldValue_v1, len(devices))
 	var pollErr error
-	readComplete := len(devices) > 0
 
 	for _, device := range devices {
 		if err := fc.ctx.Err(); err != nil {
@@ -269,7 +265,6 @@ func (fc *FieldValueCache) Poll() error {
 
 			// Check if this is a transient error (benign, don't store)
 			if IsTransientError(err) {
-				readComplete = false
 				log.Logger.Infow("DCGM transient error, will retry",
 					"component", "field_cache",
 					"deviceID", device.ID,
@@ -309,11 +304,7 @@ func (fc *FieldValueCache) Poll() error {
 		}
 	}
 	fc.lastUpdate = time.Now()
-	if pollErr != nil {
-		fc.lastError = pollErr
-	} else if readComplete {
-		fc.lastError = nil
-	}
+	fc.lastError = pollErr
 	fc.mu.Unlock()
 
 	log.Logger.Debugw("field values cached", "devices", len(devices), "fields", len(watchedFields))
