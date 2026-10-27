@@ -28,9 +28,10 @@ func TestWriteMetadataPreservesAgentIdentityAndMasksSecrets(t *testing.T) {
 		"machine_id": "persisted-agent-uuid",
 		"sak_token":  "secret-token-value",
 		"hostname":   "node-01",
+		"agent":      "custom-agent-label",
 	}
 	var out bytes.Buffer
 	writeMetadata(&out, metadata)
-	require.Equal(t, "agent_uuid: persisted-agent-uuid\nhostname: node-01\nmachine_id: persisted-agent-uuid\nsak_token: "+pkgmetadata.MaskToken("secret-token-value")+"\n", out.String())
+	require.Equal(t, "agent: custom-agent-label\nagent_uuid: persisted-agent-uuid\nhostname: node-01\nmachine_id: persisted-agent-uuid\nsak_token: "+pkgmetadata.MaskToken("secret-token-value")+"\n", out.String())
 	require.NotContains(t, metadata, "agent_uuid", "display alias must not migrate or duplicate persisted state")
 }

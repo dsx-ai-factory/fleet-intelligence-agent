@@ -65,7 +65,12 @@ Used to view or update the agent's metadata store, including remote export confi
 the agent uses a valid SMBIOS/DMI system UUID, or generates a UUID when that
 value is unavailable or a placeholder. In both cases it persists the result and
 reuses it across starts. `machine_id` remains a deprecated metadata alias for
-the same agent UUID; both names address the existing persisted value.
+the same agent UUID.
+
+**Warning:** Setting either `agent_uuid` or `machine_id` with `--set-key`
+changes the persisted reporting identity. The backend treats subsequent reports
+as a new reporting source. Preserve this value during upgrades and routine
+configuration changes.
 
 The backend assigns a separate canonical `nodeUUID` to the node. The hardware
 `systemUUID` has no fallback and may be absent. The deprecated inventory JSON

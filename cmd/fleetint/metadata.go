@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"sort"
 	"time"
@@ -118,18 +119,17 @@ func metadataCommand(cliContext *cli.Context) error {
 // writeMetadata exposes the preferred agent identity name without migrating the
 // storage key used by enrollment, inventory, attestation, and telemetry.
 func writeMetadata(w io.Writer, metadata map[string]string) {
-	keys := make([]string, 0, len(metadata))
+	values := maps.Clone(metadata)
 	if value, ok := metadata[pkgmetadata.MetadataKeyMachineID]; ok {
-		fmt.Fprintf(w, "agent_uuid: %s\n", value)
+		values["agent_uuid"] = value
 	}
-	for key := range metadata {
-		if key != "agent_uuid" {
-			keys = append(keys, key)
-		}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		fmt.Fprintf(w, "%s: %s\n", key, maskMetadataValue(key, metadata[key]))
+		fmt.Fprintf(w, "%s: %s\n", key, maskMetadataValue(key, values[key]))
 	}
 }
 
