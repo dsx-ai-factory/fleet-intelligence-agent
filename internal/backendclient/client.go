@@ -105,18 +105,11 @@ func (c *client) UpsertNode(ctx context.Context, agentUUID string, req *NodeUpse
 		return nil, fmt.Errorf("node upsert request cannot be nil")
 	}
 	var wireResp struct {
-		AgentUUID   string  `json:"agentUUID"`
 		ComputeZone *string `json:"computeZone"`
 		NodeGroup   *string `json:"nodeGroup"`
 	}
 	if err := c.doJSON(ctx, http.MethodPut, []string{"v1", "agent", "nodes", agentUUID}, jwt, req, &wireResp); err != nil {
 		return nil, err
-	}
-	if wireResp.AgentUUID == "" {
-		return nil, fmt.Errorf("node upsert response missing agentUUID field")
-	}
-	if wireResp.AgentUUID != agentUUID {
-		return nil, fmt.Errorf("node upsert response agentUUID %q does not match requested agentUUID %q", wireResp.AgentUUID, agentUUID)
 	}
 	if wireResp.NodeGroup == nil {
 		return nil, fmt.Errorf("node upsert response missing nodeGroup field")
@@ -125,7 +118,6 @@ func (c *client) UpsertNode(ctx context.Context, agentUUID string, req *NodeUpse
 		return nil, fmt.Errorf("node upsert response missing computeZone field")
 	}
 	return &NodeUpsertResponse{
-		AgentUUID:   wireResp.AgentUUID,
 		NodeGroup:   *wireResp.NodeGroup,
 		ComputeZone: *wireResp.ComputeZone,
 	}, nil

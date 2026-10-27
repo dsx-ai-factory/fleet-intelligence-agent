@@ -89,12 +89,6 @@ func TestBackendNonceProviderErrors(t *testing.T) {
 	_, _, _, err := NewBackendNonceProvider(nil).GetNonce(context.Background(), "node", "jwt")
 	require.ErrorContains(t, err, "backend client")
 
-	client := &testNonceClient{}
-	_, _, _, err = NewBackendNonceProvider(client).GetNonce(context.Background(), "", "jwt")
-	require.ErrorContains(t, err, "agent UUID")
-	_, _, _, err = NewBackendNonceProvider(client).GetNonce(context.Background(), "node", "")
-	require.ErrorContains(t, err, "jwt")
-
 	nilClient := &nilNonceClient{}
 	_, _, _, err = NewBackendNonceProvider(nilClient).GetNonce(context.Background(), "node", "jwt")
 	require.ErrorContains(t, err, "nil")

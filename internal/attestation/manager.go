@@ -280,9 +280,6 @@ func (s *backendSubmitter) Submit(ctx context.Context, result *Result, jwt strin
 	if result == nil {
 		return fmt.Errorf("attestation submission requires result")
 	}
-	if jwt == "" {
-		return fmt.Errorf("attestation submission requires jwt")
-	}
 	req := toAttestationRequest(result)
 	outbound.LogIssues("attestation-backend-submitter", "AttestationRequest", outbound.ValidateAttestationRequest(req), "agent_uuid", result.AgentUUID)
 	return s.client.SubmitAttestation(ctx, result.AgentUUID, req, jwt)

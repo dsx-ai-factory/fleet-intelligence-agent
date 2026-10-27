@@ -41,13 +41,6 @@ func (p *backendNonceProvider) GetNonce(ctx context.Context, agentUUID, jwt stri
 	if p.client == nil {
 		return "", time.Time{}, "", fmt.Errorf("nonce provider requires backend client")
 	}
-	if agentUUID == "" {
-		return "", time.Time{}, "", fmt.Errorf("nonce provider requires agent UUID")
-	}
-	if jwt == "" {
-		return "", time.Time{}, "", fmt.Errorf("nonce provider requires jwt")
-	}
-
 	resp, err := p.client.GetNonce(ctx, agentUUID, jwt)
 	if err != nil {
 		return "", time.Time{}, "", err

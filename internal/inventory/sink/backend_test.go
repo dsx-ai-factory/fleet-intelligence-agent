@@ -163,7 +163,7 @@ func (f *fakeClient) UpsertNode(_ context.Context, agentUUID string, req *backen
 	f.req = req
 	f.jwt = jwt
 	if f.resp == nil && f.err == nil {
-		f.resp = &backendclient.NodeUpsertResponse{AgentUUID: agentUUID}
+		f.resp = &backendclient.NodeUpsertResponse{}
 	}
 	return f.resp, f.err
 }
@@ -209,7 +209,6 @@ func TestBackendSinkExportErrors(t *testing.T) {
 func TestBackendSinkExportUsesState(t *testing.T) {
 	enrollmentTime := time.Date(2026, 5, 6, 15, 0, 0, 0, time.UTC)
 	client := &fakeClient{resp: &backendclient.NodeUpsertResponse{
-		AgentUUID:   "node-1",
 		NodeGroup:   "resolved-group",
 		ComputeZone: "resolved-zone",
 	}}
@@ -297,7 +296,6 @@ func TestBackendSinkExportAtomicallyPersistsChangedResolvedMembership(t *testing
 				computeZone: tc.currentZone,
 			}
 			client := &fakeClient{resp: &backendclient.NodeUpsertResponse{
-				AgentUUID:   "node-1",
 				NodeGroup:   tc.resolvedGroup,
 				ComputeZone: tc.resolvedZone,
 			}}
@@ -359,7 +357,6 @@ func TestBackendSinkExportReturnsResolvedMembershipPersistenceErrors(t *testing.
 		setComputeErr: errors.New("compute zone write failed"),
 	}
 	client := &fakeClient{resp: &backendclient.NodeUpsertResponse{
-		AgentUUID:   "node-1",
 		NodeGroup:   "resolved-group",
 		ComputeZone: "resolved-zone",
 	}}

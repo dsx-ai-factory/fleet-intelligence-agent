@@ -43,7 +43,6 @@ type NodeUpsertRequest struct {
 
 // NodeUpsertResponse is the backend-resolved node membership after inventory upsert.
 type NodeUpsertResponse struct {
-	AgentUUID   string `json:"agentUUID"`
 	ComputeZone string `json:"computeZone"`
 	NodeGroup   string `json:"nodeGroup"`
 }

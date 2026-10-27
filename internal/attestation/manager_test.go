@@ -227,8 +227,6 @@ func TestManagerHelpersAndSubmitterErrors(t *testing.T) {
 	require.ErrorContains(t, err, "backend client")
 	err = NewBackendSubmitter(&recordingClient{}).Submit(context.Background(), nil, "jwt")
 	require.ErrorContains(t, err, "requires result")
-	err = NewBackendSubmitter(&recordingClient{}).Submit(context.Background(), &Result{}, "")
-	require.ErrorContains(t, err, "requires jwt")
 }
 
 func TestBackendSubmitterValidationDoesNotBlockSubmit(t *testing.T) {
