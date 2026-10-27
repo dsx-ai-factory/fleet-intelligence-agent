@@ -25,10 +25,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentidentity"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
-	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/nodeidentity"
 )
 
 type fakeBackendClient struct {
@@ -61,11 +61,11 @@ func (f *fakeBackendClient) SubmitAttestation(context.Context, string, *backendc
 func TestEnrollWorkflow(t *testing.T) {
 	originalFactory := newBackendClient
 	originalSync := syncInventoryAfterEnroll
-	originalEnsure := ensureNodeUUID
+	originalEnsure := ensureAgentUUID
 	t.Cleanup(func() {
 		newBackendClient = originalFactory
 		syncInventoryAfterEnroll = originalSync
-		ensureNodeUUID = originalEnsure
+		ensureAgentUUID = originalEnsure
 	})
 
 	client := &fakeBackendClient{enrollJWT: "jwt-token"}
@@ -76,13 +76,13 @@ func TestEnrollWorkflow(t *testing.T) {
 
 	syncCalled := false
 	ensureCalled := false
-	ensureNodeUUID = func(ctx context.Context, state nodeidentity.State) (string, error) {
+	ensureAgentUUID = func(ctx context.Context, state agentidentity.State) (string, error) {
 		require.NotNil(t, state)
 		ensureCalled = true
 		return "4c4c4544-0053-5210-8038-c8c04f583034", nil
 	}
 	syncInventoryAfterEnroll = func(ctx context.Context, cfg *config.Config) error {
-		require.True(t, ensureCalled, "node UUID should be initialized before post-enroll inventory sync")
+		require.True(t, ensureCalled, "agent UUID should be initialized before post-enroll inventory sync")
 		syncCalled = true
 		return nil
 	}
@@ -351,29 +351,29 @@ func TestEnrollWorkflowErrors(t *testing.T) {
 		require.ErrorContains(t, err, "enroll boom")
 	})
 
-	t.Run("node UUID initialization", func(t *testing.T) {
+	t.Run("agent UUID initialization", func(t *testing.T) {
 		originalFactory := newBackendClient
-		originalEnsure := ensureNodeUUID
+		originalEnsure := ensureAgentUUID
 		originalSync := syncInventoryAfterEnroll
 		originalStore := storeEnrollmentConfig
 		t.Cleanup(func() {
 			newBackendClient = originalFactory
-			ensureNodeUUID = originalEnsure
+			ensureAgentUUID = originalEnsure
 			syncInventoryAfterEnroll = originalSync
 			storeEnrollmentConfig = originalStore
 		})
 		newBackendClient = func(rawBaseURL string) (backendclient.Client, error) {
 			return &fakeBackendClient{enrollJWT: "jwt-token"}, nil
 		}
-		ensureNodeUUID = func(context.Context, nodeidentity.State) (string, error) {
+		ensureAgentUUID = func(context.Context, agentidentity.State) (string, error) {
 			return "", errors.New("identity store failed")
 		}
 		syncInventoryAfterEnroll = func(context.Context, *config.Config) error {
-			t.Fatal("inventory sync should not run when node UUID initialization fails")
+			t.Fatal("inventory sync should not run when agent UUID initialization fails")
 			return nil
 		}
 		storeEnrollmentConfig = func(context.Context, string, string, string, time.Time, EnrollMetadata) error {
-			t.Fatal("enrollment metadata should not be stored when node UUID initialization fails")
+			t.Fatal("enrollment metadata should not be stored when agent UUID initialization fails")
 			return nil
 		}
 
@@ -381,7 +381,7 @@ func TestEnrollWorkflowErrors(t *testing.T) {
 		t.Setenv("HOME", tmpHome)
 
 		err := Enroll(context.Background(), "https://example.com", "sak-token")
-		require.ErrorContains(t, err, "failed to initialize node UUID")
+		require.ErrorContains(t, err, "failed to initialize agent UUID")
 	})
 
 	t.Run("localhost legacy endpoint allowed", func(t *testing.T) {

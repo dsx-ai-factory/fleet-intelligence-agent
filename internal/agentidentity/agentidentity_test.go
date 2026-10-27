@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package nodeidentity
+package agentidentity
 
 import (
 	"context"
@@ -25,20 +25,20 @@ import (
 )
 
 type fakeState struct {
-	nodeUUID string
-	ok       bool
-	err      error
-	calls    int
-	commitAs string
+	agentUUID string
+	ok        bool
+	err       error
+	calls     int
+	commitAs  string
 }
 
-func (s *fakeState) GetOrCreateNodeUUID(_ context.Context, create func() (string, error)) (string, bool, error) {
+func (s *fakeState) GetOrCreateAgentUUID(_ context.Context, create func() (string, error)) (string, bool, error) {
 	s.calls++
 	if s.err != nil {
 		return "", false, s.err
 	}
-	if s.ok && s.nodeUUID != "" {
-		return s.nodeUUID, false, nil
+	if s.ok && s.agentUUID != "" {
+		return s.agentUUID, false, nil
 	}
 	value, err := create()
 	if err != nil {
@@ -48,7 +48,7 @@ func (s *fakeState) GetOrCreateNodeUUID(_ context.Context, create func() (string
 	if s.commitAs != "" {
 		value = s.commitAs
 	}
-	s.nodeUUID = value
+	s.agentUUID = value
 	s.ok = true
 	return value, created, nil
 }
@@ -57,20 +57,20 @@ func overrideUUIDSources(t *testing.T, read func() (string, error), generate fun
 	t.Helper()
 
 	previousRead := readHardwareUUID
-	previousGenerate := newNodeUUID
+	previousGenerate := newAgentUUID
 	readHardwareUUID = read
-	newNodeUUID = generate
+	newAgentUUID = generate
 	t.Cleanup(func() {
 		readHardwareUUID = previousRead
-		newNodeUUID = previousGenerate
+		newAgentUUID = previousGenerate
 	})
 }
 
-func TestNodeUUIDFromSystemUUID(t *testing.T) {
+func TestAgentUUIDFromSystemUUID(t *testing.T) {
 	const validUUID = "4C4C4544-0053-5210-8038-C8C04F583034"
 
 	t.Run("uses system uuid as reported", func(t *testing.T) {
-		id, err := nodeUUIDFromSystemUUID(validUUID)
+		id, err := agentUUIDFromSystemUUID(validUUID)
 		require.NoError(t, err)
 		assert.Equal(t, validUUID, id)
 	})
@@ -86,7 +86,7 @@ func TestNodeUUIDFromSystemUUID(t *testing.T) {
 		{name: "all-f placeholder", systemUUID: "ffffffff-ffff-ffff-ffff-ffffffffffff", wantErr: "is a placeholder"},
 	} {
 		t.Run("rejects "+tc.name, func(t *testing.T) {
-			id, err := nodeUUIDFromSystemUUID(tc.systemUUID)
+			id, err := agentUUIDFromSystemUUID(tc.systemUUID)
 			require.Error(t, err)
 			assert.Empty(t, id)
 			assert.Contains(t, err.Error(), tc.wantErr)
@@ -94,14 +94,14 @@ func TestNodeUUIDFromSystemUUID(t *testing.T) {
 	}
 }
 
-func TestEnsureNodeUUID(t *testing.T) {
+func TestEnsureAgentUUID(t *testing.T) {
 	const (
 		dmiUUID     = "4c4c4544-0053-5210-8038-c8c04f583034"
 		generatedID = "6f459d44-ee11-44c1-b633-e810390ab3f7"
 	)
 
 	t.Run("uses persisted UUID", func(t *testing.T) {
-		state := &fakeState{nodeUUID: dmiUUID, ok: true}
+		state := &fakeState{agentUUID: dmiUUID, ok: true}
 		overrideUUIDSources(t, func() (string, error) {
 			t.Fatal("hardware UUID should not be read when UUID is already persisted")
 			return "", nil
@@ -110,7 +110,7 @@ func TestEnsureNodeUUID(t *testing.T) {
 			return ""
 		})
 
-		id, err := EnsureNodeUUID(context.Background(), state)
+		id, err := EnsureAgentUUID(context.Background(), state)
 		require.NoError(t, err)
 		assert.Equal(t, dmiUUID, id)
 		assert.Equal(t, 1, state.calls)
@@ -124,10 +124,10 @@ func TestEnsureNodeUUID(t *testing.T) {
 			return generatedID
 		})
 
-		id, err := EnsureNodeUUID(context.Background(), state)
+		id, err := EnsureAgentUUID(context.Background(), state)
 		require.NoError(t, err)
 		assert.Equal(t, dmiUUID, id)
-		assert.Equal(t, dmiUUID, state.nodeUUID)
+		assert.Equal(t, dmiUUID, state.agentUUID)
 		assert.Equal(t, 1, state.calls)
 	})
 
@@ -139,10 +139,10 @@ func TestEnsureNodeUUID(t *testing.T) {
 			return generatedID
 		})
 
-		id, err := EnsureNodeUUID(context.Background(), state)
+		id, err := EnsureAgentUUID(context.Background(), state)
 		require.NoError(t, err)
 		assert.Equal(t, generatedID, id)
-		assert.Equal(t, generatedID, state.nodeUUID)
+		assert.Equal(t, generatedID, state.agentUUID)
 		assert.Equal(t, 1, state.calls)
 	})
 
@@ -155,10 +155,10 @@ func TestEnsureNodeUUID(t *testing.T) {
 			return generatedID
 		})
 
-		id, err := EnsureNodeUUID(context.Background(), state)
+		id, err := EnsureAgentUUID(context.Background(), state)
 		require.NoError(t, err)
 		assert.Equal(t, committedID, id)
-		assert.Equal(t, committedID, state.nodeUUID)
+		assert.Equal(t, committedID, state.agentUUID)
 		assert.Equal(t, 1, state.calls)
 	})
 
@@ -170,9 +170,9 @@ func TestEnsureNodeUUID(t *testing.T) {
 			return generatedID
 		})
 
-		id, err := EnsureNodeUUID(context.Background(), state)
+		id, err := EnsureAgentUUID(context.Background(), state)
 		require.Error(t, err)
 		assert.Empty(t, id)
-		assert.Contains(t, err.Error(), "failed to ensure node UUID")
+		assert.Contains(t, err.Error(), "failed to ensure agent UUID")
 	})
 }

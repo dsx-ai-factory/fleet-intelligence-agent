@@ -28,6 +28,7 @@ import (
 	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentidentity"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
@@ -36,14 +37,13 @@ import (
 	inventorysink "github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory/sink"
 	inventorysource "github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory/source"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
-	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/nodeidentity"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/registry"
 )
 
 var (
 	newBackendClient               = backendclient.New
 	syncInventoryAfterEnroll       = syncInventoryOnce
-	ensureNodeUUID                 = nodeidentity.EnsureNodeUUID
+	ensureAgentUUID                = agentidentity.EnsureAgentUUID
 	storeEnrollmentConfig          = storeConfigInMetadata
 	postEnrollInventorySyncTimeout = time.Minute
 )
@@ -79,8 +79,8 @@ func EnrollWithConfigAndMetadata(ctx context.Context, baseEndpoint, sakToken str
 	if err != nil {
 		return err
 	}
-	if _, err := ensureNodeUUID(ctx, agentstate.NewSQLite()); err != nil {
-		return fmt.Errorf("failed to initialize node UUID: %w", err)
+	if _, err := ensureAgentUUID(ctx, agentstate.NewSQLite()); err != nil {
+		return fmt.Errorf("failed to initialize agent UUID: %w", err)
 	}
 	enrolledAt := time.Now().UTC()
 	if err := storeEnrollmentConfig(ctx, baseURL.String(), jwtToken, sakToken, enrolledAt, normalizedEnrollMetadata(metadata)); err != nil {

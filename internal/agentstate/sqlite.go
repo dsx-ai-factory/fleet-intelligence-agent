@@ -104,15 +104,15 @@ func (s *sqliteState) SetSAK(ctx context.Context, value string) error {
 	return s.setMetadata(ctx, MetadataKeySAKToken, value)
 }
 
-func (s *sqliteState) GetNodeUUID(ctx context.Context) (string, bool, error) {
+func (s *sqliteState) GetAgentUUID(ctx context.Context) (string, bool, error) {
 	return s.getMetadata(ctx, pkgmetadata.MetadataKeyMachineID)
 }
 
-func (s *sqliteState) SetNodeUUID(ctx context.Context, value string) error {
+func (s *sqliteState) SetAgentUUID(ctx context.Context, value string) error {
 	return s.setMetadata(ctx, pkgmetadata.MetadataKeyMachineID, value)
 }
 
-func (s *sqliteState) GetOrCreateNodeUUID(ctx context.Context, create func() (string, error)) (string, bool, error) {
+func (s *sqliteState) GetOrCreateAgentUUID(ctx context.Context, create func() (string, error)) (string, bool, error) {
 	db, err := s.openReadWrite()
 	if err != nil {
 		return "", false, err
@@ -128,17 +128,17 @@ func (s *sqliteState) GetOrCreateNodeUUID(ctx context.Context, create func() (st
 		return "", false, fmt.Errorf("create metadata table: %w", err)
 	}
 
-	return GetOrCreateNodeUUIDMetadata(ctx, db, create)
+	return GetOrCreateAgentUUIDMetadata(ctx, db, create)
 }
 
-// GetOrCreateNodeUUIDMetadata atomically returns the committed node UUID
+// GetOrCreateAgentUUIDMetadata atomically returns the committed agent UUID
 // metadata value, creating it when missing or repairing an empty value.
-func GetOrCreateNodeUUIDMetadata(ctx context.Context, db *sql.DB, create func() (string, error)) (string, bool, error) {
+func GetOrCreateAgentUUIDMetadata(ctx context.Context, db *sql.DB, create func() (string, error)) (string, bool, error) {
 	if create == nil {
-		return "", false, fmt.Errorf("node UUID create function is required")
+		return "", false, fmt.Errorf("agent UUID create function is required")
 	}
 
-	existing, ok, err := readNodeUUIDDB(ctx, db)
+	existing, ok, err := readAgentUUIDDB(ctx, db)
 	if err != nil {
 		return "", false, err
 	} else if ok {
@@ -150,7 +150,7 @@ func GetOrCreateNodeUUIDMetadata(ctx context.Context, db *sql.DB, create func() 
 		return "", false, err
 	}
 	if candidate == "" {
-		return "", false, fmt.Errorf("created node UUID is empty")
+		return "", false, fmt.Errorf("created agent UUID is empty")
 	}
 	if _, err := db.ExecContext(ctx, `
 INSERT INTO gpud_metadata (key, value) VALUES (?, ?)
@@ -159,21 +159,21 @@ WHERE gpud_metadata.value = ''`,
 		pkgmetadata.MetadataKeyMachineID,
 		candidate,
 	); err != nil {
-		return "", false, fmt.Errorf("insert node UUID metadata: %w", err)
+		return "", false, fmt.Errorf("insert agent UUID metadata: %w", err)
 	}
 
-	committed, ok, err := readNodeUUIDDB(ctx, db)
+	committed, ok, err := readAgentUUIDDB(ctx, db)
 	if err != nil {
 		return "", false, err
 	} else if !ok {
-		return "", false, fmt.Errorf("node UUID metadata was not committed")
+		return "", false, fmt.Errorf("agent UUID metadata was not committed")
 	} else if committed == "" {
-		return "", false, fmt.Errorf("node UUID metadata is empty")
+		return "", false, fmt.Errorf("agent UUID metadata is empty")
 	}
 	return committed, committed == candidate, nil
 }
 
-func readNodeUUIDDB(ctx context.Context, db *sql.DB) (string, bool, error) {
+func readAgentUUIDDB(ctx context.Context, db *sql.DB) (string, bool, error) {
 	var value string
 	err := db.QueryRowContext(ctx, `
 SELECT value FROM gpud_metadata WHERE key = ?`,
@@ -187,7 +187,7 @@ SELECT value FROM gpud_metadata WHERE key = ?`,
 	case errors.Is(err, sql.ErrNoRows):
 		return "", false, nil
 	default:
-		return "", false, fmt.Errorf("read node UUID metadata: %w", err)
+		return "", false, fmt.Errorf("read agent UUID metadata: %w", err)
 	}
 }
 

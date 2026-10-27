@@ -30,7 +30,7 @@ import (
 type fakeState struct {
 	baseURL           string
 	jwt               string
-	nodeUUID          string
+	agentUUID         string
 	nodeGroup         string
 	computeZone       string
 	nodeGroupErr      error
@@ -63,25 +63,25 @@ func (f *fakeState) GetJWT(context.Context) (string, bool, error) {
 func (f *fakeState) SetJWT(context.Context, string) error         { return nil }
 func (f *fakeState) GetSAK(context.Context) (string, bool, error) { return "", false, nil }
 func (f *fakeState) SetSAK(context.Context, string) error         { return nil }
-func (f *fakeState) GetNodeUUID(context.Context) (string, bool, error) {
+func (f *fakeState) GetAgentUUID(context.Context) (string, bool, error) {
 	if f.err != nil {
 		return "", false, f.err
 	}
-	return f.nodeUUID, f.nodeUUID != "", nil
+	return f.agentUUID, f.agentUUID != "", nil
 }
-func (f *fakeState) SetNodeUUID(context.Context, string) error { return nil }
-func (f *fakeState) GetOrCreateNodeUUID(_ context.Context, create func() (string, error)) (string, bool, error) {
+func (f *fakeState) SetAgentUUID(context.Context, string) error { return nil }
+func (f *fakeState) GetOrCreateAgentUUID(_ context.Context, create func() (string, error)) (string, bool, error) {
 	if f.err != nil {
 		return "", false, f.err
 	}
-	if f.nodeUUID != "" {
-		return f.nodeUUID, false, nil
+	if f.agentUUID != "" {
+		return f.agentUUID, false, nil
 	}
 	value, err := create()
 	if err != nil {
 		return "", false, err
 	}
-	f.nodeUUID = value
+	f.agentUUID = value
 	return value, true, nil
 }
 func (f *fakeState) GetNodeGroup(context.Context) (string, bool, error) {
@@ -144,11 +144,11 @@ func (f *fakeState) GetEnrollmentTime(context.Context) (time.Time, bool, error) 
 func (f *fakeState) SetEnrollmentTime(context.Context, time.Time) error { return nil }
 
 type fakeClient struct {
-	nodeUUID string
-	req      *backendclient.NodeUpsertRequest
-	jwt      string
-	resp     *backendclient.NodeUpsertResponse
-	err      error
+	agentUUID string
+	req       *backendclient.NodeUpsertRequest
+	jwt       string
+	resp      *backendclient.NodeUpsertResponse
+	err       error
 }
 
 func (f *fakeClient) Enroll(context.Context, string) (string, error) { return "", nil }
@@ -158,12 +158,12 @@ func (f *fakeClient) GetNonce(context.Context, string, string) (*backendclient.N
 func (f *fakeClient) SubmitAttestation(context.Context, string, *backendclient.AttestationRequest, string) error {
 	return nil
 }
-func (f *fakeClient) UpsertNode(_ context.Context, nodeUUID string, req *backendclient.NodeUpsertRequest, jwt string) (*backendclient.NodeUpsertResponse, error) {
-	f.nodeUUID = nodeUUID
+func (f *fakeClient) UpsertNode(_ context.Context, agentUUID string, req *backendclient.NodeUpsertRequest, jwt string) (*backendclient.NodeUpsertResponse, error) {
+	f.agentUUID = agentUUID
 	f.req = req
 	f.jwt = jwt
 	if f.resp == nil && f.err == nil {
-		f.resp = &backendclient.NodeUpsertResponse{AgentUUID: nodeUUID}
+		f.resp = &backendclient.NodeUpsertResponse{AgentUUID: agentUUID}
 	}
 	return f.resp, f.err
 }
@@ -198,7 +198,7 @@ func TestBackendSinkExportErrors(t *testing.T) {
 	require.ErrorContains(t, err, "inventory snapshot")
 
 	err = (&backendSink{
-		state: &fakeState{baseURL: "https://example.com", jwt: "jwt", nodeUUID: "node-1"},
+		state: &fakeState{baseURL: "https://example.com", jwt: "jwt", agentUUID: "node-1"},
 		clientFactory: func(string) (backendclient.Client, error) {
 			return nil, errors.New("client factory error")
 		},
@@ -216,7 +216,7 @@ func TestBackendSinkExportUsesState(t *testing.T) {
 	state := &fakeState{
 		baseURL:     "https://example.com",
 		jwt:         "jwt-token",
-		nodeUUID:    "node-1",
+		agentUUID:   "node-1",
 		nodeGroup:   "group-a",
 		computeZone: "zone-a",
 		enrolled:    enrollmentTime,
@@ -233,7 +233,7 @@ func TestBackendSinkExportUsesState(t *testing.T) {
 		MachineID: "machine-id",
 	})
 	require.NoError(t, err)
-	require.Equal(t, "node-1", client.nodeUUID)
+	require.Equal(t, "node-1", client.agentUUID)
 	require.Equal(t, "jwt-token", client.jwt)
 	require.NotNil(t, client.req)
 	require.Equal(t, "host-a", client.req.Hostname)
@@ -292,7 +292,7 @@ func TestBackendSinkExportAtomicallyPersistsChangedResolvedMembership(t *testing
 			state := &fakeState{
 				baseURL:     "https://example.com",
 				jwt:         "jwt-token",
-				nodeUUID:    "node-1",
+				agentUUID:   "node-1",
 				nodeGroup:   tc.currentGroup,
 				computeZone: tc.currentZone,
 			}
@@ -324,7 +324,7 @@ func TestBackendSinkExportClearsStateWhenResolvedMembershipIsEmpty(t *testing.T)
 	state := &fakeState{
 		baseURL:     "https://example.com",
 		jwt:         "jwt-token",
-		nodeUUID:    "node-1",
+		agentUUID:   "node-1",
 		nodeGroup:   "stale-group",
 		computeZone: "stale-zone",
 	}
@@ -354,7 +354,7 @@ func TestBackendSinkExportReturnsResolvedMembershipPersistenceErrors(t *testing.
 	state := &fakeState{
 		baseURL:       "https://example.com",
 		jwt:           "jwt-token",
-		nodeUUID:      "node-1",
+		agentUUID:     "node-1",
 		setNodeErr:    errors.New("node group write failed"),
 		setComputeErr: errors.New("compute zone write failed"),
 	}
@@ -387,7 +387,7 @@ func TestBackendSinkExportEnrollmentTimeErrorIsNonFatal(t *testing.T) {
 		state: &fakeState{
 			baseURL:       "https://example.com",
 			jwt:           "jwt-token",
-			nodeUUID:      "node-1",
+			agentUUID:     "node-1",
 			enrollmentErr: errors.New("malformed enrollment timestamp"),
 		},
 		clientFactory: func(string) (backendclient.Client, error) {
@@ -409,7 +409,7 @@ func TestBackendSinkExportOptionalMetadataErrorsAreNonFatal(t *testing.T) {
 	state := &fakeState{
 		baseURL:      "https://example.com",
 		jwt:          "jwt-token",
-		nodeUUID:     "node-1",
+		agentUUID:    "node-1",
 		nodeGroupErr: errors.New("failed to read nodegroup"),
 		computeErr:   errors.New("failed to read compute zone"),
 	}
@@ -437,9 +437,9 @@ func TestBackendSinkValidationDoesNotBlockExport(t *testing.T) {
 	client := &fakeClient{}
 	s := &backendSink{
 		state: &fakeState{
-			baseURL:  "https://example.com",
-			jwt:      "jwt-token",
-			nodeUUID: "node-1",
+			baseURL:   "https://example.com",
+			jwt:       "jwt-token",
+			agentUUID: "node-1",
 		},
 		clientFactory: func(string) (backendclient.Client, error) {
 			return client, nil

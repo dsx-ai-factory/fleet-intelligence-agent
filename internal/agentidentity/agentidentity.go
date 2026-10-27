@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package nodeidentity initializes and persists the stable agent UUID used by
+// Package agentidentity initializes and persists the stable agent UUID used by
 // enrollment, inventory, attestation, and metrics workflows.
 // The persisted agent UUID is stored in the legacy machine_id metadata key.
 // It is separate from the backend canonical nodeUUID and the OS machine ID.
-package nodeidentity
+package agentidentity
 
 import (
 	"context"
@@ -30,49 +30,49 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 )
 
-// State is the local storage contract needed to persist node identity.
+// State is the local storage contract needed to persist agent identity.
 type State interface {
-	GetOrCreateNodeUUID(ctx context.Context, create func() (string, error)) (value string, created bool, err error)
+	GetOrCreateAgentUUID(ctx context.Context, create func() (string, error)) (value string, created bool, err error)
 }
 
 var (
-	readHardwareUUID = func() (string, error) { return nodeUUIDFromSystemUUID(pkghost.SystemUUID()) }
-	newNodeUUID      = uuid.NewString
+	readHardwareUUID = func() (string, error) { return agentUUIDFromSystemUUID(pkghost.SystemUUID()) }
+	newAgentUUID     = uuid.NewString
 )
 
-// EnsureNodeUUID returns the persisted agent UUID, or initializes and persists it
+// EnsureAgentUUID returns the persisted agent UUID, or initializes and persists it
 // from the reported system UUID with a random UUID fallback.
-func EnsureNodeUUID(ctx context.Context, state State) (string, error) {
+func EnsureAgentUUID(ctx context.Context, state State) (string, error) {
 	if state == nil {
-		return "", errors.New("node identity state is required")
+		return "", errors.New("agent identity state is required")
 	}
 
-	nodeUUID, created, err := state.GetOrCreateNodeUUID(ctx, func() (string, error) {
-		nodeUUID, err := readHardwareUUID()
-		if err != nil || nodeUUID == "" {
-			nodeUUID = newNodeUUID()
+	agentUUID, created, err := state.GetOrCreateAgentUUID(ctx, func() (string, error) {
+		agentUUID, err := readHardwareUUID()
+		if err != nil || agentUUID == "" {
+			agentUUID = newAgentUUID()
 			log.Logger.Warnw("Failed to get hardware UUID, generated random agent ID",
 				"error", err,
-				"generated_id", nodeUUID)
+				"generated_id", agentUUID)
 		} else {
-			log.Logger.Infow("Initialized agent ID from hardware UUID", "agent_uuid", nodeUUID)
+			log.Logger.Infow("Initialized agent ID from hardware UUID", "agent_uuid", agentUUID)
 		}
-		return nodeUUID, nil
+		return agentUUID, nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to ensure node UUID: %w", err)
+		return "", fmt.Errorf("failed to ensure agent UUID: %w", err)
 	}
 	if created {
-		log.Logger.Infow("Persisted agent ID to database", "agent_uuid", nodeUUID)
+		log.Logger.Infow("Persisted agent ID to database", "agent_uuid", agentUUID)
 	} else {
-		log.Logger.Infow("Using persisted agent ID from database", "agent_uuid", nodeUUID)
+		log.Logger.Infow("Using persisted agent ID from database", "agent_uuid", agentUUID)
 	}
-	return nodeUUID, nil
+	return agentUUID, nil
 }
 
-// nodeUUIDFromSystemUUID accepts the system UUID reported in inventory as the
-// node UUID unless it is missing or an all-zero/all-f placeholder.
-func nodeUUIDFromSystemUUID(systemUUID string) (string, error) {
+// agentUUIDFromSystemUUID accepts the system UUID reported in inventory as the
+// agent UUID unless it is missing or an all-zero/all-f placeholder.
+func agentUUIDFromSystemUUID(systemUUID string) (string, error) {
 	if systemUUID == "" {
 		return "", errors.New("system UUID not found")
 	}

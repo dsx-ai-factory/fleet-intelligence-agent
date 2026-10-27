@@ -50,7 +50,7 @@ func TestSQLiteStateRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	err = state.SetSAK(ctx, "sak-token")
 	require.NoError(t, err)
-	err = state.SetNodeUUID(ctx, "node-1")
+	err = state.SetAgentUUID(ctx, "node-1")
 	require.NoError(t, err)
 	err = state.SetNodeGroup(ctx, "group-a")
 	require.NoError(t, err)
@@ -75,7 +75,7 @@ func TestSQLiteStateRoundTrip(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "sak-token", value)
 
-	value, ok, err = state.GetNodeUUID(ctx)
+	value, ok, err = state.GetAgentUUID(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, "node-1", value)
@@ -178,21 +178,21 @@ END`)
 	require.Equal(t, "zone-a", computeZone)
 }
 
-func TestSQLiteStateGetOrCreateNodeUUID(t *testing.T) {
+func TestSQLiteStateGetOrCreateAgentUUID(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	state := newTestSQLiteState(t)
 
-	value, created, err := state.GetOrCreateNodeUUID(ctx, func() (string, error) {
+	value, created, err := state.GetOrCreateAgentUUID(ctx, func() (string, error) {
 		return "node-created", nil
 	})
 	require.NoError(t, err)
 	require.True(t, created)
 	require.Equal(t, "node-created", value)
 
-	value, created, err = state.GetOrCreateNodeUUID(ctx, func() (string, error) {
-		t.Fatal("create should not run when node UUID is already persisted")
+	value, created, err = state.GetOrCreateAgentUUID(ctx, func() (string, error) {
+		t.Fatal("create should not run when agent UUID is already persisted")
 		return "", nil
 	})
 	require.NoError(t, err)
@@ -200,17 +200,17 @@ func TestSQLiteStateGetOrCreateNodeUUID(t *testing.T) {
 	require.Equal(t, "node-created", value)
 
 	emptyRowState := newTestSQLiteState(t)
-	err = emptyRowState.SetNodeUUID(ctx, "")
+	err = emptyRowState.SetAgentUUID(ctx, "")
 	require.NoError(t, err)
 
-	value, created, err = emptyRowState.GetOrCreateNodeUUID(ctx, func() (string, error) {
+	value, created, err = emptyRowState.GetOrCreateAgentUUID(ctx, func() (string, error) {
 		return "node-repaired", nil
 	})
 	require.NoError(t, err)
 	require.True(t, created)
 	require.Equal(t, "node-repaired", value)
 
-	value, ok, err := emptyRowState.GetNodeUUID(ctx)
+	value, ok, err := emptyRowState.GetAgentUUID(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, "node-repaired", value)
@@ -234,7 +234,7 @@ func TestSQLiteStateMissingMetadataTableIsTreatedAsAbsent(t *testing.T) {
 	for _, get := range []func(context.Context) (string, bool, error){
 		state.GetJWT,
 		state.GetSAK,
-		state.GetNodeUUID,
+		state.GetAgentUUID,
 		state.GetNodeGroup,
 		state.GetComputeZone,
 	} {
@@ -337,4 +337,38 @@ func TestSQLiteStateGetBackendBaseURLPropagatesReadErrors(t *testing.T) {
 	_, _, err = state.GetBackendBaseURL(ctx)
 	require.Error(t, err)
 	require.NotErrorIs(t, err, sql.ErrNoRows)
+}
+
+// An upgrade must keep the identity stored by earlier agent releases. Seed the
+// legacy key directly so this cannot pass by changing both accessor implementations.
+func TestSQLiteStateAgentUUIDUsesPersistedLegacyKey(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	state := newTestSQLiteState(t)
+	stateFile, err := state.stateFileFn()
+	require.NoError(t, err)
+	db, err := sqlite.Open(stateFile)
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, pkgmetadata.CreateTableMetadata(ctx, db))
+	_, err = db.ExecContext(ctx, `INSERT INTO gpud_metadata (key, value) VALUES ('machine_id', 'persisted-agent-uuid')`)
+	require.NoError(t, err)
+	value, ok, err := state.GetAgentUUID(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, "persisted-agent-uuid", value)
+	value, created, err := state.GetOrCreateAgentUUID(ctx, func() (string, error) {
+		t.Fatal("an upgrade must not replace the persisted agent UUID")
+		return "", nil
+	})
+	require.NoError(t, err)
+	require.False(t, created)
+	require.Equal(t, "persisted-agent-uuid", value)
+	require.NoError(t, state.SetAgentUUID(ctx, "updated-agent-uuid"))
+	var stored string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT value FROM gpud_metadata WHERE key = 'machine_id'`).Scan(&stored))
+	require.Equal(t, "updated-agent-uuid", stored)
+	var aliases int
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM gpud_metadata WHERE key = 'agent_uuid'`).Scan(&aliases))
+	require.Zero(t, aliases, "renaming accessors must not introduce a second persisted identity")
 }

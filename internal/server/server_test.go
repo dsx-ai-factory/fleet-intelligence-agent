@@ -413,21 +413,21 @@ func TestInitializeDatabasesSecuresFreshStateFile(t *testing.T) {
 	}
 }
 
-// TestInitializeMachineID tests the initializeMachineID function.
-func TestInitializeMachineID(t *testing.T) {
+// TestInitializeAgentUUID tests the initializeAgentUUID function.
+func TestInitializeAgentUUID(t *testing.T) {
 	ctx := context.Background()
 	dbRW, dbRO, err := initializeDatabases(ctx, &config.Config{State: filepath.Join(t.TempDir(), "fleetint.state")})
 	require.NoError(t, err)
 	defer dbRW.Close()
 	defer dbRO.Close()
 
-	machineID, err := initializeMachineID(ctx, dbRW, dbRO)
+	agentUUID, err := initializeAgentUUID(ctx, dbRW, dbRO)
 	require.NoError(t, err)
-	assert.NotEmpty(t, machineID)
+	assert.NotEmpty(t, agentUUID)
 
-	machineID2, err := initializeMachineID(ctx, dbRW, dbRO)
+	agentUUID2, err := initializeAgentUUID(ctx, dbRW, dbRO)
 	require.NoError(t, err)
-	assert.Equal(t, machineID, machineID2, "Machine ID should be consistent across calls")
+	assert.Equal(t, agentUUID, agentUUID2, "Agent UUID should be consistent across calls")
 }
 
 // TestServerStop tests the Stop method.

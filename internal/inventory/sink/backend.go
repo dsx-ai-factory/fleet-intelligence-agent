@@ -68,12 +68,12 @@ func (s *backendSink) Export(ctx context.Context, snap *inventory.Snapshot) erro
 		log.Logger.Infow("inventory export skipped: agent not enrolled (no JWT)")
 		return inventory.ErrNotReady
 	}
-	nodeUUID, ok, err := s.state.GetNodeUUID(ctx)
+	agentUUID, ok, err := s.state.GetAgentUUID(ctx)
 	if err != nil {
 		return err
 	}
-	if !ok || nodeUUID == "" {
-		log.Logger.Infow("inventory export skipped: agent not enrolled (no node UUID)")
+	if !ok || agentUUID == "" {
+		log.Logger.Infow("inventory export skipped: agent not enrolled (no agent UUID)")
 		return inventory.ErrNotReady
 	}
 	client, err := s.clientFactory(baseURL)
@@ -100,9 +100,9 @@ func (s *backendSink) Export(ctx context.Context, snap *inventory.Snapshot) erro
 		normalized := enrollmentTime.UTC()
 		req.EnrolledAt = &normalized
 	}
-	outbound.LogIssues("inventory-backend-sink", "NodeUpsertRequest", outbound.ValidateNodeUpsertRequest(req), "node_uuid", nodeUUID)
+	outbound.LogIssues("inventory-backend-sink", "NodeUpsertRequest", outbound.ValidateNodeUpsertRequest(req), "agent_uuid", agentUUID)
 
-	resp, err := client.UpsertNode(ctx, nodeUUID, req, jwt)
+	resp, err := client.UpsertNode(ctx, agentUUID, req, jwt)
 	if err != nil {
 		return err
 	}
@@ -115,7 +115,7 @@ func (s *backendSink) Export(ctx context.Context, snap *inventory.Snapshot) erro
 		}
 	}
 	log.Logger.Infow("inventory exported to backend",
-		"node_uuid", nodeUUID,
+		"agent_uuid", agentUUID,
 		"node_group", resp.NodeGroup,
 		"compute_zone", resp.ComputeZone)
 	return nil

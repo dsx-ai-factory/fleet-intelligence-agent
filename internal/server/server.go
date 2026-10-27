@@ -52,6 +52,7 @@ import (
 	nvidiapci "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia/pci"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentidentity"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/agentstate"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/attestation"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
@@ -60,7 +61,6 @@ import (
 	inventorysink "github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory/sink"
 	inventorysource "github.com/dsx-ai-factory/fleet-intelligence-agent/internal/inventory/source"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
-	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/nodeidentity"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/registry"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/workloadmetrics"
 )
@@ -97,7 +97,7 @@ type Server struct {
 	loopCtx    context.Context
 	loopCancel context.CancelFunc
 
-	machineID string
+	agentUUID string
 
 	workloadMetrics *workloadmetrics.Manager
 }
@@ -140,23 +140,23 @@ func initializeDatabases(ctx context.Context, cfg *config.Config) (*sql.DB, *sql
 	return dbRW, dbRO, nil
 }
 
-type dbNodeUUIDState struct {
+type dbAgentUUIDState struct {
 	dbRW *sql.DB
 	dbRO *sql.DB
 }
 
-func (s dbNodeUUIDState) GetOrCreateNodeUUID(ctx context.Context, create func() (string, error)) (string, bool, error) {
+func (s dbAgentUUIDState) GetOrCreateAgentUUID(ctx context.Context, create func() (string, error)) (string, bool, error) {
 	if err := pkgmetadata.CreateTableMetadata(ctx, s.dbRW); err != nil {
 		return "", false, fmt.Errorf("create metadata table: %w", err)
 	}
-	return agentstate.GetOrCreateNodeUUIDMetadata(ctx, s.dbRW, create)
+	return agentstate.GetOrCreateAgentUUIDMetadata(ctx, s.dbRW, create)
 }
 
-// initializeMachineID retrieves or creates a machine ID
+// initializeAgentUUID retrieves or creates the persisted in-band source UUID.
 // This establishes the agent's stable identity for metrics reporting.
 // Priority: DB (persisted) → DMI product UUID → random UUID
-func initializeMachineID(ctx context.Context, dbRW, dbRO *sql.DB) (string, error) {
-	return nodeidentity.EnsureNodeUUID(ctx, dbNodeUUIDState{dbRW: dbRW, dbRO: dbRO})
+func initializeAgentUUID(ctx context.Context, dbRW, dbRO *sql.DB) (string, error) {
+	return agentidentity.EnsureAgentUUID(ctx, dbAgentUUIDState{dbRW: dbRW, dbRO: dbRO})
 }
 
 // getHealthCheckInterval determines the health check interval from config
@@ -260,12 +260,12 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 		}
 	}()
 
-	// Initialize machine ID
-	machineID, err := initializeMachineID(ctx, dbRW, dbRO)
+	// Initialize the persisted agent UUID.
+	agentUUID, err := initializeAgentUUID(ctx, dbRW, dbRO)
 	if err != nil {
 		return nil, err
 	}
-	s.machineID = machineID
+	s.agentUUID = agentUUID
 
 	// Initialize fault injector for testing (only if enabled)
 	if config.EnableFaultInjection {
@@ -334,7 +334,7 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 	log.Logger.Infow("DCGM field value cache created", "healthCheckInterval", healthCheckInterval)
 	s.gpudInstance = &components.GPUdInstance{
 		RootCtx:              ctx,
-		MachineID:            machineID,
+		MachineID:            agentUUID,
 		DCGMInstance:         dcgmInstance,
 		DCGMHealthCache:      dcgmHealthCache,
 		DCGMFieldValueCache:  dcgmFieldValueCache,
@@ -424,7 +424,7 @@ func New(ctx context.Context, auditLogger log.AuditLogger, config *config.Config
 			exporter.WithComponentsRegistry(s.componentsRegistry),
 			exporter.WithDCGM(dcgmInstance),
 			exporter.WithDatabaseConnections(dbRW, dbRO),
-			exporter.WithMachineID(machineID),
+			exporter.WithMachineID(agentUUID),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create health exporter: %w", err)
@@ -512,7 +512,7 @@ func (s *Server) startAttestationLoop(ctx context.Context, cfg *config.Config) {
 
 	state := agentstate.NewSQLite()
 	manager := attestation.NewManager(
-		attestation.NewStateNodeUUIDProvider(state),
+		attestation.NewStateAgentUUIDProvider(state),
 		attestation.NewStateJWTProvider(state),
 		attestation.NewStateNonceProvider(state),
 		attestation.NewCLIEvidenceCollector(timeout),

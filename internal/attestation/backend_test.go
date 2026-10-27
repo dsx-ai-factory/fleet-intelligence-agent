@@ -27,16 +27,16 @@ import (
 )
 
 type stubState struct {
-	baseURL  string
-	baseOK   bool
-	baseErr  error
-	jwt      string
-	jwtOK    bool
-	jwtErr   error
-	setJWT   string
-	nodeUUID string
-	nodeOK   bool
-	nodeErr  error
+	baseURL   string
+	baseOK    bool
+	baseErr   error
+	jwt       string
+	jwtOK     bool
+	jwtErr    error
+	setJWT    string
+	agentUUID string
+	agentOK   bool
+	agentErr  error
 }
 
 func (s *stubState) GetBackendBaseURL(context.Context) (string, bool, error) {
@@ -47,23 +47,23 @@ func (s *stubState) GetJWT(context.Context) (string, bool, error)    { return s.
 func (s *stubState) SetJWT(_ context.Context, v string) error        { s.setJWT = v; s.jwt = v; return nil }
 func (s *stubState) GetSAK(context.Context) (string, bool, error)    { return "", false, nil }
 func (s *stubState) SetSAK(context.Context, string) error            { return nil }
-func (s *stubState) GetNodeUUID(context.Context) (string, bool, error) {
-	return s.nodeUUID, s.nodeOK, s.nodeErr
+func (s *stubState) GetAgentUUID(context.Context) (string, bool, error) {
+	return s.agentUUID, s.agentOK, s.agentErr
 }
-func (s *stubState) SetNodeUUID(context.Context, string) error { return nil }
-func (s *stubState) GetOrCreateNodeUUID(_ context.Context, create func() (string, error)) (string, bool, error) {
-	if s.nodeErr != nil {
-		return "", false, s.nodeErr
+func (s *stubState) SetAgentUUID(context.Context, string) error { return nil }
+func (s *stubState) GetOrCreateAgentUUID(_ context.Context, create func() (string, error)) (string, bool, error) {
+	if s.agentErr != nil {
+		return "", false, s.agentErr
 	}
-	if s.nodeOK && s.nodeUUID != "" {
-		return s.nodeUUID, false, nil
+	if s.agentOK && s.agentUUID != "" {
+		return s.agentUUID, false, nil
 	}
 	value, err := create()
 	if err != nil {
 		return "", false, err
 	}
-	s.nodeUUID = value
-	s.nodeOK = true
+	s.agentUUID = value
+	s.agentOK = true
 	return value, true, nil
 }
 func (s *stubState) GetNodeGroup(context.Context) (string, bool, error) {
@@ -84,10 +84,10 @@ func (s *stubState) GetEnrollmentTime(context.Context) (time.Time, bool, error) 
 func (s *stubState) SetEnrollmentTime(context.Context, time.Time) error { return nil }
 
 type recordingClient struct {
-	lastNodeUUID string
-	lastJWT      string
-	lastReq      *backendclient.AttestationRequest
-	nonceResp    *backendclient.NonceResponse
+	lastAgentUUID string
+	lastJWT       string
+	lastReq       *backendclient.AttestationRequest
+	nonceResp     *backendclient.NonceResponse
 }
 
 func (c *recordingClient) Enroll(context.Context, string) (string, error) { return "", nil }
@@ -97,8 +97,8 @@ func (c *recordingClient) UpsertNode(context.Context, string, *backendclient.Nod
 func (c *recordingClient) GetNonce(context.Context, string, string) (*backendclient.NonceResponse, error) {
 	return c.nonceResp, nil
 }
-func (c *recordingClient) SubmitAttestation(_ context.Context, nodeUUID string, req *backendclient.AttestationRequest, jwt string) error {
-	c.lastNodeUUID = nodeUUID
+func (c *recordingClient) SubmitAttestation(_ context.Context, agentUUID string, req *backendclient.AttestationRequest, jwt string) error {
+	c.lastAgentUUID = agentUUID
 	c.lastJWT = jwt
 	c.lastReq = req
 	return nil
@@ -176,7 +176,7 @@ func TestStateProvidersAndSubmitter(t *testing.T) {
 	state := &stubState{
 		baseURL: "https://backend.example.com", baseOK: true,
 		jwt: "jwt-token", jwtOK: true,
-		nodeUUID: "node-1", nodeOK: true,
+		agentUUID: "node-1", agentOK: true,
 	}
 
 	jwtProvider := NewStateJWTProvider(state)
@@ -186,9 +186,9 @@ func TestStateProvidersAndSubmitter(t *testing.T) {
 	require.NoError(t, jwtProvider.SetJWT(context.Background(), "updated"))
 	require.Equal(t, "updated", state.setJWT)
 
-	nodeUUID, err := NewStateNodeUUIDProvider(state)(context.Background())
+	agentUUID, err := NewStateAgentUUIDProvider(state)(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, "node-1", nodeUUID)
+	require.Equal(t, "node-1", agentUUID)
 
 	nonce, ts, refreshedJWT, err := NewStateNonceProvider(state).GetNonce(context.Background(), "node-1", "jwt-token")
 	require.NoError(t, err)
@@ -197,7 +197,7 @@ func TestStateProvidersAndSubmitter(t *testing.T) {
 	require.Equal(t, "new-jwt", refreshedJWT)
 
 	result := &Result{
-		NodeUUID: "node-1",
+		AgentUUID: "node-1",
 		SDKResponse: SDKResponse{
 			ResultCode: 1,
 			Evidences:  []EvidenceItem{{Arch: "BLACKWELL"}},
@@ -205,21 +205,21 @@ func TestStateProvidersAndSubmitter(t *testing.T) {
 	}
 	err = NewStateBackendSubmitter(state).Submit(context.Background(), result, "jwt-token")
 	require.NoError(t, err)
-	require.Equal(t, "node-1", recording.lastNodeUUID)
+	require.Equal(t, "node-1", recording.lastAgentUUID)
 	require.Equal(t, "jwt-token", recording.lastJWT)
 	require.NotNil(t, recording.lastReq)
 	require.Equal(t, "BLACKWELL", recording.lastReq.AttestationData.SDKResponse.Evidences[0].Arch)
 
-	recording.lastNodeUUID = ""
+	recording.lastAgentUUID = ""
 	err = NewStateBackendSubmitter(state).Submit(context.Background(), &Result{}, "jwt-token")
 	require.NoError(t, err)
-	require.Equal(t, "node-1", recording.lastNodeUUID)
+	require.Equal(t, "node-1", recording.lastAgentUUID)
 }
 
 func TestStateBackendSubmitterMissingStateDoesNotPanic(t *testing.T) {
 	err := NewStateBackendSubmitter(nil).Submit(context.Background(), &Result{}, "jwt-token")
 	require.ErrorIs(t, err, ErrNotEnrolled)
-	require.ErrorContains(t, err, "node UUID not available")
+	require.ErrorContains(t, err, "agent UUID not available")
 }
 
 func TestStateProvidersPropagateBackendClientConstructionErrors(t *testing.T) {
@@ -234,6 +234,6 @@ func TestStateProvidersPropagateBackendClientConstructionErrors(t *testing.T) {
 	_, _, _, err := NewStateNonceProvider(state).GetNonce(context.Background(), "node-1", "jwt-token")
 	require.ErrorContains(t, err, "construct failed")
 
-	err = NewStateBackendSubmitter(state).Submit(context.Background(), &Result{NodeUUID: "node-1"}, "jwt-token")
+	err = NewStateBackendSubmitter(state).Submit(context.Background(), &Result{AgentUUID: "node-1"}, "jwt-token")
 	require.ErrorContains(t, err, "construct failed")
 }
