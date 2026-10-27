@@ -105,26 +105,18 @@ func (c *client) UpsertNode(ctx context.Context, agentUUID string, req *NodeUpse
 		return nil, fmt.Errorf("node upsert request cannot be nil")
 	}
 	var wireResp struct {
-		AgentUUID      string  `json:"agentUUID"`
-		LegacyNodeUUID string  `json:"nodeUUID"`
-		ComputeZone    *string `json:"computeZone"`
-		NodeGroup      *string `json:"nodeGroup"`
+		AgentUUID   string  `json:"agentUUID"`
+		ComputeZone *string `json:"computeZone"`
+		NodeGroup   *string `json:"nodeGroup"`
 	}
 	if err := c.doJSON(ctx, http.MethodPut, []string{"v1", "agent", "nodes", agentUUID}, jwt, req, &wireResp); err != nil {
 		return nil, err
 	}
-	if wireResp.AgentUUID != "" && wireResp.LegacyNodeUUID != "" && wireResp.AgentUUID != wireResp.LegacyNodeUUID {
-		return nil, fmt.Errorf("node upsert response agentUUID and deprecated nodeUUID disagree")
+	if wireResp.AgentUUID == "" {
+		return nil, fmt.Errorf("node upsert response missing agentUUID field")
 	}
-	responseAgentUUID := wireResp.AgentUUID
-	if responseAgentUUID == "" {
-		responseAgentUUID = wireResp.LegacyNodeUUID
-	}
-	if responseAgentUUID == "" {
-		return nil, fmt.Errorf("node upsert response missing agentUUID or legacy nodeUUID field")
-	}
-	if responseAgentUUID != agentUUID {
-		return nil, fmt.Errorf("node upsert response agentUUID %q does not match requested agentUUID %q", responseAgentUUID, agentUUID)
+	if wireResp.AgentUUID != agentUUID {
+		return nil, fmt.Errorf("node upsert response agentUUID %q does not match requested agentUUID %q", wireResp.AgentUUID, agentUUID)
 	}
 	if wireResp.NodeGroup == nil {
 		return nil, fmt.Errorf("node upsert response missing nodeGroup field")
@@ -133,10 +125,9 @@ func (c *client) UpsertNode(ctx context.Context, agentUUID string, req *NodeUpse
 		return nil, fmt.Errorf("node upsert response missing computeZone field")
 	}
 	return &NodeUpsertResponse{
-		AgentUUID:      responseAgentUUID,
-		LegacyNodeUUID: responseAgentUUID,
-		NodeGroup:      *wireResp.NodeGroup,
-		ComputeZone:    *wireResp.ComputeZone,
+		AgentUUID:   wireResp.AgentUUID,
+		NodeGroup:   *wireResp.NodeGroup,
+		ComputeZone: *wireResp.ComputeZone,
 	}, nil
 }
 

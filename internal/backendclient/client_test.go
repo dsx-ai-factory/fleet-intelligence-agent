@@ -83,9 +83,9 @@ func TestClient_UpsertNode(t *testing.T) {
 		gotAuth = r.Header.Get("Authorization")
 		_ = json.NewDecoder(r.Body).Decode(&gotReq)
 		_ = json.NewEncoder(w).Encode(NodeUpsertResponse{
-			LegacyNodeUUID: "node-1",
-			NodeGroup:      "resolved-group",
-			ComputeZone:    "resolved-zone",
+			AgentUUID:   "node-1",
+			NodeGroup:   "resolved-group",
+			ComputeZone: "resolved-zone",
 		})
 	}))
 	defer server.Close()
@@ -94,10 +94,9 @@ func TestClient_UpsertNode(t *testing.T) {
 	resp, err := c.UpsertNode(context.Background(), "node-1", &NodeUpsertRequest{Hostname: "node-1"}, "jwt-token")
 	require.NoError(t, err)
 	require.Equal(t, &NodeUpsertResponse{
-		AgentUUID:      "node-1",
-		LegacyNodeUUID: "node-1",
-		NodeGroup:      "resolved-group",
-		ComputeZone:    "resolved-zone",
+		AgentUUID:   "node-1",
+		NodeGroup:   "resolved-group",
+		ComputeZone: "resolved-zone",
 	}, resp)
 	require.Equal(t, http.MethodPut, gotMethod)
 	require.Equal(t, "/v1/agent/nodes/node-1", gotPath)
@@ -274,7 +273,7 @@ func TestClient_ResponseValidationAndErrors(t *testing.T) {
 		require.ErrorContains(t, err, "failed to make backend request")
 	})
 
-	t.Run("missing node uuid in upsert response", func(t *testing.T) {
+	t.Run("missing agent uuid in upsert response", func(t *testing.T) {
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(NodeUpsertResponse{NodeGroup: "group-a", ComputeZone: "zone-a"})
 		}))
@@ -282,12 +281,12 @@ func TestClient_ResponseValidationAndErrors(t *testing.T) {
 
 		c := NewWithHTTPClient(mustParseURL(t, server.URL), server.Client())
 		_, err := c.UpsertNode(context.Background(), "node-1", &NodeUpsertRequest{}, "jwt-token")
-		require.ErrorContains(t, err, "missing agentUUID or legacy nodeUUID")
+		require.ErrorContains(t, err, "missing agentUUID")
 	})
 
-	t.Run("mismatched node uuid in upsert response", func(t *testing.T) {
+	t.Run("mismatched agent uuid in upsert response", func(t *testing.T) {
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_ = json.NewEncoder(w).Encode(NodeUpsertResponse{LegacyNodeUUID: "node-2"})
+			_ = json.NewEncoder(w).Encode(NodeUpsertResponse{AgentUUID: "node-2"})
 		}))
 		defer server.Close()
 
@@ -299,7 +298,7 @@ func TestClient_ResponseValidationAndErrors(t *testing.T) {
 	t.Run("missing resolved membership field in upsert response", func(t *testing.T) {
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]string{
-				"nodeUUID":  "node-1",
+				"agentUUID": "node-1",
 				"nodeGroup": "group-a",
 			})
 		}))
@@ -387,26 +386,25 @@ func mustParseURL(t *testing.T, raw string) *url.URL {
 	return parsed
 }
 
-func TestClient_UpsertNodeIdentityAliases(t *testing.T) {
+func TestClient_UpsertNodeRequiresAgentUUID(t *testing.T) {
 	for _, tc := range []struct{ name, body, wantError string }{
 		{"preferred", `{"agentUUID":"source-1","nodeGroup":"","computeZone":""}`, ""},
-		{"legacy", `{"nodeUUID":"source-1","nodeGroup":"","computeZone":""}`, ""},
+		{"legacy only is rejected", `{"nodeUUID":"source-1","nodeGroup":"","computeZone":""}`, "missing agentUUID"},
 		{"both", `{"agentUUID":"source-1","nodeUUID":"source-1","nodeGroup":"","computeZone":""}`, ""},
-		{"conflicting aliases", `{"agentUUID":"source-1","nodeUUID":"canonical-1","nodeGroup":"","computeZone":""}`, "disagree"},
+		{"legacy field is ignored", `{"agentUUID":"source-1","nodeUUID":"other-source","nodeGroup":"","computeZone":""}`, ""},
 		{"wrong agent", `{"agentUUID":"source-2","nodeGroup":"","computeZone":""}`, "does not match"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(tc.body)) }))
 			defer server.Close()
 			c := NewWithHTTPClient(mustParseURL(t, server.URL), server.Client())
-			response, err := c.UpsertNode(context.Background(), "source-1", &NodeUpsertRequest{MachineID: "os-machine-id"}, "jwt")
+			response, err := c.UpsertNode(context.Background(), "source-1", &NodeUpsertRequest{Hostname: "node-1"}, "jwt")
 			if tc.wantError != "" {
 				require.ErrorContains(t, err, tc.wantError)
 				return
 			}
 			require.NoError(t, err)
 			require.Equal(t, "source-1", response.AgentUUID)
-			require.Equal(t, response.AgentUUID, response.LegacyNodeUUID)
 		})
 	}
 }

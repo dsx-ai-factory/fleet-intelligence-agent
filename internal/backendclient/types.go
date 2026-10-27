@@ -46,8 +46,6 @@ type NodeUpsertResponse struct {
 	AgentUUID   string `json:"agentUUID"`
 	ComputeZone string `json:"computeZone"`
 	NodeGroup   string `json:"nodeGroup"`
-	// Deprecated: use AgentUUID. This acknowledgement echoes the source UUID.
-	LegacyNodeUUID string `json:"nodeUUID"`
 }
 
 type NodeResources struct {
