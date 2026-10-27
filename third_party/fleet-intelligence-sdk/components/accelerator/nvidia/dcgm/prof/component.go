@@ -77,7 +77,8 @@ type component struct {
 	lastCheckResult *checkResult
 }
 
-// fieldValidator validates fields based on hardware support
+// New configures profiling collection without allocating native DCGM resources.
+// Check validates hardware support and sets up sampling watches when DCGM is ready.
 func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 	cctx, ccancel := context.WithCancel(gpudInstance.RootCtx)
 	dcgmGroupNames := gpudInstance.DCGMGroupNames.WithDefaults()
@@ -103,6 +104,9 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 }
 
 // setupFieldWatchingIfReady validates and registers fields. Caller holds setupMu.
+// Native setup failures remain retryable. An empty device inventory or no
+// supported fields completes setup without watches. Failed cleanup must finish
+// before a retry can replace the watch owner and its retained native handles.
 func (c *component) setupFieldWatchingIfReady() {
 	if c.ctx.Err() != nil || c.fieldSetupComplete || c.dcgmInstance == nil || !c.dcgmInstance.DCGMExists() {
 		return
@@ -177,6 +181,8 @@ func (c *component) IsSupported() bool {
 	return c.dcgmInstance.DCGMExists()
 }
 
+// Start runs Check immediately, then at healthCheckInterval until cancellation.
+// Native watches control sampling independently of these cached reads.
 func (c *component) Start() error {
 	go func() {
 		ticker := time.NewTicker(c.healthCheckInterval)
@@ -214,12 +220,15 @@ func (c *component) Events(ctx context.Context, since time.Time) (apiv1.Events, 
 	return nil, nil
 }
 
+// cleanup waits for an active Check before releasing profiling watches.
 func (c *component) cleanup() error {
 	c.setupMu.Lock()
 	defer c.setupMu.Unlock()
 	return c.cleanupFieldGroupLocked()
 }
 
+// cleanupFieldGroupLocked releases sampling groups and retains failed handles
+// for another cleanup attempt. The caller must hold setupMu.
 func (c *component) cleanupFieldGroupLocked() error {
 	if c.fieldWatches != nil {
 		return c.fieldWatches.Close()
@@ -227,12 +236,18 @@ func (c *component) cleanupFieldGroupLocked() error {
 	return nil
 }
 
+// Close cancels collection and releases watches after any active Check completes.
+// Cleanup failures can be retried by calling Close again.
 func (c *component) Close() error {
 	log.Logger.Debugw("closing profiling component")
 	c.cancel()
 	return c.cleanup()
 }
 
+// Check retries incomplete setup, reads all validated fields from DCGM's cache,
+// and updates metrics and health. It holds setupMu through setup and native reads.
+// Cancellation preserves the last completed assessment. If none exists, the
+// returned result is Initializing and is not stored as a completed assessment.
 func (c *component) Check() (result components.CheckResult) {
 	c.setupMu.Lock()
 	defer c.setupMu.Unlock()
@@ -297,7 +312,8 @@ func (c *component) Check() (result components.CheckResult) {
 		if c.ctx.Err() != nil {
 			break
 		}
-		// Query values using EntityGetLatestValues (FieldValue_v1)
+		// Read all validated fields each check. Slower native watches can return
+		// the same cached sample without sampling the GPU again.
 		vals, err := c.readFields(
 			dcgm.FE_GPU,   // Entity type: GPU
 			device.ID,     // Entity ID

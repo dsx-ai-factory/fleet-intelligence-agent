@@ -75,6 +75,8 @@ type component struct {
 	lastCheckResult *checkResult
 }
 
+// New configures CPU collection without allocating native DCGM resources.
+// Check discovers CPU entities and sets up their sampling watches when DCGM is ready.
 func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 	cctx, ccancel := context.WithCancel(gpudInstance.RootCtx)
 	dcgmGroupNames := gpudInstance.DCGMGroupNames.WithDefaults()
@@ -101,6 +103,8 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 
 // setupFieldWatchingIfReady discovers CPUs and registers their watches.
 // The caller holds setupMu. Failed attempts release partial resources before retry.
+// Discovery errors leave setup incomplete and produce a Degraded assessment.
+// Successful discovery with no CPUs completes setup without allocating groups.
 func (c *component) setupFieldWatchingIfReady() {
 	if c.ctx.Err() != nil || c.fieldSetupComplete || c.dcgmInstance == nil || !c.dcgmInstance.DCGMExists() {
 		return
@@ -201,6 +205,8 @@ func (c *component) IsSupported() bool {
 	return c.dcgmInstance.DCGMExists()
 }
 
+// Start runs Check immediately, then at healthCheckInterval until cancellation.
+// Native watches control sampling independently of these cached reads.
 func (c *component) Start() error {
 	go func() {
 		ticker := time.NewTicker(c.healthCheckInterval)
@@ -238,6 +244,8 @@ func (c *component) Events(ctx context.Context, since time.Time) (apiv1.Events, 
 	return nil, nil
 }
 
+// Close cancels collection and waits for an active Check before releasing watches
+// and then the CPU entity group. Cleanup failures can be retried with another Close.
 func (c *component) Close() error {
 	log.Logger.Debugw("closing component")
 
@@ -253,6 +261,10 @@ func (c *component) Close() error {
 	return c.cleanupCPUGroupLocked()
 }
 
+// Check retries incomplete setup, reads all selected CPU fields from DCGM's cache,
+// and updates metrics and health. It holds setupMu through setup and native reads.
+// Cancellation preserves the last completed assessment. If none exists, the
+// returned result is Initializing and is not stored as a completed assessment.
 func (c *component) Check() (result components.CheckResult) {
 	c.setupMu.Lock()
 	defer c.setupMu.Unlock()
@@ -311,7 +323,8 @@ func (c *component) Check() (result components.CheckResult) {
 		return cr
 	}
 
-	// Query and export DCGM CPU-level field values using cached entities
+	// Read all CPU fields each check. Slower native watches can return the same
+	// cached sample on consecutive checks without sampling the CPU again.
 	for _, cpuID := range c.cpuEntities {
 		if c.ctx.Err() != nil {
 			break

@@ -52,13 +52,17 @@ type FieldValueCache struct {
 	registrationMu sync.Mutex
 }
 
-// NewFieldValueCache creates a placeholder cache. Call SetupFieldWatching() after components register fields.
+// NewFieldValueCache creates a cache with the default profile settings.
+// pollInterval sets both the standard sampling interval and the cached-read cycle.
+// Register component fields before calling SetupFieldWatching or Start.
 func NewFieldValueCache(ctx context.Context, instance Instance, pollInterval time.Duration) *FieldValueCache {
 	return NewFieldValueCacheWithIntervals(ctx, instance, pollInterval, CollectionIntervals{})
 }
 
 // NewFieldValueCacheWithIntervals configures native sampling watches for registered fields.
-// All selected cached fields are read on the pollInterval cycle.
+// pollInterval sets the standard sampling interval and the cached-read cycle.
+// watchIntervals supplies the extended interval and field-to-profile overrides.
+// Construction allocates no native groups. Register fields before setup or Start.
 func NewFieldValueCacheWithIntervals(ctx context.Context, instance Instance, pollInterval time.Duration, watchIntervals CollectionIntervals) *FieldValueCache {
 	cctx, ccancel := context.WithCancel(ctx)
 	if pollInterval <= 0 {
@@ -82,14 +86,15 @@ func NewFieldValueCacheWithIntervals(ctx context.Context, instance Instance, pol
 	return fc
 }
 
-// SetupFieldWatching creates the field group and starts DCGM watching for all registered fields.
+// SetupFieldWatching creates sampling groups for the registered fields and starts
+// their native watches. Repeated calls reuse watches that are already ready.
 // For tests, use SetupFieldWatchingWithName to provide a unique name.
 func (fc *FieldValueCache) SetupFieldWatching() error {
 	return fc.SetupFieldWatchingWithName(fc.fieldGroupName)
 }
 
-// SetupFieldWatchingWithName creates the field group with a custom name.
-// This is useful for tests to avoid naming conflicts when running in parallel.
+// SetupFieldWatchingWithName uses a custom base name for the sampling groups.
+// Each group gets a numeric suffix. Tests can use unique names to avoid conflicts.
 func (fc *FieldValueCache) SetupFieldWatchingWithName(fieldGroupName string) error {
 	fc.mu.Lock()
 	fc.fieldGroupName = fieldGroupName
@@ -98,12 +103,15 @@ func (fc *FieldValueCache) SetupFieldWatchingWithName(fieldGroupName string) err
 	return fc.ensureFieldWatchingSetup()
 }
 
+// ensureFieldWatchingSetup serializes public setup calls with polling and cleanup.
 func (fc *FieldValueCache) ensureFieldWatchingSetup() error {
 	fc.registrationMu.Lock()
 	defer fc.registrationMu.Unlock()
 	return fc.setupLocked()
 }
 
+// setupLocked creates missing watches or retries incomplete setup. The caller
+// must hold registrationMu. Unavailable DCGM is skipped until a later attempt.
 func (fc *FieldValueCache) setupLocked() error {
 	if fc.ctx.Err() != nil {
 		return context.Canceled
@@ -114,7 +122,8 @@ func (fc *FieldValueCache) setupLocked() error {
 		return nil
 	}
 
-	// The watch owner retains the selected fields across setup retries and reconnects.
+	// Build sampling groups once from the registered fields. Reuse their field
+	// selection and intervals when native watches are recreated.
 	if fc.fieldWatches == nil {
 		watchedFields := fc.instance.GetWatchedFields()
 		if len(watchedFields) == 0 {
@@ -138,7 +147,9 @@ func (fc *FieldValueCache) setupLocked() error {
 	return nil
 }
 
-// Start begins background polling. Requires SetupFieldWatching() to be called first.
+// Start performs an initial poll and starts one background polling loop.
+// Register component fields first. Poll handles watch setup and retries failures;
+// an initial poll failure is logged and does not prevent background retries.
 func (fc *FieldValueCache) Start() error {
 	var startErr error
 	fc.startOnce.Do(func() {
@@ -155,6 +166,7 @@ func (fc *FieldValueCache) Start() error {
 }
 
 // Stop cancels polling and releases all field groups after any in-flight poll.
+// Failed cleanup is logged and can be retried by calling Stop again.
 func (fc *FieldValueCache) Stop() {
 	fc.cancel()
 
@@ -165,6 +177,8 @@ func (fc *FieldValueCache) Stop() {
 	}
 }
 
+// resetAfterReconnect discards handles and cached results from the old session.
+// The next Poll recreates watches using the retained field selection and intervals.
 func (fc *FieldValueCache) resetAfterReconnect() {
 	fc.registrationMu.Lock()
 	if fc.fieldWatches != nil {
@@ -179,6 +193,8 @@ func (fc *FieldValueCache) resetAfterReconnect() {
 	fc.mu.Unlock()
 }
 
+// pollLoop reads cached values at the standard interval until cancellation.
+// DCGM's native watches control how often the underlying samples change.
 func (fc *FieldValueCache) pollLoop() {
 	ticker := time.NewTicker(fc.pollInterval)
 	defer ticker.Stop()
@@ -196,6 +212,9 @@ func (fc *FieldValueCache) pollLoop() {
 }
 
 // Poll reads all selected fields from DCGM's cache. Used by background polling and scan mode.
+// Reads do not force native sampling. Extended samples can therefore repeat across
+// polls, with their original DCGM timestamps. Results are published as one batch;
+// a successful batch with no skipped devices clears the previous collection error.
 func (fc *FieldValueCache) Poll() error {
 	fc.registrationMu.Lock()
 	defer fc.registrationMu.Unlock()

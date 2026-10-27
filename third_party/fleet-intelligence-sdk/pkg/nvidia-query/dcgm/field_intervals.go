@@ -54,6 +54,7 @@ type CollectionIntervals struct {
 	FieldProfiles map[dcgm.Short]FieldProfile
 }
 
+// parseFieldProfile accepts only the two supported, case-sensitive profile names.
 func parseFieldProfile(value string) (FieldProfile, error) {
 	profile := FieldProfile(strings.TrimSpace(value))
 	switch profile {
@@ -64,15 +65,27 @@ func parseFieldProfile(value string) (FieldProfile, error) {
 	}
 }
 
-// ParseFieldProfiles parses comma-separated ID=profile or FIRST-LAST=profile
-// assignments. Omitted fields keep their built-in profile. Unknown profiles and
-// overlapping entries are rejected. Assignments do not enable field collection.
+// ParseFieldProfiles parses field-to-profile overrides, such as the value of
+// FLEETINT_DCGM_FIELD_PROFILES. Entries use ID=profile or FIRST-LAST=profile,
+// separated by commas. Ranges include both endpoints. Spaces around IDs, range
+// endpoints, and profile names are allowed. Profile names are case-sensitive.
+//
+// For example, "1110=extended,1200-1219=standard" assigns field 1110 to extended
+// and fields 1200 through 1219 to standard. The returned map contains those
+// explicit assignments only. FieldInterval applies the built-in profile to all
+// omitted fields: extended for 1200-1219 and 1404-1419, standard for all others.
+// Empty input returns an empty map, which keeps all built-in assignments.
+//
+// IDs must be in 1..65535. Invalid syntax, unknown profiles, and overlapping
+// entries return an error and no map. Even entries with the same profile must
+// not overlap. Assignments neither set durations nor enable field collection.
 func ParseFieldProfiles(value string) (map[dcgm.Short]FieldProfile, error) {
 	result := make(map[dcgm.Short]FieldProfile)
 	if strings.TrimSpace(value) == "" {
 		return result, nil
 	}
 	for _, entry := range strings.Split(value, ",") {
+		// Read the profile separately from the field ID or inclusive range.
 		parts := strings.Split(entry, "=")
 		if len(parts) != 2 {
 			return nil, fmt.Errorf("expected field ID or range=profile")
@@ -89,6 +102,7 @@ func ParseFieldProfiles(value string) (map[dcgm.Short]FieldProfile, error) {
 		if err != nil || first == 0 {
 			return nil, fmt.Errorf("invalid field ID")
 		}
+		// A single ID is a range of one field. Parse an upper bound if supplied.
 		last := first
 		if len(bounds) == 2 {
 			last, err = strconv.ParseUint(strings.TrimSpace(bounds[1]), 10, 16)
@@ -96,6 +110,8 @@ func ParseFieldProfiles(value string) (map[dcgm.Short]FieldProfile, error) {
 				return nil, fmt.Errorf("invalid field range")
 			}
 		}
+		// Expand ranges once during configuration parsing. Reject duplicate IDs
+		// so the result does not depend on which assignment appears last.
 		for id := first; id <= last; id++ {
 			field := dcgm.Short(id)
 			if _, exists := result[field]; exists {
@@ -107,10 +123,17 @@ func ParseFieldProfiles(value string) (map[dcgm.Short]FieldProfile, error) {
 	return result, nil
 }
 
-// FieldInterval returns the native DCGM sampling interval. Standard fields use
-// the supplied standard interval. Extended fields use its maximum with the
-// extended minimum. Field assignments do not
-// enable collection. Unknown SDK profile names leave the built-in assignment intact.
+// FieldInterval returns the native DCGM sampling interval for one selected field.
+// It first selects the built-in profile, then applies any explicit profile override.
+// Standard fields use standardInterval. Extended fields use the greater of
+// standardInterval and watchIntervals.Extended, so a longer standard interval is
+// always respected. Nonpositive durations use the defaults: 30s standard and
+// 60s extended.
+//
+// For example, with no overrides and a 30s standard interval, field 100 uses 30s
+// and field 1200 uses 60s. With a 90s standard interval, both use 90s.
+// This function does not select fields for collection. Unknown profile names
+// supplied directly through the SDK leave the built-in assignment intact.
 func FieldInterval(field dcgm.Short, standardInterval time.Duration, watchIntervals CollectionIntervals) time.Duration {
 	if standardInterval <= 0 {
 		standardInterval = defaultStandardInterval
@@ -172,6 +195,9 @@ type fieldWatchGroup struct {
 // NewFieldWatches groups selected fields by effective DCGM sampling interval.
 // The two profiles bound each owner to at most two field groups. Equal intervals
 // share one group. Profile settings never add fields to collection.
+// For example, fields 100 and 1200 use separate 30s and 60s groups with defaults.
+// If the standard interval is 90s, both fields share one 90s group.
+// Construction sorts and deduplicates IDs but allocates no native DCGM resources.
 func NewFieldWatches(fields []dcgm.Short, standardInterval time.Duration, watchIntervals CollectionIntervals) *FieldWatches {
 	grouped := make(map[time.Duration][]dcgm.Short)
 	seen := make(map[dcgm.Short]bool)
@@ -189,6 +215,8 @@ func NewFieldWatches(fields []dcgm.Short, standardInterval time.Duration, watchI
 		s.groups = append(s.groups, fieldWatchGroup{interval: interval, fields: fields})
 	}
 	sort.Slice(s.groups, func(i, j int) bool { return s.groups[i].interval < s.groups[j].interval })
+	// Store the complete read list in one buffer. Each sampling group uses a
+	// slice of that buffer, so cached reads do not need to join group lists.
 	s.fields = make([]dcgm.Short, 0, len(seen))
 	for i := range s.groups {
 		start := len(s.fields)
@@ -198,7 +226,14 @@ func NewFieldWatches(fields []dcgm.Short, standardInterval time.Duration, watchI
 	return s
 }
 
-// Setup rolls back every created group and watch if any setup operation fails.
+// Setup creates field groups and starts watches for the supplied entity group.
+// name is the base for native field-group names; each gets a numeric suffix.
+// Ready watches for the same entity group are reused. Otherwise, cleanup must
+// finish before replacement groups can be created.
+//
+// On failure, Setup attempts to release all partial resources. Failed cleanup
+// retains the affected handles for a later Close or Setup attempt. Oversized
+// field groups are rejected before any native resources are allocated.
 func (s *FieldWatches) Setup(name string, group dcgm.GroupHandle) error {
 	if len(s.groups) == 0 {
 		return nil
@@ -240,7 +275,9 @@ func (s *FieldWatches) Setup(name string, group dcgm.GroupHandle) error {
 // The returned slice belongs to FieldWatches and must not be modified.
 func (s *FieldWatches) Fields() []dcgm.Short { return s.fields }
 
-// Reset forgets native handles from a lost session. Selected fields are retained.
+// Reset forgets native handles from a lost session without calling native cleanup.
+// Call it only after that session is lost. Field selections and intervals remain
+// available for Setup to recreate watches in the new session.
 func (s *FieldWatches) Reset() {
 	for i := range s.groups {
 		s.groups[i].handle = dcgm.FieldHandle{}
@@ -250,6 +287,8 @@ func (s *FieldWatches) Reset() {
 
 // Close unwatches and destroys allocated groups. Failed operations retain their
 // handles so a later Close or Setup can retry.
+// A group is destroyed only after its watch stops. Repeated successful calls are
+// harmless. Field selections and intervals remain available for another Setup.
 func (s *FieldWatches) Close() error {
 	var errs []error
 	for i := range s.groups {
