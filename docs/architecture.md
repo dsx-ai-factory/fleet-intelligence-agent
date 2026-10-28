@@ -35,20 +35,11 @@ flowchart LR
 ### Runtime behavior
 
 - GPU/DCGM components read health and telemetry from DCGM/NVML-backed data paths.
-- Standard DCGM watches use the standard interval (`FLEETINT_CHECK_INTERVAL`).
-  Extended watches use a separate sampling interval, which defaults to 60 seconds.
-  Configurable field assignments bound each collection path to two field groups.
-  Equal effective intervals share one group. The shared GPU cache, profiling
-  collector, and CPU collector read all their selected fields from DCGM's cache
-  on the standard cycle. Extended fields can return the same sample on consecutive
-  reads. See [DCGM sampling intervals](configuration.md#dcgm-sampling-intervals).
-- CPU and profiling collectors set up watches from their checks after DCGM becomes
-  available. Failed setup can retry on a later check. Successful setup or an empty
-  entity inventory completes setup and prevents repeated allocation.
-  CPU discovery errors report degraded health. Successful discovery with no
-  CPUs reports healthy.
-  Checks called or interrupted during shutdown retain the last completed health
-  result. A stopped check with no completed result returns initializing.
+- DCGM collection separates native sampling from cached reads. Each collection
+  path uses at most two sampling groups so slower fields do not slow other fields.
+  See [DCGM sampling intervals](configuration.md#dcgm-sampling-intervals).
+- CPU and profiling collectors defer native setup until DCGM is available and
+  retry incomplete setup. Session replacement resets their native resources.
 - System components read host state (CPU, memory, disk, network, OS/kernel/library/PCI views).
 - The agent evaluates component health continuously and serves current state via API/metrics.
 - Exporters serialize telemetry/events/health data for downstream ingestion.

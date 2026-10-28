@@ -19,6 +19,7 @@ package cpu
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +37,10 @@ const Name = "accelerator-nvidia-dcgm-cpu"
 
 const (
 	defaultHealthCheckInterval = time.Minute
+	// DCGM errorString messages. The pinned go-dcgm discovery API returns
+	// their text without preserving the status code.
+	cpuModuleNotLoadedMessage = "This request is serviced by a module of DCGM that is not currently loaded"
+	cpuNotSupportedMessage    = "Feature not supported"
 )
 
 var _ components.Component = &component{}
@@ -98,13 +103,28 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 		fieldGroupName:      dcgmGroupNames.CPUFieldGroup,
 		cpuGroupName:        dcgmGroupNames.CPUGroup,
 	}
+	if registrar, ok := c.dcgmInstance.(interface{ RegisterReconnectCallback(func()) }); ok {
+		registrar.RegisterReconnectCallback(c.resetAfterReconnect)
+	}
 	return c, nil
+}
+
+// resetAfterReconnect forgets resources from the old session without native
+// cleanup. The next Check discovers CPUs and creates watches in the new session.
+func (c *component) resetAfterReconnect() {
+	c.setupMu.Lock()
+	defer c.setupMu.Unlock()
+	c.fieldWatches.Reset()
+	c.cpuGroupHandle = dcgm.GroupHandle{}
+	c.cpuEntities = nil
+	c.fieldSetupComplete = false
+	c.setupDegradedReason = ""
 }
 
 // setupFieldWatchingIfReady discovers CPUs and registers their watches.
 // The caller holds setupMu. Failed attempts release partial resources before retry.
-// Discovery errors leave setup incomplete and produce a Degraded assessment.
-// Successful discovery with no CPUs completes setup without allocating groups.
+// Expected CPU-monitoring unavailability or no CPUs completes setup without
+// groups. Unexpected discovery errors produce Degraded and remain retryable.
 func (c *component) setupFieldWatchingIfReady() {
 	if c.ctx.Err() != nil || c.fieldSetupComplete || c.dcgmInstance == nil || !c.dcgmInstance.DCGMExists() {
 		return
@@ -121,9 +141,7 @@ func (c *component) setupFieldWatchingIfReady() {
 
 	cpuEntities, err := dcgm.GetEntityGroupEntities(dcgm.FE_CPU)
 	if err != nil {
-		// Leave setup incomplete so a later check retries discovery.
-		c.setupDegradedReason = fmt.Sprintf("failed to discover DCGM CPU entities: %v", err)
-		log.Logger.Warnw("failed to discover DCGM CPU entities", "error", err)
+		c.handleCPUDiscoveryError(err)
 		return
 	}
 	if len(cpuEntities) == 0 {
@@ -173,6 +191,23 @@ func (c *component) setupFieldWatchingIfReady() {
 	c.cpuEntities = cpuEntities
 	c.fieldSetupComplete = true
 	c.setupDegradedReason = ""
+}
+
+// handleCPUDiscoveryError distinguishes optional CPU-monitoring support from a
+// discovery failure. The caller holds setupMu and supplies a non-nil error.
+func (c *component) handleCPUDiscoveryError(err error) {
+	// GetEntityGroupEntities formats DCGM's error text without preserving its
+	// status code. Match only known unavailability messages; other errors retry.
+	message := strings.TrimPrefix(err.Error(), "error getting entity count: ")
+	switch message {
+	case cpuModuleNotLoadedMessage, cpuNotSupportedMessage:
+		c.fieldSetupComplete = true
+		c.setupDegradedReason = ""
+		log.Logger.Infow("CPU monitoring not available", "reason", err.Error())
+	default:
+		c.setupDegradedReason = fmt.Sprintf("failed to discover DCGM CPU entities: %v", err)
+		log.Logger.Warnw("failed to discover DCGM CPU entities", "error", err)
+	}
 }
 
 // cleanupCPUGroupLocked retains the handle on failure so cleanup can be retried.
@@ -253,6 +288,8 @@ func (c *component) Close() error {
 	log.Logger.Debugw("closing component")
 
 	c.cancel()
+	release := nvidiadcgm.AcquireSession(c.dcgmInstance)
+	defer release()
 	c.setupMu.Lock()
 	defer c.setupMu.Unlock()
 	if c.fieldWatches != nil {
@@ -269,6 +306,8 @@ func (c *component) Close() error {
 // Cancellation preserves the last completed assessment. If none exists, the
 // returned result is Initializing and is not stored as a completed assessment.
 func (c *component) Check() (result components.CheckResult) {
+	release := nvidiadcgm.AcquireSession(c.dcgmInstance)
+	defer release()
 	c.setupMu.Lock()
 	defer c.setupMu.Unlock()
 

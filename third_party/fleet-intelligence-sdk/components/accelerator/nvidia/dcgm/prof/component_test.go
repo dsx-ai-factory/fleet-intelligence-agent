@@ -405,6 +405,38 @@ func TestStoppedBeforeFirstCheckReturnsInitializing(t *testing.T) {
 	}
 }
 
+type reconnectProfilingInstance struct {
+	mockDCGMInstance
+	callback func()
+}
+
+func (m *reconnectProfilingInstance) RegisterReconnectCallback(callback func()) {
+	m.callback = callback
+}
+
+func TestProfilingReconnectResetsSessionResources(t *testing.T) {
+	inst := &reconnectProfilingInstance{}
+	comp, err := New(&components.GPUdInstance{RootCtx: context.Background(), DCGMInstance: inst})
+	require.NoError(t, err)
+	c := comp.(*component)
+	defer func() { require.NoError(t, c.Close()) }()
+	require.NotNil(t, inst.callback)
+	c.fieldWatches = nvidiadcgm.NewFieldWatches([]dcgm.Short{100, 1200}, 30*time.Second, c.watchIntervals)
+	watches := c.fieldWatches
+	c.fieldSetupComplete = true
+	c.watchedFields = []dcgm.Short{100, 1200}
+	c.setupDegradedReason = "old session error"
+	inst.callback()
+	require.Same(t, watches, c.fieldWatches)
+	require.Equal(t, []dcgm.Short{100, 1200}, c.fieldWatches.Fields())
+	require.False(t, c.fieldSetupComplete)
+	require.Empty(t, c.watchedFields)
+	require.Empty(t, c.setupDegradedReason)
+	require.NoError(t, c.Close())
+	inst.callback()
+	require.Equal(t, apiv1.HealthStateTypeInitializing, c.Check().HealthStateType())
+}
+
 func TestProfilingTransientAndEmptyReadsReturnHealthy(t *testing.T) {
 	comp, err := New(&components.GPUdInstance{RootCtx: context.Background()})
 	require.NoError(t, err)

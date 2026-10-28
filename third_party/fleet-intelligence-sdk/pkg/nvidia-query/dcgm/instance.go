@@ -92,6 +92,16 @@ type reconnectCallbackRegistrar interface {
 	RegisterReconnectCallback(callback func())
 }
 
+// AcquireSession prevents session replacement and native teardown until released.
+// Call it before taking collector locks used by reconnect callbacks. A caller
+// must not acquire it again before releasing it. Fixed instances need no gate.
+func AcquireSession(instance Instance) func() {
+	if locker, ok := instance.(interface{ AcquireSession() func() }); ok {
+		return locker.AcquireSession()
+	}
+	return func() {}
+}
+
 var newInstanceFunc = newInitializedInstance
 
 // New creates a DCGM instance. It returns a no-op instance when a complete
@@ -520,6 +530,9 @@ var _ Instance = &reconnectingInstance{}
 type reconnectingInstance struct {
 	stateMu   sync.RWMutex
 	currentMu sync.RWMutex
+	// sessionMu makes publication and resource resets atomic to native owners.
+	// Collectors take its read lock before their own setup/cleanup locks.
+	sessionMu sync.RWMutex
 	// reconnectMu serializes reconnect and shutdown transitions.
 	// Long-running connect operations happen outside this lock.
 	reconnectMu sync.Mutex
@@ -653,6 +666,11 @@ func (inst *reconnectingInstance) reconnectNow() error {
 		return err
 	}
 
+	// Candidate connection stays outside the gate so shutdown can cancel a
+	// blocked initial connection. go-dcgm retains the active connection through
+	// Init reference counting. Publication and all resets form one transaction.
+	inst.sessionMu.Lock()
+	defer inst.sessionMu.Unlock()
 	inst.reconnectMu.Lock()
 	defer inst.reconnectMu.Unlock()
 	if inst.shuttingDown || inst.generation != expectedGeneration {
@@ -739,6 +757,13 @@ func (inst *reconnectingInstance) RegisterReconnectCallback(callback func()) {
 	inst.stateMu.Lock()
 	inst.callbacks = append(inst.callbacks, callback)
 	inst.stateMu.Unlock()
+}
+
+// AcquireSession pins session-owned resources through a native operation.
+// Reconnect callbacks run under the write lock and must not call this method.
+func (inst *reconnectingInstance) AcquireSession() func() {
+	inst.sessionMu.RLock()
+	return inst.sessionMu.RUnlock
 }
 
 func (inst *reconnectingInstance) runReconnectCallbacks() {
@@ -895,7 +920,12 @@ func (inst *reconnectingInstance) Shutdown() error {
 		inst.shuttingDown = true
 		inst.generation++
 		close(inst.stopCh)
+		inst.reconnectMu.Unlock()
 
+		// Do not hold reconnectMu while waiting: reconnect takes sessionMu
+		// before checking its generation under reconnectMu.
+		inst.sessionMu.Lock()
+		defer inst.sessionMu.Unlock()
 		inst.currentMu.Lock()
 		currentInst := inst.current
 		inst.current = nil
@@ -904,7 +934,6 @@ func (inst *reconnectingInstance) Shutdown() error {
 		if currentInst != nil {
 			shutdownErr = currentInst.Shutdown()
 		}
-		inst.reconnectMu.Unlock()
 	})
 	return shutdownErr
 }

@@ -124,10 +124,20 @@ cache on each standard-interval cycle. With the defaults, standard watches use
 `30s`, extended watches use `60s`, and both classes are read from the cache every
 `30s`.
 
+The periodic exporter uses `FLEETINT_COLLECT_INTERVAL` (default `60s`). Each
+export batch can contain multiple metric points from the `30s` scrape cycle.
+Prometheus clients can also scrape the agent at a different interval.
+
 A cached read does not request a new hardware sample. A field sampled every `60s`
 can return the same sample on consecutive `30s` reads. The shared agent cache
 preserves the field timestamps returned by DCGM. See the
 [DCGM cached-value APIs](https://docs.nvidia.com/datacenter/dcgm/latest/dcgm-api/dcgm-api-field-apis.html).
+
+Exported gauges keep their existing check or scrape timestamps. Repeated
+cumulative samples can produce flat values followed by a larger jump in
+short-window rate or delta calculations. Slower native sampling can also delay
+observation of a counter increase. Consumers must account for the native sampling
+interval when interpreting these values.
 
 After reconnect, the shared GPU cache clears its old values and recreates its
 native watches. It resumes cached reads on the standard interval.

@@ -48,8 +48,13 @@ type FieldValueCache struct {
 	fieldGroupName string
 	pollInterval   time.Duration
 	startOnce      sync.Once
-	// registrationMu serializes setup, reads, reconnect, and cleanup.
+	// pollMu orders polls without making Stop or reconnect wait for cached reads.
+	pollMu sync.Mutex
+	// registrationMu protects watch resources and publication across reconnects.
 	registrationMu sync.Mutex
+	// resetGeneration increments whenever the cache is reset. Poll discards a
+	// read batch if this counter changed while the read was in progress.
+	resetGeneration uint64
 }
 
 // NewFieldValueCache creates a cache with the default profile settings.
@@ -96,6 +101,8 @@ func (fc *FieldValueCache) SetupFieldWatching() error {
 // SetupFieldWatchingWithName uses a custom base name for the sampling groups.
 // Each group gets a numeric suffix. Tests can use unique names to avoid conflicts.
 func (fc *FieldValueCache) SetupFieldWatchingWithName(fieldGroupName string) error {
+	release := AcquireSession(fc.instance)
+	defer release()
 	fc.registrationMu.Lock()
 	defer fc.registrationMu.Unlock()
 
@@ -161,11 +168,14 @@ func (fc *FieldValueCache) Start() error {
 	return startErr
 }
 
-// Stop cancels polling and releases all field groups after any in-flight poll.
+// Stop cancels polling and releases field groups without waiting for cached reads.
+// An in-flight read batch is discarded after cancellation.
 // Failed cleanup is logged and can be retried by calling Stop again.
 func (fc *FieldValueCache) Stop() {
 	fc.cancel()
 
+	release := AcquireSession(fc.instance)
+	defer release()
 	fc.registrationMu.Lock()
 	defer fc.registrationMu.Unlock()
 	if fc.fieldWatches != nil {
@@ -177,6 +187,7 @@ func (fc *FieldValueCache) Stop() {
 // The next Poll recreates watches using the retained field selection and intervals.
 func (fc *FieldValueCache) resetAfterReconnect() {
 	fc.registrationMu.Lock()
+	fc.resetGeneration++
 	if fc.fieldWatches != nil {
 		fc.fieldWatches.Reset()
 	}
@@ -213,8 +224,8 @@ func (fc *FieldValueCache) pollLoop() {
 // Transient read errors are skipped. A poll without a non-transient read error
 // clears the previous collection error, including when no devices return values.
 func (fc *FieldValueCache) Poll() error {
-	fc.registrationMu.Lock()
-	defer fc.registrationMu.Unlock()
+	fc.pollMu.Lock()
+	defer fc.pollMu.Unlock()
 	if fc.ctx.Err() != nil {
 		return context.Canceled
 	}
@@ -238,22 +249,17 @@ func (fc *FieldValueCache) Poll() error {
 		}
 	}
 
-	if err := fc.setupLocked(); err != nil {
+	watchedFields, devices, resetGeneration, err := fc.preparePoll()
+	if err != nil {
 		return err
 	}
-
-	if fc.fieldWatches == nil {
-		return nil
-	}
-	watchedFields := fc.fieldWatches.Fields()
 	if len(watchedFields) == 0 {
-		log.Logger.Debugw("no selected fields, skipping field poll")
 		return nil
 	}
 
-	devices := fc.instance.GetDevices()
 	newValues := make(map[uint][]dcgm.FieldValue_v1, len(devices))
 	var pollErr error
+	var restartErr error
 
 	for _, device := range devices {
 		if err := fc.ctx.Err(); err != nil {
@@ -261,7 +267,12 @@ func (fc *FieldValueCache) Poll() error {
 		}
 		fieldValues, err := fc.instance.GetLatestValuesForFields(device.ID, watchedFields)
 		if err != nil {
-			exitForRestartIfRequired("field_cache", err, "deviceID", device.ID)
+			if IsRestartRequired(err) {
+				// Preserve the restart policy even if the cache is reset while
+				// this read is in progress. Cancellation is checked before exit.
+				restartErr = err
+				break
+			}
 
 			// Check if this is a transient error (benign, don't store)
 			if IsTransientError(err) {
@@ -289,6 +300,19 @@ func (fc *FieldValueCache) Poll() error {
 		newValues[device.ID] = fieldValues
 	}
 
+	// Reads use no native field-group handles. Only setup and publication need
+	// the lifecycle locks; reset and Stop can proceed while a cached RPC blocks.
+	release := AcquireSession(fc.instance)
+	defer release()
+	fc.registrationMu.Lock()
+	defer fc.registrationMu.Unlock()
+	if err := fc.ctx.Err(); err != nil {
+		return err
+	}
+	exitForRestartIfRequired("field_cache", restartErr)
+	if resetGeneration != fc.resetGeneration {
+		return nil
+	}
 	fc.mu.Lock()
 	// Publish the full batch under one lock. Replace old samples even when a
 	// read fails, so unavailable values cannot appear as current samples.
@@ -312,6 +336,22 @@ func (fc *FieldValueCache) Poll() error {
 		return fmt.Errorf("DCGM error during field polling: %w", pollErr)
 	}
 	return nil
+}
+
+// preparePoll pins the session while setting up watches and capturing immutable
+// read inputs. Its locks are released before the first cached-value RPC.
+func (fc *FieldValueCache) preparePoll() ([]dcgm.Short, []DeviceInfo, uint64, error) {
+	release := AcquireSession(fc.instance)
+	defer release()
+	fc.registrationMu.Lock()
+	defer fc.registrationMu.Unlock()
+	if err := fc.setupLocked(); err != nil {
+		return nil, nil, 0, err
+	}
+	if fc.fieldWatches == nil {
+		return nil, nil, fc.resetGeneration, nil
+	}
+	return fc.fieldWatches.Fields(), fc.instance.GetDevices(), fc.resetGeneration, nil
 }
 
 // DeviceFieldValues represents field values for a single device with metadata.

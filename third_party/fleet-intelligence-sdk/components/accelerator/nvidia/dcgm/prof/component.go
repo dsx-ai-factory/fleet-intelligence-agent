@@ -99,8 +99,24 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 		fieldGroupName:      dcgmGroupNames.ProfilingFieldGroup,
 		watchIntervals:      gpudInstance.DCGMIntervals,
 	}
+	if registrar, ok := c.dcgmInstance.(interface{ RegisterReconnectCallback(func()) }); ok {
+		registrar.RegisterReconnectCallback(c.resetAfterReconnect)
+	}
 
 	return c, nil
+}
+
+// resetAfterReconnect forgets watches from the old session without native cleanup.
+// The next Check validates fields and creates watches in the new session.
+func (c *component) resetAfterReconnect() {
+	c.setupMu.Lock()
+	defer c.setupMu.Unlock()
+	if c.fieldWatches != nil {
+		c.fieldWatches.Reset()
+	}
+	c.fieldSetupComplete = false
+	c.watchedFields = nil
+	c.setupDegradedReason = ""
 }
 
 // setupFieldWatchingIfReady validates and registers fields. Caller holds setupMu.
@@ -222,6 +238,8 @@ func (c *component) Events(ctx context.Context, since time.Time) (apiv1.Events, 
 
 // cleanup waits for an active Check before releasing profiling watches.
 func (c *component) cleanup() error {
+	release := nvidiadcgm.AcquireSession(c.dcgmInstance)
+	defer release()
 	c.setupMu.Lock()
 	defer c.setupMu.Unlock()
 	return c.cleanupFieldGroupLocked()
@@ -249,6 +267,8 @@ func (c *component) Close() error {
 // Cancellation preserves the last completed assessment. If none exists, the
 // returned result is Initializing and is not stored as a completed assessment.
 func (c *component) Check() (result components.CheckResult) {
+	release := nvidiadcgm.AcquireSession(c.dcgmInstance)
+	defer release()
 	c.setupMu.Lock()
 	defer c.setupMu.Unlock()
 

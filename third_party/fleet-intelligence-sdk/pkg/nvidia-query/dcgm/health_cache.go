@@ -251,6 +251,8 @@ func (hc *HealthCache) GetLastUpdateTime() time.Time {
 // This is a helper to access the underlying DCGM API without going through
 // the instance's own caching layer.
 func healthCheckDirect(inst Instance) (*dcgm.HealthResponse, error) {
+	release := AcquireSession(inst)
+	defer release()
 	groupHandle := inst.GetGroupHandle()
 	if groupHandle.GetHandle() == 0 {
 		return nil, fmt.Errorf("%w: DCGM group handle is not initialized", errTransientGroupNotReady)

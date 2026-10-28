@@ -18,6 +18,8 @@ package dcgm
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -456,6 +458,156 @@ func TestFieldCacheTransientAndEmptyReadsClearFailure(t *testing.T) {
 		_, err = fc.GetResult(inst.fields)
 		require.NoError(t, err, "a poll without devices clears the previous poll error")
 	})
+}
+
+func TestFieldCacheDiscardsReadAfterResetOrStop(t *testing.T) {
+	for _, action := range []string{"reset", "reset with late error", "stop", "stop with restart error"} {
+		t.Run(action, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				stopping := action == "stop" || action == "stop with restart error"
+				entered, release := make(chan struct{}), make(chan struct{})
+				unblock := sync.OnceFunc(func() { close(release) })
+				defer unblock()
+				inst := &intervalCacheInstance{
+					mockDCGMInstance: mockDCGMInstance{dcgmExists: true, devices: []DeviceInfo{{ID: 1}}},
+					fields:           []dcgm.Short{100},
+				}
+				inst.read = func(uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+					close(entered)
+					<-release
+					if action == "stop with restart error" {
+						return nil, fmt.Errorf("dcgm request failed with error code %d", dcgm.DCGM_ST_CONNECTION_NOT_VALID)
+					}
+					if action == "reset with late error" {
+						return nil, fmt.Errorf("cached read failed")
+					}
+					return []dcgm.FieldValue_v1{{FieldID: 100, TS: 1}}, nil
+				}
+				fc := NewFieldValueCache(context.Background(), inst, 30*time.Second)
+				fc.fieldWatches = NewFieldWatches(inst.fields, 30*time.Second, CollectionIntervals{})
+				fakeWatches(fc.fieldWatches)
+				defer fc.Stop()
+				polled := make(chan error, 1)
+				go func() { polled <- fc.Poll() }()
+				<-entered
+				// Neither operation may wait for the blocked cached read.
+				if !stopping {
+					fc.resetAfterReconnect()
+				} else {
+					fc.Stop()
+				}
+				unblock()
+				if !stopping {
+					require.NoError(t, <-polled)
+				} else {
+					require.ErrorIs(t, <-polled, context.Canceled)
+				}
+				result, err := fc.GetResult(inst.fields)
+				require.NoError(t, err)
+				require.Empty(t, result, "late results must not repopulate a reset or stopped cache")
+			})
+		})
+	}
+}
+
+func TestFieldCacheRestartPolicySurvivesReset(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		code int32
+	}{
+		{"connection-lost", dcgm.DCGM_ST_CONNECTION_NOT_VALID},
+		{"not-configured", dcgm.DCGM_ST_NOT_CONFIGURED},
+		{"not-watched", dcgm.DCGM_ST_NOT_WATCHED},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if os.Getenv("FLEETINT_TEST_RESTART_AFTER_RESET") == "1" {
+				inst := &intervalCacheInstance{
+					mockDCGMInstance: mockDCGMInstance{dcgmExists: true, devices: []DeviceInfo{{ID: 1}}},
+					fields:           []dcgm.Short{100},
+				}
+				fc := NewFieldValueCache(context.Background(), inst, 30*time.Second)
+				fc.fieldWatches = NewFieldWatches(inst.fields, 30*time.Second, CollectionIntervals{})
+				fakeWatches(fc.fieldWatches)
+				defer fc.Stop()
+				inst.read = func(uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+					fc.resetAfterReconnect()
+					return nil, fmt.Errorf("dcgm request failed with error code %d", test.code)
+				}
+				_ = fc.Poll()
+				t.Fatal("restart-required error must exit even after a cache reset")
+			}
+			executable, err := os.Executable()
+			require.NoError(t, err)
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, executable, "-test.run=^TestFieldCacheRestartPolicySurvivesReset$/^"+test.name+"$")
+			cmd.Env = append(os.Environ(), "FLEETINT_TEST_RESTART_AFTER_RESET=1")
+			output, err := cmd.CombinedOutput()
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, err, &exitErr, "%s", output)
+			require.Equal(t, 1, exitErr.ExitCode(), "%s", output)
+			require.Contains(t, string(output), "DCGM fatal error, exiting for restart")
+		})
+	}
+}
+
+func TestReconnectSerializesCachedWatchOperations(t *testing.T) {
+	for _, action := range []string{"poll", "stop"} {
+		t.Run(action, func(t *testing.T) {
+			initial := &intervalCacheInstance{
+				mockDCGMInstance: mockDCGMInstance{dcgmExists: true, devices: []DeviceInfo{{ID: 1}}},
+				fields:           []dcgm.Short{100, 1200},
+				read: func(uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+					return []dcgm.FieldValue_v1{{FieldID: 100, TS: 1}}, nil
+				},
+			}
+			next := &intervalCacheInstance{mockDCGMInstance: initial.mockDCGMInstance, fields: initial.fields, read: initial.read}
+			original := newConnectedInstanceFunc
+			newConnectedInstanceFunc = func() (Instance, error) { return next, nil }
+			defer func() { newConnectedInstanceFunc = original }()
+			inst := &reconnectingInstance{
+				current: initial, watchedFields: make(map[dcgm.Short]struct{}),
+				groupEntities: make(map[uint]struct{}), stopCh: make(chan struct{}),
+			}
+			defer inst.Shutdown()
+			swapped, release := make(chan struct{}), make(chan struct{})
+			unblock := sync.OnceFunc(func() { close(release) })
+			defer unblock()
+			inst.RegisterReconnectCallback(func() { close(swapped); <-release })
+			fc := NewFieldValueCache(context.Background(), inst, 30*time.Second)
+			fc.fieldWatches = NewFieldWatches(initial.fields, 30*time.Second, CollectionIntervals{})
+			created, _, _, destroyed := fakeWatches(fc.fieldWatches)
+			defer fc.Stop()
+			require.NoError(t, fc.Poll())
+			require.Equal(t, initial.GetGroupHandle(), next.GetGroupHandle(), "numeric IDs are deliberately reused")
+			reconnected := make(chan error, 1)
+			go func() { reconnected <- inst.reconnectNow() }()
+			<-swapped
+			completed := make(chan error, 1)
+			go func() {
+				if action == "stop" {
+					fc.Stop()
+					completed <- nil
+				} else {
+					completed <- fc.Poll()
+				}
+			}()
+			select {
+			case <-completed:
+				t.Fatal("native watch operation ran before reconnect reset completed")
+			case <-time.After(50 * time.Millisecond):
+			}
+			unblock()
+			require.NoError(t, <-reconnected)
+			require.NoError(t, <-completed)
+			require.Empty(t, *destroyed, "old handles must not be destroyed against the new session")
+			if action == "poll" {
+				require.Len(t, *created, 4, "same numeric group ID must still recreate both watches")
+				fc.Stop()
+				require.Equal(t, []uintptr{3, 4}, *destroyed)
+			}
+		})
+	}
 }
 
 func TestFieldWatchesRoundsSamplingIntervalUp(t *testing.T) {

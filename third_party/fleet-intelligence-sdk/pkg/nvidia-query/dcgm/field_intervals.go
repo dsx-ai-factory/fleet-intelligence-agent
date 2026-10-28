@@ -139,7 +139,8 @@ func FieldInterval(field dcgm.Short, standardInterval time.Duration, watchInterv
 		standardInterval = defaultStandardInterval
 	}
 	profile := StandardProfile
-	if (field >= 1200 && field <= 1219) || (field >= 1404 && field <= 1419) {
+	if (field >= dcgm.DCGM_FI_DEV_NVLINK_COUNT_TX_PACKETS && field <= dcgm.DCGM_FI_DEV_NVLINK_COUNT_EFFECTIVE_ERRORS) ||
+		(field >= dcgm.DCGM_FI_DEV_NVLINK_COUNT_FEC_HISTORY_0 && field <= dcgm.DCGM_FI_DEV_NVLINK_COUNT_FEC_HISTORY_15) {
 		profile = ExtendedProfile
 	}
 	if configured := watchIntervals.FieldProfiles[field]; configured == StandardProfile || configured == ExtendedProfile {

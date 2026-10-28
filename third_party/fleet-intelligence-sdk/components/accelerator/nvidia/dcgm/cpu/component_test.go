@@ -123,9 +123,13 @@ func TestCheck(t *testing.T) {
 	healthType := result.HealthStateType()
 	t.Logf("Health state: %v, Summary: %s", healthType, result.Summary())
 
-	// CPU component should always return healthy
-	if healthType != apiv1.HealthStateTypeHealthy {
-		t.Errorf("HealthStateType() = %v, want %v", healthType, apiv1.HealthStateTypeHealthy)
+	// Native discovery or watch setup failures report Degraded. Hosts without
+	// CPU entities remain Healthy when discovery itself succeeds.
+	if comp.(*component).setupDegradedReason != "" {
+		require.Equal(t, apiv1.HealthStateTypeDegraded, healthType)
+		require.Equal(t, comp.(*component).setupDegradedReason, result.Summary())
+	} else {
+		require.Equal(t, apiv1.HealthStateTypeHealthy, healthType)
 	}
 
 	// Now verify that metrics were actually set in Prometheus by the Check() call
@@ -380,12 +384,92 @@ func TestCollectionProfilesDoNotEnableCPUFields(t *testing.T) {
 	require.NotContains(t, c.fieldWatches.Fields(), dcgm.Short(999), "assignments must not enable fields")
 }
 
-func TestCPUDiscoveryFailureIsDegradedAndRetryable(t *testing.T) {
+type reconnectCPUInstance struct {
+	mockDCGMInstance
+	callback func()
+}
+
+func (m *reconnectCPUInstance) RegisterReconnectCallback(callback func()) { m.callback = callback }
+
+func TestCPUReconnectResetsSessionResources(t *testing.T) {
+	inst := &reconnectCPUInstance{}
+	comp, err := New(&components.GPUdInstance{RootCtx: context.Background(), DCGMInstance: inst})
+	require.NoError(t, err)
+	c := comp.(*component)
+	defer func() { require.NoError(t, c.Close()) }()
+	require.NotNil(t, inst.callback)
+	watches := c.fieldWatches
+	c.fieldSetupComplete = true
+	c.cpuGroupHandle.SetHandle(123)
+	c.cpuEntities = []uint{1}
+	c.setupDegradedReason = "old session error"
+	inst.callback()
+	require.Same(t, watches, c.fieldWatches)
+	require.ElementsMatch(t, cpuLevelFields, c.fieldWatches.Fields())
+	require.False(t, c.fieldSetupComplete)
+	require.Zero(t, c.cpuGroupHandle.GetHandle(), "old handles must not be destroyed in the new session")
+	require.Empty(t, c.cpuEntities)
+	require.Empty(t, c.setupDegradedReason)
+	require.NoError(t, c.Close())
+	inst.callback()
+	require.Equal(t, apiv1.HealthStateTypeInitializing, c.Check().HealthStateType(), "a callback after Close must not restart collection")
+}
+
+func TestCPUDiscoveryErrorHandling(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		message     string
+		unavailable bool
+	}{
+		{"module not loaded", "This request is serviced by a module of DCGM that is not currently loaded", true},
+		{"not supported", "Feature not supported", true},
+		{"disconnected", "Host engine connection invalid/disconnected", false},
+		{"unknown", "Unexpected internal error", false},
+		{"similar message", "Feature not supported because connection failed", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			comp, err := New(&components.GPUdInstance{
+				RootCtx: context.Background(), DCGMInstance: &mockDCGMInstance{dcgmExists: true},
+			})
+			require.NoError(t, err)
+			c := comp.(*component)
+			defer func() { require.NoError(t, c.Close()) }()
+			discoveryErr := fmt.Errorf("error getting entity count: %s", test.message)
+			for range 2 {
+				c.setupMu.Lock()
+				c.setupDegradedReason = "previous setup failure"
+				c.handleCPUDiscoveryError(discoveryErr)
+				c.setupMu.Unlock()
+				require.Equal(t, test.unavailable, c.fieldSetupComplete)
+				if test.unavailable {
+					require.Empty(t, c.setupDegradedReason, "unavailability clears a prior setup failure")
+					result := c.Check()
+					require.Equal(t, apiv1.HealthStateTypeHealthy, result.HealthStateType())
+					require.Equal(t, "no CPU entities available", result.Summary())
+				} else {
+					require.Contains(t, c.setupDegradedReason, discoveryErr.Error())
+				}
+				require.Empty(t, c.cpuEntities)
+				require.Zero(t, c.cpuGroupHandle.GetHandle())
+			}
+		})
+	}
+}
+
+func TestCPUUnexpectedDiscoveryFailureIsDegradedAndRetryable(t *testing.T) {
 	// Exercise the native failure path without adding production test hooks.
 	// A live session with successful CPU discovery cannot exercise this case.
 	_, discoveryErr := dcgm.GetEntityGroupEntities(dcgm.FE_CPU)
 	if discoveryErr == nil {
 		t.Skip("CPU discovery succeeds; this test requires a discovery failure")
+	}
+	probe, err := New(&components.GPUdInstance{RootCtx: context.Background()})
+	require.NoError(t, err)
+	probeCPU := probe.(*component)
+	probeCPU.handleCPUDiscoveryError(discoveryErr)
+	defer probeCPU.Close()
+	if probeCPU.fieldSetupComplete {
+		t.Skip("CPU discovery reports expected monitoring unavailability")
 	}
 	comp, err := New(&components.GPUdInstance{
 		RootCtx: context.Background(), DCGMInstance: &mockDCGMInstance{dcgmExists: true},
