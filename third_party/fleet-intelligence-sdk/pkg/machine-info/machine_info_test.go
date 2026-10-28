@@ -161,6 +161,11 @@ func TestArchitectureFromComputeCapability(t *testing.T) {
 		{major: 8, minor: 9, want: "ada-lovelace"},
 		{major: 9, minor: 0, want: "hopper"},
 		{major: 10, minor: 0, want: "blackwell"},
+		{major: 10, minor: 3, want: "blackwell"},
+		{major: 10, minor: 7, want: "rubin"},
+		{major: 12, minor: 0, want: "blackwell"},
+		{major: 12, minor: 1, want: "blackwell"},
+		{major: 13, minor: 0, want: "rubin"},
 	}
 	for _, tc := range tests {
 		capability := int64((tc.major << 16) | tc.minor)
@@ -171,6 +176,16 @@ func TestArchitectureFromComputeCapability(t *testing.T) {
 func TestFormatCUDADriverVersion(t *testing.T) {
 	assert.Equal(t, "12.8", formatCUDADriverVersion(12080))
 	assert.Empty(t, formatCUDADriverVersion(0))
+}
+
+func TestGetMachineGPUInfoRubinPreview(t *testing.T) {
+	info, _, _, err := GetMachineGPUInfo([]nvidiadcgm.DeviceInfo{{
+		Model:             "NVIDIA Graphics Device",
+		ComputeCapability: 10<<16 | 7,
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, "rubin", info.Architecture)
+	assert.Equal(t, "NVIDIA-Graphics-Device", info.Product)
 }
 
 func TestGetMachineGPUInfoFromDCGM(t *testing.T) {

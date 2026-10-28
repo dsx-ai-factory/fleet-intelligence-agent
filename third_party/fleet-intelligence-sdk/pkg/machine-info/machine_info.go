@@ -413,7 +413,14 @@ func architectureFromComputeCapability(capability int64) string {
 		return "ampere"
 	case 9:
 		return "hopper"
-	case 10, 12:
+	case 10:
+		// CUDA 13.4 exposes Rubin preview hardware as compute capability 10.7.
+		// https://developer.nvidia.com/blog/cuda-toolkit-13-4-adds-windows-on-arm-support-and-greater-control-over-shared-gpus/
+		if minor == 7 {
+			return "rubin"
+		}
+		return "blackwell"
+	case 12:
 		return "blackwell"
 	case 13:
 		return "rubin"
