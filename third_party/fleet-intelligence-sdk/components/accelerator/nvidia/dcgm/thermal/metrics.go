@@ -37,7 +37,7 @@ var (
 		pkgmetrics.MetricComponentLabelKey: Name,
 	}
 
-	metricDCGMFIDevGPUTemp = prometheus.NewGaugeVec(
+	metricDCGMFIDevGPUTemp = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -47,7 +47,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevMemoryTemp = prometheus.NewGaugeVec(
+	metricDCGMFIDevMemoryTemp = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -57,7 +57,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevSlowdownTemp = prometheus.NewGaugeVec(
+	metricDCGMFIDevSlowdownTemp = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -72,7 +72,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevGPUTempLimit = prometheus.NewGaugeVec(
+	metricDCGMFIDevGPUTempLimit = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{Name: "dcgm_fi_dev_gpu_temp_limit", Help: "Thermal margin temperature (distance to nearest slowdown threshold) for this GPU"},
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)

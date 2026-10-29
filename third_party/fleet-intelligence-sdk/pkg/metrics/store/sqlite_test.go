@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,199 @@ func TestSQLiteNewStore(t *testing.T) {
 	// Test with empty table name
 	_, err = NewSQLiteStore(ctx, dbRW, dbRO, "")
 	assert.Equal(t, ErrEmptyTableName, err)
+}
+
+func TestSQLiteLateSamplesAndRepeatedReceipts(t *testing.T) {
+	ctx := context.Background()
+	dbRW, dbRO, cleanup := pkgsqlite.OpenTestDB(t)
+	defer cleanup()
+	store, err := NewSQLiteStore(ctx, dbRW, dbRO, "late_samples")
+	require.NoError(t, err)
+	cutoff := time.Now().Add(-time.Minute)
+	m := pkgmetrics.Metric{
+		UnixMilliseconds: cutoff.Add(-time.Hour).UnixMilli(),
+		Component:        "dcgm-nvlink", Name: "counter", Type: pkgmetrics.MetricTypeCounter,
+		Labels: map[string]string{"gpu": "0"}, Value: 42,
+	}
+	failedCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	require.Error(t, store.Record(failedCtx, m))
+	rows, err := store.Read(ctx)
+	require.NoError(t, err)
+	require.Empty(t, rows, "a failed write must not consume the source sample")
+	require.NoError(t, store.Record(ctx, m, m))
+	// Use a distinct receipt time so this assertion cannot pass accidentally
+	// when several writes happen within one wall-clock millisecond.
+	firstReceipt := time.Now().Add(-30 * time.Second).UnixMilli()
+	_, err = dbRW.ExecContext(ctx, "UPDATE late_samples SET recorded_at = ?", firstReceipt)
+	require.NoError(t, err)
+	// Reopening the store models an agent restart: deduplication must persist.
+	store, err = NewSQLiteStore(ctx, dbRW, dbRO, "late_samples")
+	require.NoError(t, err)
+	m.Value = 43 // Preserve the existing update-on-conflict contract.
+	require.NoError(t, store.Record(ctx, m))
+	var repeatedReceipt int64
+	require.NoError(t, dbRO.QueryRowContext(ctx, "SELECT recorded_at FROM late_samples").Scan(&repeatedReceipt))
+	require.Equal(t, firstReceipt, repeatedReceipt)
+	rows, err = store.Read(ctx, pkgmetrics.WithRecordedSince(cutoff), pkgmetrics.WithComponents("dcgm-nvlink"))
+	require.NoError(t, err)
+	require.Equal(t, pkgmetrics.Metrics{m}, rows, "late measurements must remain exportable")
+	rows, err = store.Read(ctx, pkgmetrics.WithSince(cutoff))
+	require.NoError(t, err)
+	require.Empty(t, rows, "measurement-time API queries retain their meaning")
+	rows, err = store.Read(ctx, pkgmetrics.WithRecordedSince(cutoff), pkgmetrics.WithSince(cutoff))
+	require.NoError(t, err)
+	require.Empty(t, rows)
+	rows, err = store.Read(ctx, pkgmetrics.WithRecordedSince(time.UnixMilli(firstReceipt+1)))
+	require.NoError(t, err)
+	require.Empty(t, rows, "duplicates must not renew the export lookback")
+	count, err := store.Purge(ctx, cutoff)
+	require.NoError(t, err)
+	require.Zero(t, count, "a late sample must survive long enough to export")
+	// A new measurement with the same value remains a distinct point.
+	m.UnixMilliseconds += 60_000
+	require.NoError(t, store.Record(ctx, m))
+	rows, err = store.Read(ctx)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	// Repeated reads did not extend retention for the first sample.
+	count, err = store.Purge(ctx, time.Now().Add(time.Millisecond))
+	require.NoError(t, err)
+	require.Equal(t, 2, count)
+}
+
+func TestSQLiteReceiptMigrationPreservesLegacyAndRollbackWrites(t *testing.T) {
+	ctx := context.Background()
+	dbRW, dbRO, cleanup := pkgsqlite.OpenTestDB(t)
+	defer cleanup()
+	_, err := dbRW.ExecContext(ctx, `CREATE TABLE legacy (
+		unix_milliseconds INTEGER NOT NULL, component_name TEXT NOT NULL,
+		metric_name TEXT NOT NULL, metric_labels TEXT, metric_value REAL NOT NULL,
+		PRIMARY KEY (unix_milliseconds, component_name, metric_name, metric_labels)
+	) WITHOUT ROWID`)
+	require.NoError(t, err)
+	oldTime := time.Now().Add(-time.Hour).UnixMilli()
+	_, err = dbRW.ExecContext(ctx, "INSERT INTO legacy VALUES (?, 'cpu', 'usage', '', 10)", oldTime)
+	require.NoError(t, err)
+	store, err := NewSQLiteStore(ctx, dbRW, dbRO, "legacy")
+	require.NoError(t, err)
+	rows, err := store.Read(ctx)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, pkgmetrics.MetricTypeGauge, rows[0].Type)
+	// A duplicate legacy sample must retain its original effective receipt time.
+	require.NoError(t, store.Record(ctx, rows[0]))
+	// Simulate a previous binary writing its explicit six-column INSERT.
+	newTime := time.Now().UnixMilli()
+	_, err = dbRW.ExecContext(ctx, `INSERT OR REPLACE INTO legacy
+		(unix_milliseconds, component_name, metric_name, metric_labels, metric_value, metric_type)
+		VALUES (?, 'cpu', 'usage', '', 20, 'gauge')`, newTime)
+	require.NoError(t, err)
+	store, err = NewSQLiteStore(ctx, dbRW, dbRO, "legacy")
+	require.NoError(t, err)
+	rows, err = store.Read(ctx, pkgmetrics.WithRecordedSince(time.UnixMilli(newTime)))
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, newTime, rows[0].UnixMilliseconds)
+	count, err := store.Purge(ctx, time.UnixMilli(newTime))
+	require.NoError(t, err)
+	require.Equal(t, 1, count, "legacy retention falls back to measurement time")
+}
+
+func TestSQLiteReceiptReadUsesIndexAndPreservesMeasurementOrder(t *testing.T) {
+	ctx := context.Background()
+	dbRW, dbRO, cleanup := pkgsqlite.OpenTestDB(t)
+	defer cleanup()
+	const table = "ordered_receipts"
+	store, err := NewSQLiteStore(ctx, dbRW, dbRO, table)
+	require.NoError(t, err)
+	cutoff := time.Now().Add(-time.Minute)
+	measurement := cutoff.Add(-time.Hour).UnixMilli()
+	// Retained history must not be scanned to find a small receipt-time window.
+	history := make(pkgmetrics.Metrics, 512)
+	for i := range history {
+		history[i] = pkgmetrics.Metric{UnixMilliseconds: measurement - int64(i+1), Component: "history", Name: "value"}
+	}
+	require.NoError(t, store.Record(ctx, history...))
+	_, err = dbRW.ExecContext(ctx, "UPDATE "+table+" SET recorded_at = unix_milliseconds")
+	require.NoError(t, err)
+
+	// Receipt order differs from measurement order, including ties resolved by
+	// component, name, and labels. All five measurements are late arrivals.
+	ms := pkgmetrics.Metrics{
+		{UnixMilliseconds: measurement, Component: "b", Name: "z", Value: 1},
+		{UnixMilliseconds: measurement, Component: "a", Name: "z", Value: 2},
+		{UnixMilliseconds: measurement, Component: "a", Name: "a", Labels: map[string]string{"gpu": "2"}, Value: 3},
+		{UnixMilliseconds: measurement, Component: "a", Name: "a", Labels: map[string]string{"gpu": "1"}, Value: 4},
+		{UnixMilliseconds: measurement - 1, Component: "b", Name: "a", Value: 5},
+	}
+	for i := range ms {
+		ms[i].Type = pkgmetrics.MetricTypeGauge
+		require.NoError(t, store.Record(ctx, ms[i]))
+		_, err = dbRW.ExecContext(ctx, "UPDATE "+table+" SET recorded_at = ? WHERE metric_value = ?",
+			cutoff.Add(time.Duration(i+1)*time.Second).UnixMilli(), ms[i].Value)
+		require.NoError(t, err)
+	}
+	legacy := pkgmetrics.Metric{UnixMilliseconds: cutoff.Add(10 * time.Second).UnixMilli(), Component: "b", Name: "legacy", Type: pkgmetrics.MetricTypeGauge, Value: 6}
+	_, err = dbRW.ExecContext(ctx, "INSERT INTO "+table+
+		" (unix_milliseconds, component_name, metric_name, metric_labels, metric_value) VALUES (?, ?, ?, '', ?)",
+		legacy.UnixMilliseconds, legacy.Component, legacy.Name, legacy.Value)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name       string
+		opts       []pkgmetrics.OpOption
+		want       pkgmetrics.Metrics
+		wantAccess string
+	}{
+		{"export", []pkgmetrics.OpOption{pkgmetrics.WithRecordedSince(cutoff)}, pkgmetrics.Metrics{ms[4], ms[3], ms[2], ms[1], ms[0], legacy}, "USING INDEX " + table + "_recorded_at"},
+		{"component filter", []pkgmetrics.OpOption{pkgmetrics.WithRecordedSince(cutoff), pkgmetrics.WithComponents("a")}, pkgmetrics.Metrics{ms[3], ms[2], ms[1]}, "USING INDEX " + table + "_recorded_at"},
+		{"empty receipt window", []pkgmetrics.OpOption{pkgmetrics.WithRecordedSince(cutoff.Add(time.Minute))}, pkgmetrics.Metrics{}, "USING INDEX " + table + "_recorded_at"},
+		{"measurement filter", []pkgmetrics.OpOption{pkgmetrics.WithSince(cutoff)}, pkgmetrics.Metrics{legacy}, "USING PRIMARY KEY"},
+		{"combined filters", []pkgmetrics.OpOption{pkgmetrics.WithSince(cutoff), pkgmetrics.WithRecordedSince(cutoff)}, pkgmetrics.Metrics{legacy}, "USING PRIMARY KEY"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			op := &pkgmetrics.Op{}
+			require.NoError(t, op.ApplyOpts(tc.opts))
+			query, args, err := metricReadQuery(table, op)
+			require.NoError(t, err)
+			planRows, err := dbRO.QueryContext(ctx, "EXPLAIN QUERY PLAN "+query, args...)
+			require.NoError(t, err)
+			defer func() { _ = planRows.Close() }()
+			var steps []string
+			for planRows.Next() {
+				var id, parent, unused int
+				var step string
+				require.NoError(t, planRows.Scan(&id, &parent, &unused, &step))
+				steps = append(steps, step)
+			}
+			require.NoError(t, planRows.Err())
+			require.NoError(t, planRows.Close())
+			plan := strings.Join(steps, "\n")
+			require.Contains(t, plan, "SEARCH "+table+" "+tc.wantAccess, "the full ordered query must search the requested time range")
+			require.NotContains(t, plan, "SCAN "+table, "export must not scan all retained history")
+			got, err := store.Read(ctx, tc.opts...)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestSQLiteReceiptMigrationRollsBackOnFailure(t *testing.T) {
+	ctx := context.Background()
+	dbRW, _, cleanup := pkgsqlite.OpenTestDB(t)
+	defer cleanup()
+	_, err := dbRW.ExecContext(ctx, `CREATE TABLE legacy (unix_milliseconds INTEGER);
+		CREATE TABLE legacy_recorded_at (collision INTEGER);`)
+	require.NoError(t, err)
+	require.Error(t, ensureMetricColumns(ctx, dbRW, "legacy"))
+	var addedColumns int
+	require.NoError(t, dbRW.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('legacy')
+		WHERE name IN ('metric_type', 'recorded_at')`).Scan(&addedColumns))
+	require.Zero(t, addedColumns, "a failed index migration must not leave partial columns")
+	_, err = dbRW.ExecContext(ctx, "DROP TABLE legacy_recorded_at")
+	require.NoError(t, err)
+	require.NoError(t, ensureMetricColumns(ctx, dbRW, "legacy"), "migration must be retryable")
 }
 
 func TestSQLiteNewStore_AddsMetricTypeColumnToExistingTable(t *testing.T) {
@@ -73,12 +267,12 @@ CREATE TABLE %s (
 	assert.Equal(t, pkgmetrics.MetricTypeCounter, results[0].Type)
 }
 
-func TestEnsureMetricTypeColumnRejectsInvalidTableName(t *testing.T) {
+func TestEnsureMetricColumnsRejectsInvalidTableName(t *testing.T) {
 	dbRW, _, cleanup := pkgsqlite.OpenTestDB(t)
 	defer cleanup()
 
 	ctx := context.Background()
-	err := ensureMetricTypeColumn(ctx, dbRW, `test_metrics; DROP TABLE test_metrics;`)
+	err := ensureMetricColumns(ctx, dbRW, `test_metrics; DROP TABLE test_metrics;`)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid sqlite identifier")
 }
@@ -340,6 +534,10 @@ func TestSQLiteStore_Purge(t *testing.T) {
 		require.NoError(t, err)
 	}
 
+	// Model rows first recorded at their historical measurement times.
+	_, err = dbRW.ExecContext(ctx, "UPDATE "+tableName+" SET recorded_at = unix_milliseconds")
+	require.NoError(t, err)
+
 	// Verify all records exist
 	rs, err := store.Read(ctx)
 	require.NoError(t, err)
@@ -597,6 +795,10 @@ func TestSQLitePurge(t *testing.T) {
 		err := insert(ctx, dbRW, tableName, m)
 		require.NoError(t, err)
 	}
+
+	// Model rows first recorded at their historical measurement times.
+	_, err = dbRW.ExecContext(ctx, "UPDATE "+tableName+" SET recorded_at = unix_milliseconds")
+	require.NoError(t, err)
 
 	// Test purging metrics older than 90 minutes
 	affected, err := purge(ctx, dbRW, tableName, now.Add(-90*time.Minute))
@@ -931,6 +1133,10 @@ func TestSQLiteStore_PurgeMethod(t *testing.T) {
 		err := store.Record(ctx, m)
 		require.NoError(t, err)
 	}
+
+	// Model rows first recorded at their historical measurement times.
+	_, err = dbRW.ExecContext(ctx, "UPDATE "+tableName+" SET recorded_at = unix_milliseconds")
+	require.NoError(t, err)
 
 	// Verify all records exist
 	rs, err := store.Read(ctx)

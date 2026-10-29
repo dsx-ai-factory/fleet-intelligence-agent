@@ -267,21 +267,21 @@ func (c *component) Check() components.CheckResult {
 					metricDCGMFIDevGPUTemp.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_MEMORY_TEMP:
 					metricDCGMFIDevMemoryTemp.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_SLOWDOWN_TEMP:
 					metricDCGMFIDevSlowdownTemp.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_THERMAL_VIOLATION:
-					metricDCGMFIDevThermalViolation.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).Set(float64(fieldValue.Int64()))
+					metricDCGMFIDevThermalViolation.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_GPU_TEMP_LIMIT:
-					metricDCGMFIDevGPUTempLimit.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).Set(float64(fieldValue.Int64()))
+					metricDCGMFIDevGPUTempLimit.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				}
 			}
 		}

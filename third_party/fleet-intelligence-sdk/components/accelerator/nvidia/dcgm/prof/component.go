@@ -411,97 +411,97 @@ func (c *component) publishCheck(inputs profilingReadInputs, values [][]dcgm.Fie
 					metricDCGMFIProfGrEngineActive.With(prometheus.Labels{
 						"uuid": device.UUID,
 						"gpu":  fmt.Sprintf("%d", device.ID),
-					}).Set(val.Float64())
+					}).SetWithTimestamp(val.Float64(), val.TS)
 
 				case dcgm.DCGM_FI_PROF_SM_ACTIVE:
 					metricDCGMFIProfSmActive.With(prometheus.Labels{
 						"uuid": device.UUID,
 						"gpu":  fmt.Sprintf("%d", device.ID),
-					}).Set(val.Float64())
+					}).SetWithTimestamp(val.Float64(), val.TS)
 
 				case dcgm.DCGM_FI_PROF_SM_OCCUPANCY:
 					metricDCGMFIProfSmOccupancy.With(prometheus.Labels{
 						"uuid": device.UUID,
 						"gpu":  fmt.Sprintf("%d", device.ID),
-					}).Set(val.Float64())
+					}).SetWithTimestamp(val.Float64(), val.TS)
 
 				case dcgm.DCGM_FI_PROF_PIPE_TENSOR_ACTIVE:
 					metricDCGMFIProfPipeTensorActive.With(prometheus.Labels{
 						"uuid": device.UUID,
 						"gpu":  fmt.Sprintf("%d", device.ID),
-					}).Set(val.Float64())
+					}).SetWithTimestamp(val.Float64(), val.TS)
 
 				case dcgm.DCGM_FI_PROF_PIPE_TENSOR_IMMA_ACTIVE:
 					metricDCGMFIProfPipeTensorImmaActive.With(prometheus.Labels{
 						"uuid": device.UUID,
 						"gpu":  fmt.Sprintf("%d", device.ID),
-					}).Set(val.Float64())
+					}).SetWithTimestamp(val.Float64(), val.TS)
 
 				case dcgm.DCGM_FI_PROF_PIPE_TENSOR_HMMA_ACTIVE:
 					metricDCGMFIProfPipeTensorHmmaActive.With(prometheus.Labels{
 						"uuid": device.UUID,
 						"gpu":  fmt.Sprintf("%d", device.ID),
-					}).Set(val.Float64())
+					}).SetWithTimestamp(val.Float64(), val.TS)
 
 				case dcgm.DCGM_FI_PROF_PIPE_TENSOR_DFMA_ACTIVE:
 					metricDCGMFIProfPipeTensorDfmaActive.With(prometheus.Labels{
 						"uuid": device.UUID,
 						"gpu":  fmt.Sprintf("%d", device.ID),
-					}).Set(val.Float64())
+					}).SetWithTimestamp(val.Float64(), val.TS)
 
 				case dcgm.DCGM_FI_PROF_PIPE_INT_ACTIVE:
 					metricDCGMFIProfPipeIntActive.With(prometheus.Labels{
 						"uuid": device.UUID,
 						"gpu":  fmt.Sprintf("%d", device.ID),
-					}).Set(val.Float64())
+					}).SetWithTimestamp(val.Float64(), val.TS)
 
 				case dcgm.DCGM_FI_PROF_DRAM_ACTIVE:
 					metricDCGMFIProfDramActive.With(prometheus.Labels{
 						"uuid": device.UUID,
 						"gpu":  fmt.Sprintf("%d", device.ID),
-					}).Set(val.Float64())
+					}).SetWithTimestamp(val.Float64(), val.TS)
 
 				case dcgm.DCGM_FI_PROF_PIPE_FP64_ACTIVE:
 					metricDCGMFIProfPipeFp64Active.With(prometheus.Labels{
 						"uuid": device.UUID,
 						"gpu":  fmt.Sprintf("%d", device.ID),
-					}).Set(val.Float64())
+					}).SetWithTimestamp(val.Float64(), val.TS)
 
 				case dcgm.DCGM_FI_PROF_PIPE_FP32_ACTIVE:
 					metricDCGMFIProfPipeFp32Active.With(prometheus.Labels{
 						"uuid": device.UUID,
 						"gpu":  fmt.Sprintf("%d", device.ID),
-					}).Set(val.Float64())
+					}).SetWithTimestamp(val.Float64(), val.TS)
 
 				case dcgm.DCGM_FI_PROF_PIPE_FP16_ACTIVE:
 					metricDCGMFIProfPipeFp16Active.With(prometheus.Labels{
 						"uuid": device.UUID,
 						"gpu":  fmt.Sprintf("%d", device.ID),
-					}).Set(val.Float64())
+					}).SetWithTimestamp(val.Float64(), val.TS)
 
 				case dcgm.DCGM_FI_PROF_PCIE_TX_BYTES:
 					metricDCGMFIProfPcieTxBytes.With(prometheus.Labels{
 						"uuid": device.UUID,
 						"gpu":  fmt.Sprintf("%d", device.ID),
-					}).Set(float64(val.Int64()))
+					}).SetWithTimestamp(float64(val.Int64()), val.TS)
 
 				case dcgm.DCGM_FI_PROF_PCIE_RX_BYTES:
 					metricDCGMFIProfPcieRxBytes.With(prometheus.Labels{
 						"uuid": device.UUID,
 						"gpu":  fmt.Sprintf("%d", device.ID),
-					}).Set(float64(val.Int64()))
+					}).SetWithTimestamp(float64(val.Int64()), val.TS)
 
 				case dcgm.DCGM_FI_PROF_NVLINK_TX_BYTES:
 					metricDCGMFIProfNvlinkTxBytes.With(prometheus.Labels{
 						"uuid": device.UUID,
 						"gpu":  fmt.Sprintf("%d", device.ID),
-					}).Set(float64(val.Int64()))
+					}).SetWithTimestamp(float64(val.Int64()), val.TS)
 
 				case dcgm.DCGM_FI_PROF_NVLINK_RX_BYTES:
 					metricDCGMFIProfNvlinkRxBytes.With(prometheus.Labels{
 						"uuid": device.UUID,
 						"gpu":  fmt.Sprintf("%d", device.ID),
-					}).Set(float64(val.Int64()))
+					}).SetWithTimestamp(float64(val.Int64()), val.TS)
 				}
 			}
 		}
