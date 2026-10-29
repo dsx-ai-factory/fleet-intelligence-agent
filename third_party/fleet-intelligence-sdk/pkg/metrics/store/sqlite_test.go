@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,11 +130,85 @@ func TestSQLiteReceiptMigrationPreservesLegacyAndRollbackWrites(t *testing.T) {
 	count, err := store.Purge(ctx, time.UnixMilli(newTime))
 	require.NoError(t, err)
 	require.Equal(t, 1, count, "legacy retention falls back to measurement time")
-	var plan string
-	var id, parent, unused int
-	require.NoError(t, dbRO.QueryRowContext(ctx, `EXPLAIN QUERY PLAN SELECT * FROM legacy
-		WHERE COALESCE(recorded_at, unix_milliseconds) >= ?`, newTime).Scan(&id, &parent, &unused, &plan))
-	require.Contains(t, plan, "legacy_recorded_at", "receipt-time lookbacks must be indexed")
+}
+
+func TestSQLiteReceiptReadUsesIndexAndPreservesMeasurementOrder(t *testing.T) {
+	ctx := context.Background()
+	dbRW, dbRO, cleanup := pkgsqlite.OpenTestDB(t)
+	defer cleanup()
+	const table = "ordered_receipts"
+	store, err := NewSQLiteStore(ctx, dbRW, dbRO, table)
+	require.NoError(t, err)
+	cutoff := time.Now().Add(-time.Minute)
+	measurement := cutoff.Add(-time.Hour).UnixMilli()
+	// Retained history must not be scanned to find a small receipt-time window.
+	history := make(pkgmetrics.Metrics, 512)
+	for i := range history {
+		history[i] = pkgmetrics.Metric{UnixMilliseconds: measurement - int64(i+1), Component: "history", Name: "value"}
+	}
+	require.NoError(t, store.Record(ctx, history...))
+	_, err = dbRW.ExecContext(ctx, "UPDATE "+table+" SET recorded_at = unix_milliseconds")
+	require.NoError(t, err)
+
+	// Receipt order differs from measurement order, including ties resolved by
+	// component, name, and labels. All five measurements are late arrivals.
+	ms := pkgmetrics.Metrics{
+		{UnixMilliseconds: measurement, Component: "b", Name: "z", Value: 1},
+		{UnixMilliseconds: measurement, Component: "a", Name: "z", Value: 2},
+		{UnixMilliseconds: measurement, Component: "a", Name: "a", Labels: map[string]string{"gpu": "2"}, Value: 3},
+		{UnixMilliseconds: measurement, Component: "a", Name: "a", Labels: map[string]string{"gpu": "1"}, Value: 4},
+		{UnixMilliseconds: measurement - 1, Component: "b", Name: "a", Value: 5},
+	}
+	for i := range ms {
+		ms[i].Type = pkgmetrics.MetricTypeGauge
+		require.NoError(t, store.Record(ctx, ms[i]))
+		_, err = dbRW.ExecContext(ctx, "UPDATE "+table+" SET recorded_at = ? WHERE metric_value = ?",
+			cutoff.Add(time.Duration(i+1)*time.Second).UnixMilli(), ms[i].Value)
+		require.NoError(t, err)
+	}
+	legacy := pkgmetrics.Metric{UnixMilliseconds: cutoff.Add(10 * time.Second).UnixMilli(), Component: "b", Name: "legacy", Type: pkgmetrics.MetricTypeGauge, Value: 6}
+	_, err = dbRW.ExecContext(ctx, "INSERT INTO "+table+
+		" (unix_milliseconds, component_name, metric_name, metric_labels, metric_value) VALUES (?, ?, ?, '', ?)",
+		legacy.UnixMilliseconds, legacy.Component, legacy.Name, legacy.Value)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name       string
+		opts       []pkgmetrics.OpOption
+		want       pkgmetrics.Metrics
+		wantAccess string
+	}{
+		{"export", []pkgmetrics.OpOption{pkgmetrics.WithRecordedSince(cutoff)}, pkgmetrics.Metrics{ms[4], ms[3], ms[2], ms[1], ms[0], legacy}, "USING INDEX " + table + "_recorded_at"},
+		{"component filter", []pkgmetrics.OpOption{pkgmetrics.WithRecordedSince(cutoff), pkgmetrics.WithComponents("a")}, pkgmetrics.Metrics{ms[3], ms[2], ms[1]}, "USING INDEX " + table + "_recorded_at"},
+		{"empty receipt window", []pkgmetrics.OpOption{pkgmetrics.WithRecordedSince(cutoff.Add(time.Minute))}, pkgmetrics.Metrics{}, "USING INDEX " + table + "_recorded_at"},
+		{"measurement filter", []pkgmetrics.OpOption{pkgmetrics.WithSince(cutoff)}, pkgmetrics.Metrics{legacy}, "USING PRIMARY KEY"},
+		{"combined filters", []pkgmetrics.OpOption{pkgmetrics.WithSince(cutoff), pkgmetrics.WithRecordedSince(cutoff)}, pkgmetrics.Metrics{legacy}, "USING PRIMARY KEY"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			op := &pkgmetrics.Op{}
+			require.NoError(t, op.ApplyOpts(tc.opts))
+			query, args, err := metricReadQuery(table, op)
+			require.NoError(t, err)
+			planRows, err := dbRO.QueryContext(ctx, "EXPLAIN QUERY PLAN "+query, args...)
+			require.NoError(t, err)
+			defer func() { _ = planRows.Close() }()
+			var steps []string
+			for planRows.Next() {
+				var id, parent, unused int
+				var step string
+				require.NoError(t, planRows.Scan(&id, &parent, &unused, &step))
+				steps = append(steps, step)
+			}
+			require.NoError(t, planRows.Err())
+			require.NoError(t, planRows.Close())
+			plan := strings.Join(steps, "\n")
+			require.Contains(t, plan, "SEARCH "+table+" "+tc.wantAccess, "the full ordered query must search the requested time range")
+			require.NotContains(t, plan, "SCAN "+table, "export must not scan all retained history")
+			got, err := store.Read(ctx, tc.opts...)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
 }
 
 func TestSQLiteReceiptMigrationRollsBackOnFailure(t *testing.T) {

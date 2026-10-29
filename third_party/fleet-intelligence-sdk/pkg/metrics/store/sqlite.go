@@ -207,8 +207,68 @@ func read(ctx context.Context, dbRO *sql.DB, table string, opts ...pkgmetrics.Op
 		return nil, err
 	}
 
+	query, params, err := metricReadQuery(table, op)
+	if err != nil {
+		return nil, err
+	}
+
+	start := time.Now()
+	defer func() {
+		pkgmetricsrecorder.RecordSQLiteSelect(time.Since(start).Seconds())
+	}()
+
+	queryRows, err := dbRO.QueryContext(ctx, query, params...)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer func() {
+		_ = queryRows.Close()
+	}()
+
+	rows := make(pkgmetrics.Metrics, 0)
+	for queryRows.Next() {
+		m := pkgmetrics.Metric{}
+		var labels sql.NullString
+		if err := queryRows.Scan(&m.UnixMilliseconds, &m.Component, &m.Name, &labels, &m.Value, &m.Type); err != nil {
+			return nil, err
+		}
+		if m.Type == "" {
+			m.Type = pkgmetrics.MetricTypeGauge
+		}
+		if labels.Valid && labels.String != "" {
+			lm := make(map[string]string, 0)
+			if err := json.Unmarshal([]byte(labels.String), &lm); err != nil {
+				return nil, err
+			}
+			m.Labels = lm
+		}
+		rows = append(rows, m)
+	}
+	if err := queryRows.Err(); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// metricReadQuery builds receipt- or measurement-time filters and a stable
+// measurement-time order.
+func metricReadQuery(table string, op *pkgmetrics.Op) (string, []any, error) {
 	if table == "" {
-		return nil, ErrEmptyTableName
+		return "", nil, ErrEmptyTableName
+	}
+	fromStatement := table
+	if !op.RecordedSince.IsZero() && op.Since.IsZero() {
+		// Otherwise SQLite can scan the entire primary key to satisfy ORDER BY.
+		// Search the receipt window first, then sort only the matching rows.
+		// Measurement-time filters can use the existing primary-key range.
+		index, err := quoteSQLiteIdentifier(table + "_recorded_at")
+		if err != nil {
+			return "", nil, err
+		}
+		fromStatement += " INDEXED BY " + index
 	}
 
 	params := []any{}
@@ -254,52 +314,14 @@ FROM %s
 		columnMetricLabels,
 		columnMetricValue,
 		columnMetricType,
-		table,
+		fromStatement,
 	)
 	if whereStatement != "" {
 		query += whereStatement + "\n"
 	}
 	query += orderByStatement
 
-	start := time.Now()
-	defer func() {
-		pkgmetricsrecorder.RecordSQLiteSelect(time.Since(start).Seconds())
-	}()
-
-	queryRows, err := dbRO.QueryContext(ctx, query, params...)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, err
-	}
-	defer func() {
-		_ = queryRows.Close()
-	}()
-
-	rows := make(pkgmetrics.Metrics, 0)
-	for queryRows.Next() {
-		m := pkgmetrics.Metric{}
-		var labels sql.NullString
-		if err := queryRows.Scan(&m.UnixMilliseconds, &m.Component, &m.Name, &labels, &m.Value, &m.Type); err != nil {
-			return nil, err
-		}
-		if m.Type == "" {
-			m.Type = pkgmetrics.MetricTypeGauge
-		}
-		if labels.Valid && labels.String != "" {
-			lm := make(map[string]string, 0)
-			if err := json.Unmarshal([]byte(labels.String), &lm); err != nil {
-				return nil, err
-			}
-			m.Labels = lm
-		}
-		rows = append(rows, m)
-	}
-	if err := queryRows.Err(); err != nil {
-		return nil, err
-	}
-	return rows, nil
+	return query, params, nil
 }
 
 // ensureMetricColumns upgrades the existing table in place. Nullable receipt
