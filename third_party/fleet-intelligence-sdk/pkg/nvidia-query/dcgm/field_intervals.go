@@ -160,7 +160,8 @@ func FieldInterval(field dcgm.Short, standardInterval time.Duration, watchInterv
 }
 
 // FieldWatches owns native DCGM field groups and their sampling intervals.
-// Its owner must serialize setup, reads, reconnect, and cleanup.
+// Its owner must serialize setup, reconnect, and cleanup. Cached-value reads
+// use immutable field IDs and do not require these native handles.
 type FieldWatches struct {
 	// The groups partition selected fields by effective sampling interval, allowing
 	// slower fields to use a longer DCGM watch without slowing faster fields.

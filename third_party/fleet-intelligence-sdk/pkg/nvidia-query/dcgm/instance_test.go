@@ -387,7 +387,10 @@ func TestNewWithContextReturnsNoOpOnTimeout(t *testing.T) {
 		newInstanceFunc = originalNewInstanceFunc
 		newConnectedInstanceFunc = originalNewConnectedInstanceFunc
 	}()
+	reconnectEntered := make(chan struct{})
+	signalReconnect := sync.OnceFunc(func() { close(reconnectEntered) })
 	newConnectedInstanceFunc = func() (Instance, error) {
+		signalReconnect()
 		return nil, errors.New("dcgm unavailable for reconnect test")
 	}
 
@@ -413,6 +416,13 @@ func TestNewWithContextReturnsNoOpOnTimeout(t *testing.T) {
 		t.Fatalf("expected no-op instance after timeout")
 	}
 
+	// Shutdown cancels retries but does not join a candidate connection. Wait
+	// until its mock was entered before restoring the global function below.
+	select {
+	case <-reconnectEntered:
+	case <-time.After(time.Second):
+		t.Fatal("background reconnect did not enter its mock")
+	}
 	close(blocker)
 	select {
 	case <-lateInstance.shutdownCh:
@@ -1115,13 +1125,15 @@ func (m *blockingReplayMockInstance) AddHealthWatch(system dcgm.HealthSystem) er
 // The read reference protects the library without pinning session publication.
 type readReferenceInstance struct {
 	Instance
-	retained int
-	released int
+	retained  int
+	released  int
+	retainErr error
 }
 
+func (i *readReferenceInstance) DCGMExists() bool { return true }
 func (i *readReferenceInstance) retainLibraryForRead() (func(), error) {
 	i.retained++
-	return func() { i.released++ }, nil
+	return func() { i.released++ }, i.retainErr
 }
 func TestRetainLibraryForReadForwardsToCurrentInstance(t *testing.T) {
 	native := &readReferenceInstance{Instance: NewNoOp()}
@@ -1159,4 +1171,90 @@ func TestNativeReadReferenceSurvivesOwnerShutdown(t *testing.T) {
 	// Without the retained reference, go-dcgm would already have called dlclose.
 	_, err = dcgm.GetAllDeviceCount()
 	require.NoError(t, err)
+}
+
+// A blocked cached read must retain its library but release currentMu, allowing
+// both session replacement and shutdown to proceed without waiting for the RPC.
+type blockingEntityReadOwner struct {
+	readReferenceInstance
+	entered chan struct{}
+	resume  chan struct{}
+}
+
+func (i *blockingEntityReadOwner) GetLatestValuesForFields(uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+	close(i.entered)
+	<-i.resume
+	return []dcgm.FieldValue_v1{{FieldID: 100}}, nil
+}
+
+func (i *blockingEntityReadOwner) enrichDeviceInventoryIfIncomplete() error {
+	close(i.entered)
+	<-i.resume
+	return nil
+}
+
+func TestEntityReadsDoNotBlockReconnectOrShutdown(t *testing.T) {
+	for _, query := range []string{"cached values", "inventory"} {
+		for _, action := range []string{"reconnect", "shutdown"} {
+			t.Run(query+"/"+action, func(t *testing.T) {
+				owner := &blockingEntityReadOwner{readReferenceInstance: readReferenceInstance{Instance: NewNoOp()}, entered: make(chan struct{}), resume: make(chan struct{})}
+				unblock := sync.OnceFunc(func() { close(owner.resume) })
+				inst := &reconnectingInstance{current: owner, stopCh: make(chan struct{})}
+				defer inst.Shutdown()
+				defer unblock()
+				original := newConnectedInstanceFunc
+				newConnectedInstanceFunc = func() (Instance, error) { return NewNoOp(), nil }
+				defer func() { newConnectedInstanceFunc = original }()
+				read := make(chan error, 1)
+				go func() {
+					if query == "inventory" {
+						read <- inst.enrichDeviceInventoryIfIncomplete()
+					} else {
+						_, err := inst.GetLatestValuesForFields(0, []dcgm.Short{100})
+						read <- err
+					}
+				}()
+				<-owner.entered
+				completed := make(chan error, 1)
+				go func() {
+					if action == "reconnect" {
+						completed <- inst.reconnectNow()
+					} else {
+						completed <- inst.Shutdown()
+					}
+				}()
+				select {
+				case err := <-completed:
+					require.NoError(t, err)
+				case <-time.After(2 * time.Second):
+					unblock()
+					<-read
+					<-completed
+					t.Fatal("entity read blocked instance lifecycle")
+				}
+				require.Equal(t, 1, owner.retained)
+				require.Zero(t, owner.released, "library must stay retained while the native read is running")
+				unblock()
+				require.NoError(t, <-read)
+				require.Equal(t, 1, owner.released)
+			})
+		}
+	}
+}
+
+func TestEntityReadAfterShutdownReturnsUnavailable(t *testing.T) {
+	inst := &reconnectingInstance{current: NewNoOp(), stopCh: make(chan struct{})}
+	require.NoError(t, inst.Shutdown())
+	_, err := ReadEntityValues(inst, dcgm.FE_CPU, 0, []dcgm.Short{1110})
+	require.ErrorContains(t, err, "DCGM is not available")
+}
+
+func TestReadReferenceFailureReleasesPartialReference(t *testing.T) {
+	native := &readReferenceInstance{Instance: NewNoOp(), retainErr: fmt.Errorf("retain failed")}
+	inst := &reconnectingInstance{current: native}
+	release, err := RetainLibraryForRead(inst)
+	require.EqualError(t, err, "retain failed")
+	require.Nil(t, release)
+	require.Equal(t, 1, native.retained)
+	require.Equal(t, 1, native.released)
 }

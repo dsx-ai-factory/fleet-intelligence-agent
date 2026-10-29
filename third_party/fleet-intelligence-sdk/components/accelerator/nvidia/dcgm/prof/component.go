@@ -92,15 +92,17 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 	}
 
 	c := &component{
-		ctx:        cctx,
-		readFields: dcgm.EntityGetLatestValues,
-		cancel:     ccancel,
+		ctx:    cctx,
+		cancel: ccancel,
 
 		healthCheckInterval: healthCheckInterval,
 		dcgmInstance:        gpudInstance.DCGMInstance,
 		dcgmHealthCache:     gpudInstance.DCGMHealthCache,
 		fieldGroupName:      dcgmGroupNames.ProfilingFieldGroup,
 		watchIntervals:      gpudInstance.DCGMIntervals,
+	}
+	c.readFields = func(group dcgm.Field_Entity_Group, id uint, fields []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+		return nvidiadcgm.ReadEntityValues(c.dcgmInstance, group, id, fields)
 	}
 	if registrar, ok := c.dcgmInstance.(interface{ RegisterReconnectCallback(func()) }); ok {
 		registrar.RegisterReconnectCallback(c.resetAfterReconnect)
@@ -266,69 +268,48 @@ func (c *component) Close() error {
 	return c.cleanup()
 }
 
-// Check retries incomplete setup, reads all validated fields from DCGM's cache,
-// and updates metrics and health. Reads run outside lifecycle locks; results
-// are published only if their setup generation is still current.
-// Cancellation preserves the last completed assessment. If none exists, the
-// returned result is Initializing and is not stored as a completed assessment.
-func (c *component) Check() (result components.CheckResult) {
+// profilingReadInputs owns the selected fields and device inventory for one
+// setup generation. These inputs remain valid after reconnect resets the owner.
+type profilingReadInputs struct {
+	fields     []dcgm.Short
+	devices    []nvidiadcgm.DeviceInfo
+	generation uint64
+}
+
+// Check separates setup, cached reads, and publication. Lifecycle locks belong
+// to the phase methods and are never held during periodic cached-value reads.
+func (c *component) Check() components.CheckResult {
 	c.checkMu.Lock()
 	defer c.checkMu.Unlock()
-	// Release the library after publication has released lifecycle locks.
-	var releaseLibrary func()
-	defer func() {
-		if releaseLibrary != nil {
-			releaseLibrary()
-		}
-	}()
+	cr := &checkResult{}
+	inputs := c.prepareCheck(cr)
+	values, err := c.readCheck(inputs)
+	return c.publishCheck(inputs, values, err, cr)
+}
+
+// prepareCheck releases both lifecycle locks before returning immutable read
+// inputs. Setup failures and terminal empty selections retain their health policy.
+func (c *component) prepareCheck(cr *checkResult) profilingReadInputs {
 	release := nvidiadcgm.AcquireSession(c.dcgmInstance)
+	defer release()
 	c.setupMu.Lock()
-	locked := true
-	generation := c.resetGeneration
-	cr := &checkResult{ts: time.Now().UTC()}
-	defer func() {
-		// Early returns keep the initial locks. Read paths reacquire them before
-		// publication; this fallback also protects cancellation during a read.
-		if !locked {
-			release = nvidiadcgm.AcquireSession(c.dcgmInstance)
-			c.setupMu.Lock()
-		}
-		defer release()
-		defer c.setupMu.Unlock()
-		c.lastMu.Lock()
-		defer c.lastMu.Unlock()
-		// Cancellation or reset is not a completed health assessment. Keep the prior
-		// result, including its timestamp, reason, and error.
-		if c.ctx.Err() != nil || generation != c.resetGeneration {
-			if c.lastCheckResult != nil {
-				result = c.lastCheckResult
-			} else {
-				cr.health = apiv1.HealthStateTypeInitializing
-				cr.reason = "DCGM session changed before a check completed"
-				if c.ctx.Err() != nil {
-					cr.reason = "collector stopped before a check completed"
-				}
-				cr.err = nil
-				result = cr
-			}
-			return
-		}
-		c.lastCheckResult = cr
-	}()
+	defer c.setupMu.Unlock()
+	cr.ts = time.Now().UTC()
+	inputs := profilingReadInputs{generation: c.resetGeneration}
 	if c.ctx.Err() != nil {
-		return cr
+		return inputs
 	}
 	log.Logger.Infow("checking profiling metrics via DCGM")
 
 	if c.dcgmInstance == nil {
 		cr.health = apiv1.HealthStateTypeHealthy
 		cr.reason = "DCGM instance is nil"
-		return cr
+		return inputs
 	}
 	if !c.dcgmInstance.DCGMExists() {
 		cr.health = apiv1.HealthStateTypeHealthy
 		cr.reason = "DCGM library is not loaded"
-		return cr
+		return inputs
 	}
 
 	// New() may have received a reconnecting instance that was still backed by
@@ -341,29 +322,25 @@ func (c *component) Check() (result components.CheckResult) {
 	if setupDegradedReason != "" {
 		cr.health = apiv1.HealthStateTypeDegraded
 		cr.reason = setupDegradedReason
-		return cr
+		return inputs
 	}
 	if len(watchedFields) == 0 {
 		cr.health = apiv1.HealthStateTypeHealthy
 		cr.reason = "no profiling fields to monitor (hardware doesn't support)"
-		return cr
+		return inputs
 	}
 
-	devices := c.dcgmInstance.GetDevices()
-	// Retain the library independently so Close can release resources without
-	// unloading native code beneath an in-flight cached read.
-	releaseLibrary, readErr := nvidiadcgm.RetainLibraryForRead(c.dcgmInstance)
-	if readErr != nil {
-		cr.err = readErr
-		cr.health = apiv1.HealthStateTypeDegraded
-		cr.reason = fmt.Sprintf("failed to get DCGM profiling fields: %v", readErr)
-		return cr
-	}
-	c.setupMu.Unlock()
-	release()
-	locked = false
-	values := make([][]dcgm.FieldValue_v1, len(devices))
-	for i, device := range devices {
+	inputs.fields = watchedFields
+	inputs.devices = c.dcgmInstance.GetDevices()
+	return inputs
+}
+
+// readCheck holds no lifecycle locks. Active-check fatal errors retain their
+// restart policy, while canceled checks discard late teardown errors.
+func (c *component) readCheck(inputs profilingReadInputs) ([][]dcgm.FieldValue_v1, error) {
+	values := make([][]dcgm.FieldValue_v1, len(inputs.devices))
+	var readErr error
+	for i, device := range inputs.devices {
 		if c.ctx.Err() != nil {
 			break
 		}
@@ -372,7 +349,7 @@ func (c *component) Check() (result components.CheckResult) {
 		vals, err := c.readFields(
 			dcgm.FE_GPU,   // Entity type: GPU
 			device.ID,     // Entity ID
-			watchedFields, // Only query hardware-validated fields
+			inputs.fields, // Only query hardware-validated fields
 		)
 
 		// Close may unwatch fields while the cached read is still running. Ignore
@@ -407,143 +384,159 @@ func (c *component) Check() (result components.CheckResult) {
 
 		values[i] = vals
 	}
-	release = nvidiadcgm.AcquireSession(c.dcgmInstance)
+	return values, readErr
+}
+
+// publishCheck validates the snapshot before updating gauges or health. Its
+// short lock scope prevents reset or Close from interleaving with publication.
+func (c *component) publishCheck(inputs profilingReadInputs, values [][]dcgm.FieldValue_v1, readErr error, cr *checkResult) components.CheckResult {
+	release := nvidiadcgm.AcquireSession(c.dcgmInstance)
+	defer release()
 	c.setupMu.Lock()
-	locked = true
-	if c.ctx.Err() != nil || generation != c.resetGeneration {
-		return cr
-	}
-	for i, device := range devices {
-		// Only current-generation values may update public gauges.
-		for _, val := range values[i] {
-			if isSentinel := nvidiadcgm.CheckSentinel(val,
-				"deviceID", device.ID,
-				"uuid", device.UUID,
-			); isSentinel {
-				continue
-			}
+	defer c.setupMu.Unlock()
+	if c.ctx.Err() == nil && inputs.generation == c.resetGeneration && len(inputs.fields) > 0 {
+		for i, device := range inputs.devices {
+			// Only current-generation values may update public gauges.
+			for _, val := range values[i] {
+				if isSentinel := nvidiadcgm.CheckSentinel(val,
+					"deviceID", device.ID,
+					"uuid", device.UUID,
+				); isSentinel {
+					continue
+				}
 
-			// Value is valid - export metric based on field type
-			switch val.FieldID {
-			case dcgm.DCGM_FI_PROF_GR_ENGINE_ACTIVE:
-				metricDCGMFIProfGrEngineActive.With(prometheus.Labels{
-					"uuid": device.UUID,
-					"gpu":  fmt.Sprintf("%d", device.ID),
-				}).Set(val.Float64())
+				// Value is valid - export metric based on field type
+				switch val.FieldID {
+				case dcgm.DCGM_FI_PROF_GR_ENGINE_ACTIVE:
+					metricDCGMFIProfGrEngineActive.With(prometheus.Labels{
+						"uuid": device.UUID,
+						"gpu":  fmt.Sprintf("%d", device.ID),
+					}).Set(val.Float64())
 
-			case dcgm.DCGM_FI_PROF_SM_ACTIVE:
-				metricDCGMFIProfSmActive.With(prometheus.Labels{
-					"uuid": device.UUID,
-					"gpu":  fmt.Sprintf("%d", device.ID),
-				}).Set(val.Float64())
+				case dcgm.DCGM_FI_PROF_SM_ACTIVE:
+					metricDCGMFIProfSmActive.With(prometheus.Labels{
+						"uuid": device.UUID,
+						"gpu":  fmt.Sprintf("%d", device.ID),
+					}).Set(val.Float64())
 
-			case dcgm.DCGM_FI_PROF_SM_OCCUPANCY:
-				metricDCGMFIProfSmOccupancy.With(prometheus.Labels{
-					"uuid": device.UUID,
-					"gpu":  fmt.Sprintf("%d", device.ID),
-				}).Set(val.Float64())
+				case dcgm.DCGM_FI_PROF_SM_OCCUPANCY:
+					metricDCGMFIProfSmOccupancy.With(prometheus.Labels{
+						"uuid": device.UUID,
+						"gpu":  fmt.Sprintf("%d", device.ID),
+					}).Set(val.Float64())
 
-			case dcgm.DCGM_FI_PROF_PIPE_TENSOR_ACTIVE:
-				metricDCGMFIProfPipeTensorActive.With(prometheus.Labels{
-					"uuid": device.UUID,
-					"gpu":  fmt.Sprintf("%d", device.ID),
-				}).Set(val.Float64())
+				case dcgm.DCGM_FI_PROF_PIPE_TENSOR_ACTIVE:
+					metricDCGMFIProfPipeTensorActive.With(prometheus.Labels{
+						"uuid": device.UUID,
+						"gpu":  fmt.Sprintf("%d", device.ID),
+					}).Set(val.Float64())
 
-			case dcgm.DCGM_FI_PROF_PIPE_TENSOR_IMMA_ACTIVE:
-				metricDCGMFIProfPipeTensorImmaActive.With(prometheus.Labels{
-					"uuid": device.UUID,
-					"gpu":  fmt.Sprintf("%d", device.ID),
-				}).Set(val.Float64())
+				case dcgm.DCGM_FI_PROF_PIPE_TENSOR_IMMA_ACTIVE:
+					metricDCGMFIProfPipeTensorImmaActive.With(prometheus.Labels{
+						"uuid": device.UUID,
+						"gpu":  fmt.Sprintf("%d", device.ID),
+					}).Set(val.Float64())
 
-			case dcgm.DCGM_FI_PROF_PIPE_TENSOR_HMMA_ACTIVE:
-				metricDCGMFIProfPipeTensorHmmaActive.With(prometheus.Labels{
-					"uuid": device.UUID,
-					"gpu":  fmt.Sprintf("%d", device.ID),
-				}).Set(val.Float64())
+				case dcgm.DCGM_FI_PROF_PIPE_TENSOR_HMMA_ACTIVE:
+					metricDCGMFIProfPipeTensorHmmaActive.With(prometheus.Labels{
+						"uuid": device.UUID,
+						"gpu":  fmt.Sprintf("%d", device.ID),
+					}).Set(val.Float64())
 
-			case dcgm.DCGM_FI_PROF_PIPE_TENSOR_DFMA_ACTIVE:
-				metricDCGMFIProfPipeTensorDfmaActive.With(prometheus.Labels{
-					"uuid": device.UUID,
-					"gpu":  fmt.Sprintf("%d", device.ID),
-				}).Set(val.Float64())
+				case dcgm.DCGM_FI_PROF_PIPE_TENSOR_DFMA_ACTIVE:
+					metricDCGMFIProfPipeTensorDfmaActive.With(prometheus.Labels{
+						"uuid": device.UUID,
+						"gpu":  fmt.Sprintf("%d", device.ID),
+					}).Set(val.Float64())
 
-			case dcgm.DCGM_FI_PROF_PIPE_INT_ACTIVE:
-				metricDCGMFIProfPipeIntActive.With(prometheus.Labels{
-					"uuid": device.UUID,
-					"gpu":  fmt.Sprintf("%d", device.ID),
-				}).Set(val.Float64())
+				case dcgm.DCGM_FI_PROF_PIPE_INT_ACTIVE:
+					metricDCGMFIProfPipeIntActive.With(prometheus.Labels{
+						"uuid": device.UUID,
+						"gpu":  fmt.Sprintf("%d", device.ID),
+					}).Set(val.Float64())
 
-			case dcgm.DCGM_FI_PROF_DRAM_ACTIVE:
-				metricDCGMFIProfDramActive.With(prometheus.Labels{
-					"uuid": device.UUID,
-					"gpu":  fmt.Sprintf("%d", device.ID),
-				}).Set(val.Float64())
+				case dcgm.DCGM_FI_PROF_DRAM_ACTIVE:
+					metricDCGMFIProfDramActive.With(prometheus.Labels{
+						"uuid": device.UUID,
+						"gpu":  fmt.Sprintf("%d", device.ID),
+					}).Set(val.Float64())
 
-			case dcgm.DCGM_FI_PROF_PIPE_FP64_ACTIVE:
-				metricDCGMFIProfPipeFp64Active.With(prometheus.Labels{
-					"uuid": device.UUID,
-					"gpu":  fmt.Sprintf("%d", device.ID),
-				}).Set(val.Float64())
+				case dcgm.DCGM_FI_PROF_PIPE_FP64_ACTIVE:
+					metricDCGMFIProfPipeFp64Active.With(prometheus.Labels{
+						"uuid": device.UUID,
+						"gpu":  fmt.Sprintf("%d", device.ID),
+					}).Set(val.Float64())
 
-			case dcgm.DCGM_FI_PROF_PIPE_FP32_ACTIVE:
-				metricDCGMFIProfPipeFp32Active.With(prometheus.Labels{
-					"uuid": device.UUID,
-					"gpu":  fmt.Sprintf("%d", device.ID),
-				}).Set(val.Float64())
+				case dcgm.DCGM_FI_PROF_PIPE_FP32_ACTIVE:
+					metricDCGMFIProfPipeFp32Active.With(prometheus.Labels{
+						"uuid": device.UUID,
+						"gpu":  fmt.Sprintf("%d", device.ID),
+					}).Set(val.Float64())
 
-			case dcgm.DCGM_FI_PROF_PIPE_FP16_ACTIVE:
-				metricDCGMFIProfPipeFp16Active.With(prometheus.Labels{
-					"uuid": device.UUID,
-					"gpu":  fmt.Sprintf("%d", device.ID),
-				}).Set(val.Float64())
+				case dcgm.DCGM_FI_PROF_PIPE_FP16_ACTIVE:
+					metricDCGMFIProfPipeFp16Active.With(prometheus.Labels{
+						"uuid": device.UUID,
+						"gpu":  fmt.Sprintf("%d", device.ID),
+					}).Set(val.Float64())
 
-			case dcgm.DCGM_FI_PROF_PCIE_TX_BYTES:
-				metricDCGMFIProfPcieTxBytes.With(prometheus.Labels{
-					"uuid": device.UUID,
-					"gpu":  fmt.Sprintf("%d", device.ID),
-				}).Set(float64(val.Int64()))
+				case dcgm.DCGM_FI_PROF_PCIE_TX_BYTES:
+					metricDCGMFIProfPcieTxBytes.With(prometheus.Labels{
+						"uuid": device.UUID,
+						"gpu":  fmt.Sprintf("%d", device.ID),
+					}).Set(float64(val.Int64()))
 
-			case dcgm.DCGM_FI_PROF_PCIE_RX_BYTES:
-				metricDCGMFIProfPcieRxBytes.With(prometheus.Labels{
-					"uuid": device.UUID,
-					"gpu":  fmt.Sprintf("%d", device.ID),
-				}).Set(float64(val.Int64()))
+				case dcgm.DCGM_FI_PROF_PCIE_RX_BYTES:
+					metricDCGMFIProfPcieRxBytes.With(prometheus.Labels{
+						"uuid": device.UUID,
+						"gpu":  fmt.Sprintf("%d", device.ID),
+					}).Set(float64(val.Int64()))
 
-			case dcgm.DCGM_FI_PROF_NVLINK_TX_BYTES:
-				metricDCGMFIProfNvlinkTxBytes.With(prometheus.Labels{
-					"uuid": device.UUID,
-					"gpu":  fmt.Sprintf("%d", device.ID),
-				}).Set(float64(val.Int64()))
+				case dcgm.DCGM_FI_PROF_NVLINK_TX_BYTES:
+					metricDCGMFIProfNvlinkTxBytes.With(prometheus.Labels{
+						"uuid": device.UUID,
+						"gpu":  fmt.Sprintf("%d", device.ID),
+					}).Set(float64(val.Int64()))
 
-			case dcgm.DCGM_FI_PROF_NVLINK_RX_BYTES:
-				metricDCGMFIProfNvlinkRxBytes.With(prometheus.Labels{
-					"uuid": device.UUID,
-					"gpu":  fmt.Sprintf("%d", device.ID),
-				}).Set(float64(val.Int64()))
+				case dcgm.DCGM_FI_PROF_NVLINK_RX_BYTES:
+					metricDCGMFIProfNvlinkRxBytes.With(prometheus.Labels{
+						"uuid": device.UUID,
+						"gpu":  fmt.Sprintf("%d", device.ID),
+					}).Set(float64(val.Int64()))
+				}
 			}
 		}
-	}
 
-	if c.ctx.Err() != nil {
-		return cr
-	}
-	cr.err = readErr
-	if cr.err != nil {
-		if nvidiadcgm.IsUnhealthyAPIError(cr.err) {
-			cr.health = apiv1.HealthStateTypeUnhealthy
-			cr.reason = nvidiadcgm.AppendDCGMErrorType("failed to get DCGM profiling fields", cr.err)
+		cr.err = readErr
+		if readErr != nil {
+			if nvidiadcgm.IsUnhealthyAPIError(readErr) {
+				cr.health = apiv1.HealthStateTypeUnhealthy
+				cr.reason = nvidiadcgm.AppendDCGMErrorType("failed to get DCGM profiling fields", readErr)
+			} else {
+				cr.health = apiv1.HealthStateTypeDegraded
+				cr.reason = fmt.Sprintf("failed to get DCGM profiling fields: %v", readErr)
+			}
 		} else {
-			cr.health = apiv1.HealthStateTypeDegraded
-			cr.reason = fmt.Sprintf("failed to get DCGM profiling fields: %v", cr.err)
+			cr.health = apiv1.HealthStateTypeHealthy
+			cr.reason = "profiling metrics collected successfully"
 		}
-		return cr
 	}
 
-	// Profiling metrics are informational. Keep the existing Healthy result
-	// when reads are empty or skipped because of transient errors.
-	cr.health = apiv1.HealthStateTypeHealthy
-	cr.reason = "profiling metrics collected successfully"
-
+	c.lastMu.Lock()
+	defer c.lastMu.Unlock()
+	// Close can cancel during gauge publication, so check cancellation again.
+	if c.ctx.Err() != nil || inputs.generation != c.resetGeneration {
+		if c.lastCheckResult != nil {
+			return c.lastCheckResult
+		}
+		cr.health = apiv1.HealthStateTypeInitializing
+		cr.reason = "DCGM session changed before a check completed"
+		if c.ctx.Err() != nil {
+			cr.reason = "collector stopped before a check completed"
+		}
+		cr.err = nil
+		return cr
+	}
+	c.lastCheckResult = cr
 	return cr
 }
 
