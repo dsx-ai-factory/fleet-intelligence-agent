@@ -27,8 +27,12 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/components"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/eventstore"
 	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
+	metricsscraper "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics/scraper"
+	metricsstore "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics/store"
 	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
+	pkgsqlite "github.com/NVIDIA/fleet-intelligence-sdk/pkg/sqlite"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +40,38 @@ import (
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/config"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
 )
+
+func TestCollectorExportsLateMeasurementsWithoutInventingFreshPoints(t *testing.T) {
+	ctx := context.Background()
+	dbRW, dbRO, cleanup := pkgsqlite.OpenTestDB(t)
+	defer cleanup()
+	store, err := metricsstore.NewSQLiteStore(ctx, dbRW, dbRO, "test_measurements")
+	require.NoError(t, err)
+	reg := prometheus.NewRegistry()
+	counter := pkgmetrics.NewSettableCounterVec(prometheus.CounterOpts{Name: "dcgm_counter", Help: "source counter"},
+		[]string{pkgmetrics.MetricComponentLabelKey})
+	require.NoError(t, reg.Register(counter))
+	scraper, err := metricsscraper.NewPrometheusScraper(reg)
+	require.NoError(t, err)
+	metric := counter.With(prometheus.Labels{pkgmetrics.MetricComponentLabelKey: "dcgm-nvlink"})
+	measurement := time.Now().Add(-time.Hour).Truncate(time.Millisecond)
+	for _, sourceTime := range []time.Time{measurement, measurement, measurement.Add(time.Minute)} {
+		// A stable counter is still a new measurement when its timestamp advances.
+		metric.SetWithTimestamp(42, sourceTime.UnixMicro())
+		ms, err := scraper.Scrape(ctx)
+		require.NoError(t, err)
+		require.NoError(t, store.Record(ctx, ms...))
+	}
+	cfg := &config.HealthExporterConfig{IncludeMetrics: true, MetricsLookback: metav1.Duration{Duration: time.Minute}}
+	data, err := New(cfg, store, nil, nil, "test-machine", nil).Collect(ctx)
+	require.NoError(t, err)
+	require.Len(t, data.Metrics, 2, "repeated scrapes must coalesce, while late samples remain exportable")
+	require.Equal(t, measurement.UnixMilli(), data.Metrics[0].UnixMilliseconds)
+	require.Equal(t, measurement.Add(time.Minute).UnixMilli(), data.Metrics[1].UnixMilliseconds)
+	rows, err := store.Read(ctx, pkgmetrics.WithSince(time.Now().Add(-time.Minute)))
+	require.NoError(t, err)
+	require.Empty(t, rows, "measurement-time queries must retain their original filter")
+}
 
 func TestGenerateCollectionID(t *testing.T) {
 	// Generate multiple collection IDs

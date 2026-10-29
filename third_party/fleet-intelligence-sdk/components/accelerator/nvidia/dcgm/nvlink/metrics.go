@@ -51,7 +51,7 @@ var (
 		pkgmetrics.MetricComponentLabelKey: Name,
 	}
 
-	metricDCGMFIDevNvlinkBandwidthTotal = prometheus.NewGaugeVec(
+	metricDCGMFIDevNvlinkBandwidthTotal = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -111,7 +111,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevFabricManagerStatus = prometheus.NewGaugeVec(
+	metricDCGMFIDevFabricManagerStatus = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{Name: "dcgm_fi_dev_fabric_manager_status", Help: "The status of the fabric manager - a value from dcgmFabricManagerStatus_t"},
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
@@ -151,11 +151,11 @@ var (
 		prometheus.CounterOpts{Name: "dcgm_fi_dev_nvlink_count_effective_errors", Help: "Sum of the number of errors in each Nvlink packet"},
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
-	metricDCGMFIDevNvlinkCountEffectiveBERFloat = prometheus.NewGaugeVec(
+	metricDCGMFIDevNvlinkCountEffectiveBERFloat = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{Name: "dcgm_fi_dev_nvlink_count_effective_ber_float", Help: "Effective BER for effective errors - decoded float value"},
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
-	metricDCGMFIDevNvlinkCountSymbolBERFloat = prometheus.NewGaugeVec(
+	metricDCGMFIDevNvlinkCountSymbolBERFloat = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{Name: "dcgm_fi_dev_nvlink_count_symbol_ber_float", Help: "BER for symbol errors - decoded float value"},
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)

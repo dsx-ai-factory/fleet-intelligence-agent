@@ -195,12 +195,12 @@ func (c *component) Check() components.CheckResult {
 					metricDCGMFIDevGPUUtil.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_MEM_COPY_UTIL:
 					metricDCGMFIDevMemCopyUtil.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				}
 			}
 		}

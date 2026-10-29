@@ -38,6 +38,9 @@ flowchart LR
 - DCGM collection separates native sampling from cached reads. Each collection
   path uses at most two sampling groups so slower fields do not slow other fields.
   See [DCGM sampling intervals](configuration.md#dcgm-sampling-intervals).
+- DCGM metrics carry source measurement timestamps through Prometheus, storage,
+  and export. Repeated reads of a sample share one stored point. Export lookbacks
+  use first receipt time so late measurements remain eligible for export.
 - CPU and profiling collectors defer native setup until DCGM is available and
   retry incomplete setup. Session replacement resets their native resources.
 - System components read host state (CPU, memory, disk, network, OS/kernel/library/PCI views).

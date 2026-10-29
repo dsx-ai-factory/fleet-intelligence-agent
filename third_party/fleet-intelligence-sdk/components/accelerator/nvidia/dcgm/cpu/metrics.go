@@ -37,7 +37,7 @@ var (
 	}
 
 	// CPU-level metrics (use cpu_id label)
-	metricDCGMFIDevCPUTempCurrent = prometheus.NewGaugeVec(
+	metricDCGMFIDevCPUTempCurrent = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -47,7 +47,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "cpu_id"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevCPUPowerLimit = prometheus.NewGaugeVec(
+	metricDCGMFIDevCPUPowerLimit = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -57,17 +57,17 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "cpu_id"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevCPUTempWarning = prometheus.NewGaugeVec(
+	metricDCGMFIDevCPUTempWarning = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{Name: "dcgm_fi_dev_cpu_temp_warning", Help: "CPU Warning Temperature"},
 		[]string{pkgmetrics.MetricComponentLabelKey, "cpu_id"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevCPUTempCritical = prometheus.NewGaugeVec(
+	metricDCGMFIDevCPUTempCritical = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{Name: "dcgm_fi_dev_cpu_temp_critical", Help: "CPU Critical Temperature"},
 		[]string{pkgmetrics.MetricComponentLabelKey, "cpu_id"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevCPUPowerUtilCurrent = prometheus.NewGaugeVec(
+	metricDCGMFIDevCPUPowerUtilCurrent = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{Name: "dcgm_fi_dev_cpu_power_util_current", Help: "CPU power utilization"},
 		[]string{pkgmetrics.MetricComponentLabelKey, "cpu_id"},
 	).MustCurryWith(componentLabel)

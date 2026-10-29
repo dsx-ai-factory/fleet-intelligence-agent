@@ -53,7 +53,7 @@ var (
 		pkgmetrics.MetricComponentLabelKey: Name,
 	}
 
-	metricDCGMFIDevFBFree = prometheus.NewGaugeVec(
+	metricDCGMFIDevFBFree = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -63,7 +63,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevFBUsed = prometheus.NewGaugeVec(
+	metricDCGMFIDevFBUsed = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -73,7 +73,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevFBTotal = prometheus.NewGaugeVec(
+	metricDCGMFIDevFBTotal = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -103,7 +103,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevRowRemapFailure = prometheus.NewGaugeVec(
+	metricDCGMFIDevRowRemapFailure = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -113,7 +113,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevFBUsedPercent = prometheus.NewGaugeVec(
+	metricDCGMFIDevFBUsedPercent = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -123,7 +123,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevRowRemapPending = prometheus.NewGaugeVec(
+	metricDCGMFIDevRowRemapPending = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -205,27 +205,27 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevBanksRemapRowsAvailHigh = prometheus.NewGaugeVec(
+	metricDCGMFIDevBanksRemapRowsAvailHigh = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{Name: "dcgm_fi_dev_banks_remap_rows_avail_high", Help: "Historical high mark of available spare memory rows per memory bank"},
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevBanksRemapRowsAvailLow = prometheus.NewGaugeVec(
+	metricDCGMFIDevBanksRemapRowsAvailLow = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{Name: "dcgm_fi_dev_banks_remap_rows_avail_low", Help: "Historical low mark of available spare memory rows per memory bank"},
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevBanksRemapRowsAvailMax = prometheus.NewGaugeVec(
+	metricDCGMFIDevBanksRemapRowsAvailMax = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{Name: "dcgm_fi_dev_banks_remap_rows_avail_max", Help: "Historical max available spare memory rows per memory bank"},
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevBanksRemapRowsAvailNone = prometheus.NewGaugeVec(
+	metricDCGMFIDevBanksRemapRowsAvailNone = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{Name: "dcgm_fi_dev_banks_remap_rows_avail_none", Help: "Historical marker of memory banks with no available spare memory rows"},
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevBanksRemapRowsAvailPartial = prometheus.NewGaugeVec(
+	metricDCGMFIDevBanksRemapRowsAvailPartial = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{Name: "dcgm_fi_dev_banks_remap_rows_avail_partial", Help: "Historical mark of partial available spare memory rows per memory bank"},
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)

@@ -47,6 +47,13 @@ const (
 
 	// columnMetricType represents the Prometheus metric type.
 	columnMetricType = "metric_type"
+
+	// columnRecordedAt is the first receipt time, used for export and retention.
+	// NULL identifies legacy rows, whose measurement time is the fallback.
+	columnRecordedAt = "recorded_at"
+
+	// Keep this expression identical in the index, reads, and retention queries.
+	recordedAtExpression = "COALESCE(recorded_at, unix_milliseconds)"
 )
 
 // TODO: drop the old table "gpud_metrics"
@@ -115,7 +122,7 @@ CREATE TABLE IF NOT EXISTS %s (
 	if err != nil {
 		return err
 	}
-	return ensureMetricTypeColumn(ctx, dbRW, table)
+	return ensureMetricColumns(ctx, dbRW, table)
 }
 
 func insert(ctx context.Context, dbRW *sql.DB, table string, ms ...pkgmetrics.Metric) error {
@@ -139,7 +146,7 @@ func insert(ctx context.Context, dbRW *sql.DB, table string, ms ...pkgmetrics.Me
 
 	// Build the query with placeholders for all metrics
 	query := fmt.Sprintf(
-		"INSERT OR REPLACE INTO %s (%s, %s, %s, %s, %s, %s) VALUES ",
+		"INSERT INTO %s (%s, %s, %s, %s, %s, %s, %s) VALUES ",
 		table,
 		columnUnixMilliseconds,
 		columnComponentName,
@@ -147,16 +154,26 @@ func insert(ctx context.Context, dbRW *sql.DB, table string, ms ...pkgmetrics.Me
 		columnMetricLabels,
 		columnMetricValue,
 		columnMetricType,
+		columnRecordedAt,
 	)
 
 	// Create proper placeholders with commas between value sets
 	placeholders := make([]string, len(ms))
 	for i := range placeholders {
-		placeholders[i] = "(?, ?, ?, ?, ?, ?)"
+		placeholders[i] = "(?, ?, ?, ?, ?, ?, ?)"
 	}
 	query += strings.Join(placeholders, ", ")
+	// Preserve first receipt when a cached source sample is scraped again. Keep
+	// the existing replacement behavior for its value and metric type.
+	// Identical samples do not need a row update.
+	query += fmt.Sprintf(" ON CONFLICT (%s, %s, %s, %s) DO UPDATE SET %s = excluded.%s, %s = excluded.%s"+
+		" WHERE %s IS NOT excluded.%s OR %s IS NOT excluded.%s;",
+		columnUnixMilliseconds, columnComponentName, columnMetricName, columnMetricLabels,
+		columnMetricValue, columnMetricValue, columnMetricType, columnMetricType,
+		columnMetricValue, columnMetricValue, columnMetricType, columnMetricType)
 
-	args := make([]interface{}, 0, len(ms)*6)
+	args := make([]interface{}, 0, len(ms)*7)
+	recordedAt := time.Now().UnixMilli()
 	for _, m := range ms {
 		labels := ""
 		if len(m.Labels) > 0 {
@@ -170,7 +187,7 @@ func insert(ctx context.Context, dbRW *sql.DB, table string, ms ...pkgmetrics.Me
 		if metricType == "" {
 			metricType = pkgmetrics.MetricTypeGauge
 		}
-		args = append(args, m.UnixMilliseconds, m.Component, m.Name, labels, m.Value, metricType)
+		args = append(args, m.UnixMilliseconds, m.Component, m.Name, labels, m.Value, metricType, recordedAt)
 	}
 
 	log.Logger.Infow("inserting metrics", "metrics", len(ms))
@@ -181,7 +198,7 @@ func insert(ctx context.Context, dbRW *sql.DB, table string, ms ...pkgmetrics.Me
 	return err
 }
 
-// read returns the metric data in the ascending order of unix seconds
+// read returns metric data in ascending measurement-time order, with stable ties
 // meaning the first element is the oldest event.
 // It returns nil if no record is found ("database/sql.ErrNoRows").
 func read(ctx context.Context, dbRO *sql.DB, table string, opts ...pkgmetrics.OpOption) (pkgmetrics.Metrics, error) {
@@ -199,10 +216,18 @@ func read(ctx context.Context, dbRO *sql.DB, table string, opts ...pkgmetrics.Op
 		params = append(params, op.Since.UnixMilli())
 	}
 
-	orderByStatement := fmt.Sprintf("ORDER BY %s ASC;", columnUnixMilliseconds)
+	orderByStatement := fmt.Sprintf("ORDER BY %s, %s, %s, %s;",
+		columnUnixMilliseconds, columnComponentName, columnMetricName, columnMetricLabels)
 	whereStatement := ""
 	if !op.Since.IsZero() {
 		whereStatement = fmt.Sprintf("%s >= ?", columnUnixMilliseconds)
+	}
+	if !op.RecordedSince.IsZero() {
+		if whereStatement != "" {
+			whereStatement += " AND "
+		}
+		whereStatement += recordedAtExpression + " >= ?"
+		params = append(params, op.RecordedSince.UnixMilli())
 	}
 	if len(op.SelectedComponents) > 0 {
 		if whereStatement != "" {
@@ -277,44 +302,66 @@ FROM %s
 	return rows, nil
 }
 
-func ensureMetricTypeColumn(ctx context.Context, dbRW *sql.DB, table string) error {
+// ensureMetricColumns upgrades the existing table in place. Nullable receipt
+// times allow older binaries to keep inserting rows after a rollback. Legacy
+// rows use their measurement time without a full-table backfill.
+func ensureMetricColumns(ctx context.Context, dbRW *sql.DB, table string) error {
 	quotedTable, err := quoteSQLiteIdentifier(table)
 	if err != nil {
 		return err
 	}
-
-	rows, err := dbRW.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s);", quotedTable))
+	tx, err := dbRW.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = rows.Close()
-	}()
+	defer func() { _ = tx.Rollback() }()
 
-	for rows.Next() {
-		var cid int
-		var name, columnType string
-		var notNull int
-		var defaultValue sql.NullString
-		var pk int
-		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
-			return err
-		}
-		if name == columnMetricType {
-			return nil
-		}
-	}
-	if err := rows.Err(); err != nil {
+	columns, err := metricColumns(ctx, tx, quotedTable)
+	if err != nil {
 		return err
 	}
+	if !columns[columnMetricType] {
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s TEXT NOT NULL DEFAULT '%s';",
+			quotedTable, columnMetricType, pkgmetrics.MetricTypeGauge)); err != nil {
+			return err
+		}
+	}
+	if !columns[columnRecordedAt] {
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s INTEGER;",
+			quotedTable, columnRecordedAt)); err != nil {
+			return err
+		}
+	}
+	// Export lookbacks and retention must remain indexed as the table grows.
+	quotedIndex, err := quoteSQLiteIdentifier(table + "_recorded_at")
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (%s);",
+		quotedIndex, quotedTable, recordedAtExpression)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
-	_, err = dbRW.ExecContext(ctx, fmt.Sprintf(
-		"ALTER TABLE %s ADD COLUMN %s TEXT NOT NULL DEFAULT '%s';",
-		quotedTable,
-		columnMetricType,
-		pkgmetrics.MetricTypeGauge,
-	))
-	return err
+// metricColumns closes the schema query before migration statements run.
+func metricColumns(ctx context.Context, tx *sql.Tx, quotedTable string) (map[string]bool, error) {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s);", quotedTable))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, columnType string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			return nil, err
+		}
+		columns[name] = true
+	}
+	return columns, rows.Err()
 }
 
 func quoteSQLiteIdentifier(name string) (string, error) {
@@ -327,15 +374,15 @@ func quoteSQLiteIdentifier(name string) (string, error) {
 	return `"` + name + `"`, nil
 }
 
-// purge purges the data for the corresponding component that is older
-// than the given time.
+// purge removes samples first received before the cutoff. Measurement time
+// alone cannot determine retention because a source sample can arrive late.
 func purge(ctx context.Context, dbRW *sql.DB, table string, before time.Time) (int, error) {
 	if table == "" {
 		return 0, ErrEmptyTableName
 	}
 
 	query := fmt.Sprintf(`
-DELETE FROM %s WHERE %s < ?;`, table, columnUnixMilliseconds)
+DELETE FROM %s WHERE %s < ?;`, table, recordedAtExpression)
 
 	start := time.Now()
 	rs, err := dbRW.ExecContext(ctx, query, before.UnixMilli())

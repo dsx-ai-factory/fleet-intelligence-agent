@@ -48,7 +48,7 @@ var (
 		pkgmetrics.MetricComponentLabelKey: Name,
 	}
 
-	metricDCGMFIProfGrEngineActive = prometheus.NewGaugeVec(
+	metricDCGMFIProfGrEngineActive = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -58,7 +58,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIProfSmActive = prometheus.NewGaugeVec(
+	metricDCGMFIProfSmActive = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -68,7 +68,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIProfSmOccupancy = prometheus.NewGaugeVec(
+	metricDCGMFIProfSmOccupancy = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -78,7 +78,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIProfPipeTensorActive = prometheus.NewGaugeVec(
+	metricDCGMFIProfPipeTensorActive = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -88,7 +88,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIProfDramActive = prometheus.NewGaugeVec(
+	metricDCGMFIProfDramActive = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -98,7 +98,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIProfPipeFp64Active = prometheus.NewGaugeVec(
+	metricDCGMFIProfPipeFp64Active = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -108,7 +108,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIProfPipeFp32Active = prometheus.NewGaugeVec(
+	metricDCGMFIProfPipeFp32Active = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -118,7 +118,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIProfPipeFp16Active = prometheus.NewGaugeVec(
+	metricDCGMFIProfPipeFp16Active = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -128,7 +128,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIProfPcieTxBytes = prometheus.NewGaugeVec(
+	metricDCGMFIProfPcieTxBytes = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -138,7 +138,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIProfPcieRxBytes = prometheus.NewGaugeVec(
+	metricDCGMFIProfPcieRxBytes = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -148,7 +148,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIProfNvlinkTxBytes = prometheus.NewGaugeVec(
+	metricDCGMFIProfNvlinkTxBytes = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -158,7 +158,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIProfNvlinkRxBytes = prometheus.NewGaugeVec(
+	metricDCGMFIProfNvlinkRxBytes = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -168,7 +168,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIProfPipeTensorImmaActive = prometheus.NewGaugeVec(
+	metricDCGMFIProfPipeTensorImmaActive = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -178,7 +178,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIProfPipeTensorHmmaActive = prometheus.NewGaugeVec(
+	metricDCGMFIProfPipeTensorHmmaActive = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -188,7 +188,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIProfPipeTensorDfmaActive = prometheus.NewGaugeVec(
+	metricDCGMFIProfPipeTensorDfmaActive = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -198,7 +198,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIProfPipeIntActive = prometheus.NewGaugeVec(
+	metricDCGMFIProfPipeIntActive = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",

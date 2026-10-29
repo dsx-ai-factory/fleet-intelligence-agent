@@ -409,15 +409,15 @@ func (c *component) publishCheck(inputs cpuReadInputs, values [][]dcgm.FieldValu
 				// Use valid value
 				switch fieldValue.FieldID {
 				case dcgm.DCGM_FI_DEV_CPU_TEMP_CURRENT:
-					metricDCGMFIDevCPUTempCurrent.With(prometheus.Labels{"cpu_id": cpuIDStr}).Set(fieldValue.Float64())
+					metricDCGMFIDevCPUTempCurrent.With(prometheus.Labels{"cpu_id": cpuIDStr}).SetWithTimestamp(fieldValue.Float64(), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_CPU_POWER_UTIL_CURRENT:
-					metricDCGMFIDevCPUPowerUtilCurrent.With(prometheus.Labels{"cpu_id": cpuIDStr}).Set(fieldValue.Float64())
+					metricDCGMFIDevCPUPowerUtilCurrent.With(prometheus.Labels{"cpu_id": cpuIDStr}).SetWithTimestamp(fieldValue.Float64(), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_CPU_POWER_LIMIT:
-					metricDCGMFIDevCPUPowerLimit.With(prometheus.Labels{"cpu_id": cpuIDStr}).Set(fieldValue.Float64())
+					metricDCGMFIDevCPUPowerLimit.With(prometheus.Labels{"cpu_id": cpuIDStr}).SetWithTimestamp(fieldValue.Float64(), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_CPU_TEMP_WARNING:
-					metricDCGMFIDevCPUTempWarning.With(prometheus.Labels{"cpu_id": cpuIDStr}).Set(fieldValue.Float64())
+					metricDCGMFIDevCPUTempWarning.With(prometheus.Labels{"cpu_id": cpuIDStr}).SetWithTimestamp(fieldValue.Float64(), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_CPU_TEMP_CRITICAL:
-					metricDCGMFIDevCPUTempCritical.With(prometheus.Labels{"cpu_id": cpuIDStr}).Set(fieldValue.Float64())
+					metricDCGMFIDevCPUTempCritical.With(prometheus.Labels{"cpu_id": cpuIDStr}).SetWithTimestamp(fieldValue.Float64(), fieldValue.TS)
 				}
 			}
 		}
