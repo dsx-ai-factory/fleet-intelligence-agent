@@ -60,9 +60,12 @@ type component struct {
 	cpuGroupHandle dcgm.GroupHandle // Dedicated group for CPUs
 	// fieldWatches owns native sampling groups for the selected CPU fields.
 	fieldWatches *nvidiadcgm.FieldWatches
-	// setupMu serializes checks, setup, and cleanup. Close waits for an active
-	// check before it releases the field and CPU entity groups.
+	// checkMu serializes checks without making reset or Close wait for reads.
+	checkMu sync.Mutex
+	// setupMu protects watches and result publication, not cached-value reads.
 	setupMu sync.Mutex
+	// resetGeneration invalidates read batches when reconnect replaces watches.
+	resetGeneration uint64
 	// fieldSetupComplete prevents repeated setup after success or empty discovery.
 	// Errors leave setup incomplete so a later Check can retry.
 	fieldSetupComplete bool
@@ -114,6 +117,7 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 func (c *component) resetAfterReconnect() {
 	c.setupMu.Lock()
 	defer c.setupMu.Unlock()
+	c.resetGeneration++
 	c.fieldWatches.Reset()
 	c.cpuGroupHandle = dcgm.GroupHandle{}
 	c.cpuEntities = nil
@@ -282,8 +286,8 @@ func (c *component) Events(ctx context.Context, since time.Time) (apiv1.Events, 
 	return nil, nil
 }
 
-// Close cancels collection and waits for an active Check before releasing watches
-// and then the CPU entity group. Cleanup failures can be retried with another Close.
+// Close cancels collection and releases watches and then the CPU entity group.
+// It does not wait for cached reads. Failed cleanup can be retried with another Close.
 func (c *component) Close() error {
 	log.Logger.Debugw("closing component")
 
@@ -302,27 +306,47 @@ func (c *component) Close() error {
 }
 
 // Check retries incomplete setup, reads all selected CPU fields from DCGM's cache,
-// and updates metrics and health. It holds setupMu through setup and native reads.
+// and updates metrics and health. Reads run outside lifecycle locks; results
+// are published only if their setup generation is still current.
 // Cancellation preserves the last completed assessment. If none exists, the
 // returned result is Initializing and is not stored as a completed assessment.
 func (c *component) Check() (result components.CheckResult) {
+	c.checkMu.Lock()
+	defer c.checkMu.Unlock()
+	// Release the library after publication has released lifecycle locks.
+	var releaseLibrary func()
+	defer func() {
+		if releaseLibrary != nil {
+			releaseLibrary()
+		}
+	}()
 	release := nvidiadcgm.AcquireSession(c.dcgmInstance)
-	defer release()
 	c.setupMu.Lock()
-	defer c.setupMu.Unlock()
-
+	locked := true
+	generation := c.resetGeneration
 	cr := &checkResult{ts: time.Now().UTC()}
 	defer func() {
+		// Early returns keep the initial locks. Read paths reacquire them before
+		// publication; this fallback also protects cancellation during a read.
+		if !locked {
+			release = nvidiadcgm.AcquireSession(c.dcgmInstance)
+			c.setupMu.Lock()
+		}
+		defer release()
+		defer c.setupMu.Unlock()
 		c.lastMu.Lock()
 		defer c.lastMu.Unlock()
-		// Cancellation is not a completed health assessment. Keep the prior
+		// Cancellation or reset is not a completed health assessment. Keep the prior
 		// result, including its timestamp, reason, and error.
-		if c.ctx.Err() != nil {
+		if c.ctx.Err() != nil || generation != c.resetGeneration {
 			if c.lastCheckResult != nil {
 				result = c.lastCheckResult
 			} else {
 				cr.health = apiv1.HealthStateTypeInitializing
-				cr.reason = "collector stopped before a check completed"
+				cr.reason = "DCGM session changed before a check completed"
+				if c.ctx.Err() != nil {
+					cr.reason = "collector stopped before a check completed"
+				}
 				cr.err = nil
 				result = cr
 			}
@@ -365,21 +389,43 @@ func (c *component) Check() (result components.CheckResult) {
 		return cr
 	}
 
-	// Read all CPU fields each check. Slower native watches can return the same
-	// cached sample on consecutive checks without sampling the CPU again.
-	for _, cpuID := range c.cpuEntities {
+	// Snapshot immutable read inputs and retain the library, not the session
+	// gate. Shutdown may drop the owning reference while a native read blocks.
+	entities := append([]uint(nil), c.cpuEntities...)
+	fields := cpuLevelFields
+	releaseLibrary, retainErr := nvidiadcgm.RetainLibraryForRead(c.dcgmInstance)
+	if retainErr != nil {
+		// CPU read failures retain their existing informational Healthy policy.
+		log.Logger.Warnw("failed to retain DCGM for CPU field reads", "error", retainErr)
+		cr.health = apiv1.HealthStateTypeHealthy
+		cr.reason = "CPU metrics collected successfully"
+		return cr
+	}
+	c.setupMu.Unlock()
+	release()
+	locked = false
+	values := make([][]dcgm.FieldValue_v1, len(entities))
+	for i, cpuID := range entities {
 		if c.ctx.Err() != nil {
 			break
 		}
-		fieldValues, err := c.readFields(dcgm.FE_CPU, cpuID, cpuLevelFields)
+		fieldValues, err := c.readFields(dcgm.FE_CPU, cpuID, fields)
 		if err != nil {
 			log.Logger.Warnw("failed to get CPU-level fields", "cpuID", cpuID, "error", err)
 			continue
 		}
 
+		values[i] = fieldValues
+	}
+	release = nvidiadcgm.AcquireSession(c.dcgmInstance)
+	c.setupMu.Lock()
+	locked = true
+	if c.ctx.Err() != nil || generation != c.resetGeneration {
+		return cr
+	}
+	for i, cpuID := range entities {
 		cpuIDStr := fmt.Sprintf("cpu-%d", cpuID)
-
-		for _, fieldValue := range fieldValues {
+		for _, fieldValue := range values[i] {
 			if isSentinel := nvidiadcgm.CheckSentinel(fieldValue, "cpuID", cpuID); isSentinel {
 				continue
 			}

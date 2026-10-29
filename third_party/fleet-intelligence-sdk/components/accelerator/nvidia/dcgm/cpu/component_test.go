@@ -17,7 +17,11 @@ package cpu
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+	"math"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -204,7 +208,7 @@ func TestCompletedCPUSetupWithNoEntitiesReturnsHealthy(t *testing.T) {
 	}
 }
 
-func TestCloseWaitsForActiveCheck(t *testing.T) {
+func TestCloseDoesNotWaitForCachedRead(t *testing.T) {
 	comp, err := New(&components.GPUdInstance{RootCtx: context.Background()})
 	require.NoError(t, err)
 	c := comp.(*component)
@@ -221,25 +225,27 @@ func TestCloseWaitsForActiveCheck(t *testing.T) {
 	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
 		close(entered)
 		<-release
-		// The synthetic watch has no native CPU group to destroy. Clear its
-		// handle while Check still holds setupMu, before Close can run cleanup.
-		c.cpuGroupHandle = dcgm.GroupHandle{}
 		return nil, nil
 	}
 	checked := make(chan components.CheckResult, 1)
 	go func() { checked <- c.Check() }()
 	<-entered
+	// The synthetic group has no native counterpart. The snapshot already
+	// captured readiness; clearing this handle avoids a native cleanup call.
+	c.setupMu.Lock()
+	c.cpuGroupHandle = dcgm.GroupHandle{}
+	c.setupMu.Unlock()
 	closed := make(chan error, 1)
 	go func() { closed <- c.Close() }()
 	<-c.ctx.Done()
 	select {
 	case err := <-closed:
-		t.Fatalf("Close returned before the active check finished: %v", err)
-	default:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close waited for a blocked cached read")
 	}
 	unblock()
 	require.Equal(t, states, (<-checked).HealthStates(), "an interrupted check must preserve the prior assessment")
-	require.NoError(t, <-closed)
 	require.NoError(t, c.Close())
 	require.Equal(t, states, c.Check().HealthStates())
 	require.Equal(t, states, c.LastHealthStates())
@@ -511,4 +517,70 @@ func TestStoppedBeforeFirstCheckReturnsInitializing(t *testing.T) {
 		require.Equal(t, "collector stopped before a check completed", result.Summary())
 		require.Nil(t, c.lastCheckResult, "a stopped call must not publish a health assessment")
 	}
+}
+
+// This gate models reconnect's exclusive session publication. A blocked read
+// must hold neither this gate nor setupMu, and its old batch must be discarded.
+type readLockCPUInstance struct {
+	reconnectCPUInstance
+	gate sync.RWMutex
+}
+
+func (m *readLockCPUInstance) AcquireSession() func() { m.gate.RLock(); return m.gate.RUnlock }
+
+func TestReconnectCanResetDuringCachedRead(t *testing.T) {
+	inst := &readLockCPUInstance{}
+	inst.dcgmExists = true
+	comp, err := New(&components.GPUdInstance{RootCtx: context.Background(), DCGMInstance: inst})
+	require.NoError(t, err)
+	c := comp.(*component)
+	defer func() {
+		c.setupMu.Lock()
+		c.cpuGroupHandle = dcgm.GroupHandle{}
+		c.setupMu.Unlock()
+		require.NoError(t, c.Close())
+	}()
+	c.fieldSetupComplete = true
+	c.cpuEntities = []uint{9876}
+	c.cpuGroupHandle.SetHandle(1)
+	previous := &checkResult{ts: time.Unix(100, 0), health: apiv1.HealthStateTypeHealthy, reason: "previous assessment"}
+	c.lastCheckResult = previous
+	gauge := metricDCGMFIDevCPUTempCurrent.With(prometheus.Labels{"cpu_id": "cpu-9876"})
+	gauge.Set(5)
+	entered, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+		close(entered)
+		<-release
+		value := dcgm.FieldValue_v1{FieldID: dcgm.DCGM_FI_DEV_CPU_TEMP_CURRENT, FieldType: dcgm.DCGM_FT_DOUBLE}
+		binary.LittleEndian.PutUint64(value.Value[:], math.Float64bits(99))
+		return []dcgm.FieldValue_v1{value}, nil
+	}
+	checked := make(chan components.CheckResult, 1)
+	go func() { checked <- c.Check() }()
+	<-entered
+	reset := make(chan struct{})
+	go func() { inst.gate.Lock(); inst.callback(); inst.gate.Unlock(); close(reset) }()
+	select {
+	case <-reset:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reconnect waited for a blocked cached read")
+	}
+	require.False(t, c.fieldSetupComplete)
+	unblock()
+	require.Same(t, previous, <-checked)
+	require.Same(t, previous, c.lastCheckResult)
+	raw := &dto.Metric{}
+	require.NoError(t, gauge.Write(raw))
+	require.Equal(t, float64(5), raw.GetGauge().GetValue(), "old-session values must not update gauges")
+	// A later check can publish from the new generation, even with reused IDs.
+	c.setupMu.Lock()
+	c.fieldSetupComplete = true
+	c.cpuEntities = []uint{9876}
+	c.cpuGroupHandle.SetHandle(1)
+	c.setupMu.Unlock()
+	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) { return nil, nil }
+	require.Equal(t, apiv1.HealthStateTypeHealthy, c.Check().HealthStateType())
+	require.NotSame(t, previous, c.lastCheckResult)
 }

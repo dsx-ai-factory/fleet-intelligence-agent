@@ -17,7 +17,13 @@ package prof
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+	"math"
+	"os"
+	"os/exec"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -355,7 +361,7 @@ func TestCheckReadsAllCachedFieldsAndStops(t *testing.T) {
 	})
 }
 
-func TestCloseWaitsForActiveCheck(t *testing.T) {
+func TestCloseDoesNotWaitForCachedRead(t *testing.T) {
 	comp, err := New(&components.GPUdInstance{RootCtx: context.Background()})
 	require.NoError(t, err)
 	c := comp.(*component)
@@ -371,7 +377,9 @@ func TestCloseWaitsForActiveCheck(t *testing.T) {
 	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
 		close(entered)
 		<-release
-		return nil, nil
+		// Cleanup can invalidate watches while this read is blocked. A canceled
+		// check must not restart the process because of that late teardown error.
+		return nil, fmt.Errorf("dcgm request failed with error code %d", dcgm.DCGM_ST_NOT_WATCHED)
 	}
 	checked := make(chan components.CheckResult, 1)
 	go func() { checked <- c.Check() }()
@@ -381,12 +389,12 @@ func TestCloseWaitsForActiveCheck(t *testing.T) {
 	<-c.ctx.Done()
 	select {
 	case err := <-closed:
-		t.Fatalf("Close returned before the active check finished: %v", err)
-	default:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close waited for a blocked cached read")
 	}
 	unblock()
 	require.Equal(t, states, (<-checked).HealthStates(), "an interrupted check must preserve the prior assessment")
-	require.NoError(t, <-closed)
 	require.NoError(t, c.Close())
 	require.Equal(t, states, c.Check().HealthStates())
 	require.Equal(t, states, c.LastHealthStates())
@@ -461,4 +469,95 @@ func TestProfilingTransientAndEmptyReadsReturnHealthy(t *testing.T) {
 	require.Equal(t, apiv1.HealthStateTypeUnhealthy, c.Check().HealthStateType())
 	c.dcgmInstance = &mockDCGMInstance{dcgmExists: true}
 	require.Equal(t, apiv1.HealthStateTypeHealthy, c.Check().HealthStateType(), "no devices produces no read error")
+}
+
+// This gate models reconnect's exclusive session publication. A blocked read
+// must hold neither this gate nor setupMu, and its old batch must be discarded.
+type readLockProfilingInstance struct {
+	reconnectProfilingInstance
+	gate sync.RWMutex
+}
+
+func (m *readLockProfilingInstance) AcquireSession() func() { m.gate.RLock(); return m.gate.RUnlock }
+
+func TestReconnectCanResetDuringCachedRead(t *testing.T) {
+	inst := &readLockProfilingInstance{}
+	inst.dcgmExists = true
+	inst.devices = []nvidiadcgm.DeviceInfo{{ID: 9876, UUID: "lock-test"}}
+	comp, err := New(&components.GPUdInstance{RootCtx: context.Background(), DCGMInstance: inst})
+	require.NoError(t, err)
+	c := comp.(*component)
+	defer func() { require.NoError(t, c.Close()) }()
+	c.fieldSetupComplete = true
+	c.watchedFields = []dcgm.Short{dcgm.DCGM_FI_PROF_SM_ACTIVE}
+	previous := &checkResult{ts: time.Unix(100, 0), health: apiv1.HealthStateTypeHealthy, reason: "previous assessment"}
+	c.lastCheckResult = previous
+	gauge := metricDCGMFIProfSmActive.With(prometheus.Labels{"uuid": "lock-test", "gpu": "9876"})
+	gauge.Set(5)
+	entered, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+		close(entered)
+		<-release
+		value := dcgm.FieldValue_v1{FieldID: dcgm.DCGM_FI_PROF_SM_ACTIVE, FieldType: dcgm.DCGM_FT_DOUBLE}
+		binary.LittleEndian.PutUint64(value.Value[:], math.Float64bits(99))
+		return []dcgm.FieldValue_v1{value}, nil
+	}
+	checked := make(chan components.CheckResult, 1)
+	go func() { checked <- c.Check() }()
+	<-entered
+	reset := make(chan struct{})
+	go func() { inst.gate.Lock(); inst.callback(); inst.gate.Unlock(); close(reset) }()
+	select {
+	case <-reset:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reconnect waited for a blocked cached read")
+	}
+	require.False(t, c.fieldSetupComplete)
+	unblock()
+	require.Same(t, previous, <-checked)
+	require.Same(t, previous, c.lastCheckResult)
+	raw := &dto.Metric{}
+	require.NoError(t, gauge.Write(raw))
+	require.Equal(t, float64(5), raw.GetGauge().GetValue(), "old-session values must not update gauges")
+	// A later check can publish from the new generation, even with reused IDs.
+	c.setupMu.Lock()
+	c.fieldSetupComplete = true
+	c.watchedFields = []dcgm.Short{dcgm.DCGM_FI_PROF_SM_ACTIVE}
+	c.setupMu.Unlock()
+	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) { return nil, nil }
+	require.Equal(t, apiv1.HealthStateTypeHealthy, c.Check().HealthStateType())
+	require.NotSame(t, previous, c.lastCheckResult)
+}
+
+// Active-check fatal errors still request restart even if reconnect invalidated
+// the batch. Only cancellation caused by Close suppresses late teardown errors.
+func TestProfilingRestartPolicySurvivesReconnect(t *testing.T) {
+	const child = "FLEETINT_TEST_PROF_RESTART_AFTER_RESET"
+	if os.Getenv(child) == "1" {
+		comp, err := New(&components.GPUdInstance{RootCtx: context.Background()})
+		if err != nil {
+			os.Exit(2)
+		}
+		c := comp.(*component)
+		c.dcgmInstance = &mockDCGMInstance{dcgmExists: true, devices: []nvidiadcgm.DeviceInfo{{ID: 0}}}
+		c.fieldSetupComplete = true
+		c.watchedFields = []dcgm.Short{dcgm.DCGM_FI_PROF_SM_ACTIVE}
+		c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+			c.resetAfterReconnect()
+			return nil, fmt.Errorf("dcgm request failed with error code %d", dcgm.DCGM_ST_NOT_WATCHED)
+		}
+		c.Check()
+		os.Exit(0)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestProfilingRestartPolicySurvivesReconnect$")
+	cmd.Env = append(os.Environ(), child+"=1")
+	output, err := cmd.CombinedOutput()
+	var exit *exec.ExitError
+	require.ErrorAs(t, err, &exit, string(output))
+	require.Equal(t, 1, exit.ExitCode(), string(output))
+	require.Contains(t, string(output), "DCGM fatal error, exiting for restart")
 }

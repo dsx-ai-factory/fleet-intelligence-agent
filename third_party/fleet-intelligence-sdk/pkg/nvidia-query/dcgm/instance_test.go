@@ -25,6 +25,7 @@ import (
 	"time"
 
 	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
+	"github.com/stretchr/testify/require"
 
 	dcgmendpoint "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm/endpoint"
 )
@@ -1109,4 +1110,53 @@ func (m *blockingReplayMockInstance) AddHealthWatch(system dcgm.HealthSystem) er
 		<-m.unblockFirstAddHealth
 	})
 	return m.mockTrackingInstance.AddHealthWatch(system)
+}
+
+// The read reference protects the library without pinning session publication.
+type readReferenceInstance struct {
+	Instance
+	retained int
+	released int
+}
+
+func (i *readReferenceInstance) retainLibraryForRead() (func(), error) {
+	i.retained++
+	return func() { i.released++ }, nil
+}
+func TestRetainLibraryForReadForwardsToCurrentInstance(t *testing.T) {
+	native := &readReferenceInstance{Instance: NewNoOp()}
+	inst := &reconnectingInstance{current: native}
+	gate := AcquireSession(inst)
+	release, err := RetainLibraryForRead(inst)
+	require.NoError(t, err)
+	gate()
+	inst.sessionMu.Lock()
+	inst.current = NewNoOp()
+	inst.sessionMu.Unlock()
+	require.Equal(t, 1, native.retained)
+	require.Zero(t, native.released)
+	release()
+	require.Equal(t, 1, native.released)
+}
+
+func TestNativeReadReferenceSurvivesOwnerShutdown(t *testing.T) {
+	inst, err := newConnectedInstance("read-reference-test")
+	if err != nil {
+		t.Skipf("DCGM unavailable: %v", err)
+	}
+	closed := false
+	defer func() {
+		if !closed {
+			_ = inst.Shutdown()
+		}
+	}()
+	release, err := RetainLibraryForRead(inst)
+	require.NoError(t, err)
+	defer release()
+	require.NoError(t, inst.Shutdown())
+	closed = true
+	// This native call remains safe after the owner's reference is released.
+	// Without the retained reference, go-dcgm would already have called dlclose.
+	_, err = dcgm.GetAllDeviceCount()
+	require.NoError(t, err)
 }

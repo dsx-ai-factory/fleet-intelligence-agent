@@ -102,6 +102,29 @@ func AcquireSession(instance Instance) func() {
 	return func() {}
 }
 
+// RetainLibraryForRead keeps go-dcgm's library loaded while a cached read runs
+// without the session gate. Call it while holding AcquireSession, then release
+// its reference once after the read. It uses go-dcgm's existing Init reference count;
+// it does not hold a mutex across the read or delay watch cleanup and session swap.
+func RetainLibraryForRead(instance Instance) (func(), error) {
+	if retainer, ok := instance.(interface{ retainLibraryForRead() (func(), error) }); ok {
+		return retainer.retainLibraryForRead()
+	}
+	return func() {}, nil
+}
+
+// retainLibraryForRead increments the reference count of an initialized library.
+// The session gate keeps its owning reference alive, so Init does not reconnect.
+func (inst *instance) retainLibraryForRead() (func(), error) { return dcgm.Init(dcgm.Standalone) }
+
+// retainLibraryForRead forwards the reference request to the active owner.
+// currentMu is held only for this short acquisition, never for cached reads.
+func (inst *reconnectingInstance) retainLibraryForRead() (func(), error) {
+	inst.currentMu.RLock()
+	defer inst.currentMu.RUnlock()
+	return RetainLibraryForRead(inst.current)
+}
+
 var newInstanceFunc = newInitializedInstance
 
 // New creates a DCGM instance. It returns a no-op instance when a complete

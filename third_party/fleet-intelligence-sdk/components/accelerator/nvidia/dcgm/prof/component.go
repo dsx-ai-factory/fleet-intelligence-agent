@@ -53,9 +53,12 @@ type component struct {
 	dcgmInstance    nvidiadcgm.Instance
 	dcgmHealthCache *nvidiadcgm.HealthCache
 
-	// setupMu serializes checks, setup, and cleanup. DCGM handles cannot
-	// change while a read is in flight.
-	setupMu            sync.Mutex
+	// checkMu serializes checks without making reset or Close wait for reads.
+	checkMu sync.Mutex
+	// setupMu protects watches and result publication, not cached-value reads.
+	setupMu sync.Mutex
+	// resetGeneration invalidates read batches when reconnect replaces watches.
+	resetGeneration    uint64
 	fieldSetupComplete bool
 	fieldGroupName     string
 
@@ -111,6 +114,7 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 func (c *component) resetAfterReconnect() {
 	c.setupMu.Lock()
 	defer c.setupMu.Unlock()
+	c.resetGeneration++
 	if c.fieldWatches != nil {
 		c.fieldWatches.Reset()
 	}
@@ -236,7 +240,7 @@ func (c *component) Events(ctx context.Context, since time.Time) (apiv1.Events, 
 	return nil, nil
 }
 
-// cleanup waits for an active Check before releasing profiling watches.
+// cleanup releases profiling watches without waiting for cached-value reads.
 func (c *component) cleanup() error {
 	release := nvidiadcgm.AcquireSession(c.dcgmInstance)
 	defer release()
@@ -254,7 +258,7 @@ func (c *component) cleanupFieldGroupLocked() error {
 	return nil
 }
 
-// Close cancels collection and releases watches after any active Check completes.
+// Close cancels collection and releases watches without waiting for cached reads.
 // Cleanup failures can be retried by calling Close again.
 func (c *component) Close() error {
 	log.Logger.Debugw("closing profiling component")
@@ -263,27 +267,47 @@ func (c *component) Close() error {
 }
 
 // Check retries incomplete setup, reads all validated fields from DCGM's cache,
-// and updates metrics and health. It holds setupMu through setup and native reads.
+// and updates metrics and health. Reads run outside lifecycle locks; results
+// are published only if their setup generation is still current.
 // Cancellation preserves the last completed assessment. If none exists, the
 // returned result is Initializing and is not stored as a completed assessment.
 func (c *component) Check() (result components.CheckResult) {
+	c.checkMu.Lock()
+	defer c.checkMu.Unlock()
+	// Release the library after publication has released lifecycle locks.
+	var releaseLibrary func()
+	defer func() {
+		if releaseLibrary != nil {
+			releaseLibrary()
+		}
+	}()
 	release := nvidiadcgm.AcquireSession(c.dcgmInstance)
-	defer release()
 	c.setupMu.Lock()
-	defer c.setupMu.Unlock()
-
+	locked := true
+	generation := c.resetGeneration
 	cr := &checkResult{ts: time.Now().UTC()}
 	defer func() {
+		// Early returns keep the initial locks. Read paths reacquire them before
+		// publication; this fallback also protects cancellation during a read.
+		if !locked {
+			release = nvidiadcgm.AcquireSession(c.dcgmInstance)
+			c.setupMu.Lock()
+		}
+		defer release()
+		defer c.setupMu.Unlock()
 		c.lastMu.Lock()
 		defer c.lastMu.Unlock()
-		// Cancellation is not a completed health assessment. Keep the prior
+		// Cancellation or reset is not a completed health assessment. Keep the prior
 		// result, including its timestamp, reason, and error.
-		if c.ctx.Err() != nil {
+		if c.ctx.Err() != nil || generation != c.resetGeneration {
 			if c.lastCheckResult != nil {
 				result = c.lastCheckResult
 			} else {
 				cr.health = apiv1.HealthStateTypeInitializing
-				cr.reason = "collector stopped before a check completed"
+				cr.reason = "DCGM session changed before a check completed"
+				if c.ctx.Err() != nil {
+					cr.reason = "collector stopped before a check completed"
+				}
 				cr.err = nil
 				result = cr
 			}
@@ -312,7 +336,7 @@ func (c *component) Check() (result components.CheckResult) {
 	// available creates the profiling field group and watch.
 	c.setupFieldWatchingIfReady()
 	setupDegradedReason := c.setupDegradedReason
-	watchedFields := c.watchedFields
+	watchedFields := append([]dcgm.Short(nil), c.watchedFields...)
 
 	if setupDegradedReason != "" {
 		cr.health = apiv1.HealthStateTypeDegraded
@@ -326,8 +350,20 @@ func (c *component) Check() (result components.CheckResult) {
 	}
 
 	devices := c.dcgmInstance.GetDevices()
-	var readErr error
-	for _, device := range devices {
+	// Retain the library independently so Close can release resources without
+	// unloading native code beneath an in-flight cached read.
+	releaseLibrary, readErr := nvidiadcgm.RetainLibraryForRead(c.dcgmInstance)
+	if readErr != nil {
+		cr.err = readErr
+		cr.health = apiv1.HealthStateTypeDegraded
+		cr.reason = fmt.Sprintf("failed to get DCGM profiling fields: %v", readErr)
+		return cr
+	}
+	c.setupMu.Unlock()
+	release()
+	locked = false
+	values := make([][]dcgm.FieldValue_v1, len(devices))
+	for i, device := range devices {
 		if c.ctx.Err() != nil {
 			break
 		}
@@ -339,7 +375,13 @@ func (c *component) Check() (result components.CheckResult) {
 			watchedFields, // Only query hardware-validated fields
 		)
 
+		// Close may unwatch fields while the cached read is still running. Ignore
+		// its late result after cancellation, as the shared field cache does.
+		if c.ctx.Err() != nil {
+			break
+		}
 		if err != nil {
+			// Fatal errors retain precedence over a reconnect generation change.
 			// Check for fatal errors that require restart
 			if nvidiadcgm.IsRestartRequired(err) {
 				log.Logger.Errorw("DCGM fatal error, exiting for restart",
@@ -363,8 +405,17 @@ func (c *component) Check() (result components.CheckResult) {
 			break
 		}
 
-		// Process each field value with type-aware sentinel checking
-		for _, val := range vals {
+		values[i] = vals
+	}
+	release = nvidiadcgm.AcquireSession(c.dcgmInstance)
+	c.setupMu.Lock()
+	locked = true
+	if c.ctx.Err() != nil || generation != c.resetGeneration {
+		return cr
+	}
+	for i, device := range devices {
+		// Only current-generation values may update public gauges.
+		for _, val := range values[i] {
 			if isSentinel := nvidiadcgm.CheckSentinel(val,
 				"deviceID", device.ID,
 				"uuid", device.UUID,
