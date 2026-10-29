@@ -35,6 +35,11 @@ flowchart LR
 ### Runtime behavior
 
 - GPU/DCGM components read health and telemetry from DCGM/NVML-backed data paths.
+- DCGM collection separates native sampling from cached reads. Each collection
+  path uses at most two sampling groups so slower fields do not slow other fields.
+  See [DCGM sampling intervals](configuration.md#dcgm-sampling-intervals).
+- CPU and profiling collectors defer native setup until DCGM is available and
+  retry incomplete setup. Session replacement resets their native resources.
 - System components read host state (CPU, memory, disk, network, OS/kernel/library/PCI views).
 - The agent evaluates component health continuously and serves current state via API/metrics.
 - Exporters serialize telemetry/events/health data for downstream ingestion.

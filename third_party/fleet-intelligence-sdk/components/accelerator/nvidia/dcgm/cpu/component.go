@@ -19,6 +19,7 @@ package cpu
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +37,10 @@ const Name = "accelerator-nvidia-dcgm-cpu"
 
 const (
 	defaultHealthCheckInterval = time.Minute
+	// DCGM errorString messages. The pinned go-dcgm discovery API returns
+	// their text without preserving the status code.
+	cpuModuleNotLoadedMessage = "This request is serviced by a module of DCGM that is not currently loaded"
+	cpuNotSupportedMessage    = "Feature not supported"
 )
 
 var _ components.Component = &component{}
@@ -45,24 +50,41 @@ type component struct {
 	cancel context.CancelFunc
 
 	healthCheckInterval time.Duration
+	// readFields reads DCGM's cached values. Tests replace it to exercise read
+	// failures and shutdown without GPU hardware.
+	readFields func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error)
 
 	dcgmInstance    nvidiadcgm.Instance
 	dcgmHealthCache *nvidiadcgm.HealthCache
 
 	cpuGroupHandle dcgm.GroupHandle // Dedicated group for CPUs
-	fieldGroupID   dcgm.FieldHandle
+	// fieldWatches owns native sampling groups for the selected CPU fields.
+	fieldWatches *nvidiadcgm.FieldWatches
+	// checkMu serializes checks without making reset or Close wait for reads.
+	checkMu sync.Mutex
+	// setupMu protects watches and result publication, not cached-value reads.
+	setupMu sync.Mutex
+	// resetGeneration invalidates read batches when reconnect replaces watches.
+	resetGeneration uint64
+	// fieldSetupComplete prevents repeated setup after success or empty discovery.
+	// Errors leave setup incomplete so a later Check can retry.
+	fieldSetupComplete bool
+	// Group names are retained because setup runs after construction.
+	fieldGroupName string
+	cpuGroupName   string
 
-	cpuEntities []uint // Cached CPU entity IDs
+	// cpuEntities contains the entities committed by successful setup.
+	cpuEntities []uint
 
-	// setupDegradedReason is non-empty when CPU group creation, field group creation,
-	// or field watching setup failed during New(). Check() returns Degraded immediately
-	// with this reason rather than querying fields that were never successfully registered.
+	// setupDegradedReason records group or watch setup errors until setup succeeds.
 	setupDegradedReason string
 
 	lastMu          sync.RWMutex
 	lastCheckResult *checkResult
 }
 
+// New configures CPU collection without allocating native DCGM resources.
+// Check discovers CPU entities and sets up their sampling watches when DCGM is ready.
 func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 	cctx, ccancel := context.WithCancel(gpudInstance.RootCtx)
 	dcgmGroupNames := gpudInstance.DCGMGroupNames.WithDefaults()
@@ -79,88 +101,133 @@ func New(gpudInstance *components.GPUdInstance) (components.Component, error) {
 		healthCheckInterval: healthCheckInterval,
 		dcgmInstance:        gpudInstance.DCGMInstance,
 		dcgmHealthCache:     gpudInstance.DCGMHealthCache,
+		fieldWatches:        nvidiadcgm.NewFieldWatches(cpuLevelFields, healthCheckInterval, gpudInstance.DCGMIntervals),
+		fieldGroupName:      dcgmGroupNames.CPUFieldGroup,
+		cpuGroupName:        dcgmGroupNames.CPUGroup,
 	}
-
-	// Set up DCGM field watching for CPU fields
-	if c.dcgmInstance != nil && c.dcgmInstance.DCGMExists() {
-		// Get CPU entities first to check if CPU monitoring is available
-		cpuEntities, err := dcgm.GetEntityGroupEntities(dcgm.FE_CPU)
-		if err != nil {
-			// CPU monitoring is optional and requires the DCGM CPU module to be loaded
-			// This is expected if the module is not loaded or CPU monitoring is not supported
-			log.Logger.Infow("CPU monitoring not available", "reason", err.Error())
-			return c, nil
-		}
-
-		// Skip setup if no CPUs found
-		if len(cpuEntities) == 0 {
-			log.Logger.Infow("no CPU entities found, skipping CPU field setup")
-			return c, nil
-		}
-
-		c.cpuEntities = cpuEntities
-
-		// Create a dedicated DCGM group for CPUs
-		cpuGroupHandle, err := dcgm.CreateGroup(dcgmGroupNames.CPUGroup)
-		if err != nil {
-			log.Logger.Warnw("failed to create DCGM group for CPUs", "error", err)
-			c.setupDegradedReason = fmt.Sprintf("failed to create DCGM CPU group: %v", err)
-			return c, nil
-		}
-		c.cpuGroupHandle = cpuGroupHandle
-
-		// Add CPU entities to the group
-		for _, cpuID := range c.cpuEntities {
-			if err := dcgm.AddEntityToGroup(cpuGroupHandle, dcgm.FE_CPU, cpuID); err != nil {
-				log.Logger.Warnw("failed to add CPU to group", "cpuID", cpuID, "error", err)
-			}
-		}
-		if len(c.cpuEntities) > 0 {
-			log.Logger.Infow("added CPUs to DCGM group", "numCPUs", len(c.cpuEntities))
-		}
-
-		// Create a field group for this component's CPU fields
-		fieldGroupName := dcgmGroupNames.CPUFieldGroup
-		fieldGroupID, err := dcgm.FieldGroupCreate(fieldGroupName, cpuLevelFields)
-		if err != nil {
-			log.Logger.Warnw("failed to create DCGM field group for CPU fields", "error", err)
-			// Clean up the created group before returning
-			if destroyErr := dcgm.DestroyGroup(cpuGroupHandle); destroyErr != nil {
-				log.Logger.Warnw("failed to destroy DCGM group during cleanup", "error", destroyErr)
-			}
-			c.cpuGroupHandle = dcgm.GroupHandle{} // Reset to indicate no group created
-			c.setupDegradedReason = fmt.Sprintf("failed to create DCGM CPU field group: %v", err)
-			return c, nil
-		}
-		c.fieldGroupID = fieldGroupID
-
-		// Set up field watching with update frequency matching health check interval
-		// Use the CPU-specific group handle instead of the default GPU group
-		updateFreqMicroseconds := int64(healthCheckInterval / time.Microsecond)
-		maxKeepAge := healthCheckInterval.Seconds() * 2
-		maxKeepSamples := 3
-
-		err = dcgm.WatchFieldsWithGroupEx(fieldGroupID, cpuGroupHandle,
-			updateFreqMicroseconds, maxKeepAge, int32(maxKeepSamples))
-		if err != nil {
-			log.Logger.Warnw("failed to set up DCGM field watching for CPU fields", "error", err)
-			// Clean up both field group and CPU group before returning
-			if destroyErr := dcgm.FieldGroupDestroy(fieldGroupID); destroyErr != nil {
-				log.Logger.Warnw("failed to destroy DCGM field group during cleanup", "error", destroyErr)
-			}
-			if destroyErr := dcgm.DestroyGroup(cpuGroupHandle); destroyErr != nil {
-				log.Logger.Warnw("failed to destroy DCGM group during cleanup", "error", destroyErr)
-			}
-			c.fieldGroupID = dcgm.FieldHandle{}
-			c.cpuGroupHandle = dcgm.GroupHandle{}
-			c.setupDegradedReason = fmt.Sprintf("failed to set up DCGM CPU field watching: %v", err)
-			return c, nil
-		}
-		log.Logger.Infow("set up DCGM field watching for CPU fields",
-			"updateFreq", healthCheckInterval, "maxKeepAge", maxKeepAge, "numFields", len(cpuLevelFields))
+	c.readFields = func(group dcgm.Field_Entity_Group, id uint, fields []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+		return nvidiadcgm.ReadEntityValues(c.dcgmInstance, group, id, fields)
 	}
-
+	if registrar, ok := c.dcgmInstance.(interface{ RegisterReconnectCallback(func()) }); ok {
+		registrar.RegisterReconnectCallback(c.resetAfterReconnect)
+	}
 	return c, nil
+}
+
+// resetAfterReconnect forgets resources from the old session without native
+// cleanup. The next Check discovers CPUs and creates watches in the new session.
+func (c *component) resetAfterReconnect() {
+	c.setupMu.Lock()
+	defer c.setupMu.Unlock()
+	c.resetGeneration++
+	c.fieldWatches.Reset()
+	c.cpuGroupHandle = dcgm.GroupHandle{}
+	c.cpuEntities = nil
+	c.fieldSetupComplete = false
+	c.setupDegradedReason = ""
+}
+
+// setupFieldWatchingIfReady discovers CPUs and registers their watches.
+// The caller holds setupMu. Failed attempts release partial resources before retry.
+// Expected CPU-monitoring unavailability or no CPUs completes setup without
+// groups. Unexpected discovery errors produce Degraded and remain retryable.
+func (c *component) setupFieldWatchingIfReady() {
+	if c.ctx.Err() != nil || c.fieldSetupComplete || c.dcgmInstance == nil || !c.dcgmInstance.DCGMExists() {
+		return
+	}
+	if err := c.fieldWatches.Close(); err != nil {
+		c.setupDegradedReason = fmt.Sprintf("failed to clean up DCGM CPU field watching: %v", err)
+		return
+	}
+	// A failed destroy retains its handle. Retry cleanup before allocating a group.
+	if err := c.cleanupCPUGroupLocked(); err != nil {
+		c.setupDegradedReason = fmt.Sprintf("failed to clean up DCGM CPU group: %v", err)
+		return
+	}
+
+	cpuEntities, err := dcgm.GetEntityGroupEntities(dcgm.FE_CPU)
+	if err != nil {
+		c.handleCPUDiscoveryError(err)
+		return
+	}
+	if len(cpuEntities) == 0 {
+		c.fieldSetupComplete = true
+		c.setupDegradedReason = ""
+		log.Logger.Infow("no CPU entities found, skipping CPU field setup")
+		return
+	}
+	if c.ctx.Err() != nil {
+		return
+	}
+
+	cpuGroupHandle, err := dcgm.CreateGroup(c.cpuGroupName)
+	if err != nil {
+		c.setupDegradedReason = fmt.Sprintf("failed to create DCGM CPU group: %v", err)
+		return
+	}
+	c.cpuGroupHandle = cpuGroupHandle
+	// On incomplete setup, release field watches and groups before the CPU
+	// entity group. If field cleanup fails, retain the CPU group for a retry.
+	defer func() {
+		if !c.fieldSetupComplete {
+			if err := c.fieldWatches.Close(); err != nil {
+				return
+			}
+			_ = c.cleanupCPUGroupLocked()
+		}
+	}()
+	for _, cpuID := range cpuEntities {
+		if c.ctx.Err() != nil {
+			return
+		}
+		if err := dcgm.AddEntityToGroup(cpuGroupHandle, dcgm.FE_CPU, cpuID); err != nil {
+			c.setupDegradedReason = fmt.Sprintf("failed to add CPU to DCGM group: %v", err)
+			return
+		}
+	}
+	if c.ctx.Err() != nil {
+		return
+	}
+	// Start sampling the CPU fields. On failure, the deferred cleanup above
+	// releases partial resources.
+	if err := c.fieldWatches.Setup(c.fieldGroupName, cpuGroupHandle); err != nil {
+		c.setupDegradedReason = fmt.Sprintf("failed to set up DCGM CPU field watching: %v", err)
+		return
+	}
+	c.cpuEntities = cpuEntities
+	c.fieldSetupComplete = true
+	c.setupDegradedReason = ""
+}
+
+// handleCPUDiscoveryError distinguishes optional CPU-monitoring support from a
+// discovery failure. The caller holds setupMu and supplies a non-nil error.
+func (c *component) handleCPUDiscoveryError(err error) {
+	// GetEntityGroupEntities formats DCGM's error text without preserving its
+	// status code. Match only known unavailability messages; other errors retry.
+	message := strings.TrimPrefix(err.Error(), "error getting entity count: ")
+	switch message {
+	case cpuModuleNotLoadedMessage, cpuNotSupportedMessage:
+		c.fieldSetupComplete = true
+		c.setupDegradedReason = ""
+		log.Logger.Infow("CPU monitoring not available", "reason", err.Error())
+	default:
+		c.setupDegradedReason = fmt.Sprintf("failed to discover DCGM CPU entities: %v", err)
+		log.Logger.Warnw("failed to discover DCGM CPU entities", "error", err)
+	}
+}
+
+// cleanupCPUGroupLocked retains the handle on failure so cleanup can be retried.
+// The caller holds setupMu and must release field watches first.
+func (c *component) cleanupCPUGroupLocked() error {
+	if c.cpuGroupHandle.GetHandle() == 0 {
+		return nil
+	}
+	if err := dcgm.DestroyGroup(c.cpuGroupHandle); err != nil {
+		log.Logger.Warnw("failed to destroy DCGM CPU group", "error", err)
+		return err
+	}
+	c.cpuGroupHandle = dcgm.GroupHandle{}
+	return nil
 }
 
 func (c *component) Name() string { return Name }
@@ -182,6 +249,8 @@ func (c *component) IsSupported() bool {
 	return c.dcgmInstance.DCGMExists()
 }
 
+// Start runs Check immediately, then at healthCheckInterval until cancellation.
+// Native watches control sampling independently of these cached reads.
 func (c *component) Start() error {
 	go func() {
 		ticker := time.NewTicker(c.healthCheckInterval)
@@ -219,108 +288,161 @@ func (c *component) Events(ctx context.Context, since time.Time) (apiv1.Events, 
 	return nil, nil
 }
 
+// Close cancels collection and releases watches and then the CPU entity group.
+// It does not wait for cached reads. Failed cleanup can be retried with another Close.
 func (c *component) Close() error {
 	log.Logger.Debugw("closing component")
 
-	// Clean up DCGM field group if it was created
-	if c.dcgmInstance != nil && c.dcgmInstance.DCGMExists() && c.fieldGroupID.GetHandle() != 0 {
-		if err := dcgm.FieldGroupDestroy(c.fieldGroupID); err != nil {
-			log.Logger.Warnw("failed to destroy DCGM field group", "error", err)
-		} else {
-			log.Logger.Debugw("destroyed DCGM field group for CPU component")
-		}
-	}
-
-	// Clean up CPU device group if it was created
-	if c.dcgmInstance != nil && c.dcgmInstance.DCGMExists() && c.cpuGroupHandle.GetHandle() != 0 {
-		if err := dcgm.DestroyGroup(c.cpuGroupHandle); err != nil {
-			log.Logger.Warnw("failed to destroy DCGM CPU group", "error", err)
-		} else {
-			log.Logger.Debugw("destroyed DCGM CPU group")
-		}
-	}
-
 	c.cancel()
-	return nil
+	release := nvidiadcgm.AcquireSession(c.dcgmInstance)
+	defer release()
+	c.setupMu.Lock()
+	defer c.setupMu.Unlock()
+	if c.fieldWatches != nil {
+		if err := c.fieldWatches.Close(); err != nil {
+			return err
+		}
+	}
+
+	return c.cleanupCPUGroupLocked()
 }
 
+// cpuReadInputs is an immutable snapshot of one setup generation.
+type cpuReadInputs struct {
+	entities   []uint
+	generation uint64
+}
+
+// Check prepares a snapshot, performs periodic reads without lifecycle locks,
+// and publishes results only for the current generation. Close and reconnect
+// never take checkMu.
 func (c *component) Check() components.CheckResult {
+	c.checkMu.Lock()
+	defer c.checkMu.Unlock()
+	cr := &checkResult{}
+	inputs := c.prepareCheck(cr)
+	values := c.readCheck(inputs)
+	return c.publishCheck(inputs, values, cr)
+}
+
+// prepareCheck owns both lifecycle locks only while setting up and taking a
+// snapshot. Every return releases them in this method.
+func (c *component) prepareCheck(cr *checkResult) cpuReadInputs {
+	release := nvidiadcgm.AcquireSession(c.dcgmInstance)
+	defer release()
+	c.setupMu.Lock()
+	defer c.setupMu.Unlock()
+	cr.ts = time.Now().UTC()
+	inputs := cpuReadInputs{generation: c.resetGeneration}
+	if c.ctx.Err() != nil {
+		return inputs
+	}
 	log.Logger.Infow("checking nvidia gpu CPU metrics via DCGM")
-
-	cr := &checkResult{
-		ts: time.Now().UTC(),
-	}
-	defer func() {
-		c.lastMu.Lock()
-		c.lastCheckResult = cr
-		c.lastMu.Unlock()
-	}()
-
-	// Early return if setup failed during New()
-	if c.setupDegradedReason != "" {
-		cr.health = apiv1.HealthStateTypeDegraded
-		cr.reason = c.setupDegradedReason
-		return cr
-	}
 
 	if c.dcgmInstance == nil {
 		cr.health = apiv1.HealthStateTypeHealthy
 		cr.reason = "DCGM instance is nil"
-		return cr
+		return inputs
 	}
 	if !c.dcgmInstance.DCGMExists() {
 		cr.health = apiv1.HealthStateTypeHealthy
 		cr.reason = "DCGM library is not loaded"
-		return cr
+		return inputs
+	}
+
+	c.setupFieldWatchingIfReady()
+	if c.setupDegradedReason != "" {
+		cr.health = apiv1.HealthStateTypeDegraded
+		cr.reason = c.setupDegradedReason
+		return inputs
 	}
 
 	// Skip if no CPU entities or field group wasn't created
 	if len(c.cpuEntities) == 0 {
 		cr.health = apiv1.HealthStateTypeHealthy
 		cr.reason = "no CPU entities available"
-		return cr
+		return inputs
 	}
 	if c.cpuGroupHandle.GetHandle() == 0 {
 		cr.health = apiv1.HealthStateTypeHealthy
 		cr.reason = "CPU group not created"
-		return cr
+		return inputs
 	}
 
-	// Query and export DCGM CPU-level field values using cached entities
-	for _, cpuID := range c.cpuEntities {
-		fieldValues, err := dcgm.EntityGetLatestValues(dcgm.FE_CPU, cpuID, cpuLevelFields)
+	inputs.entities = append([]uint(nil), c.cpuEntities...)
+	return inputs
+}
+
+// readCheck uses entity IDs and field IDs, not native group handles. The shared
+// read layer keeps the library loaded for each call without pinning a session.
+func (c *component) readCheck(inputs cpuReadInputs) [][]dcgm.FieldValue_v1 {
+	values := make([][]dcgm.FieldValue_v1, len(inputs.entities))
+	for i, id := range inputs.entities {
+		if c.ctx.Err() != nil {
+			break
+		}
+		fields, err := c.readFields(dcgm.FE_CPU, id, cpuLevelFields)
 		if err != nil {
-			log.Logger.Warnw("failed to get CPU-level fields", "cpuID", cpuID, "error", err)
+			log.Logger.Warnw("failed to get CPU-level fields", "cpuID", id, "error", err)
 			continue
 		}
+		values[i] = fields
+	}
+	return values
+}
 
-		cpuIDStr := fmt.Sprintf("cpu-%d", cpuID)
+// publishCheck protects the generation check, gauge updates, and assessment
+// publication as one operation. Cancellation retains the last full assessment.
+func (c *component) publishCheck(inputs cpuReadInputs, values [][]dcgm.FieldValue_v1, cr *checkResult) components.CheckResult {
+	release := nvidiadcgm.AcquireSession(c.dcgmInstance)
+	defer release()
+	c.setupMu.Lock()
+	defer c.setupMu.Unlock()
+	if c.ctx.Err() == nil && inputs.generation == c.resetGeneration && len(inputs.entities) > 0 {
+		for i, cpuID := range inputs.entities {
+			cpuIDStr := fmt.Sprintf("cpu-%d", cpuID)
+			for _, fieldValue := range values[i] {
+				if isSentinel := nvidiadcgm.CheckSentinel(fieldValue, "cpuID", cpuID); isSentinel {
+					continue
+				}
 
-		for _, fieldValue := range fieldValues {
-			if isSentinel := nvidiadcgm.CheckSentinel(fieldValue, "cpuID", cpuID); isSentinel {
-				continue
-			}
-
-			// Use valid value
-			switch fieldValue.FieldID {
-			case dcgm.DCGM_FI_DEV_CPU_TEMP_CURRENT:
-				metricDCGMFIDevCPUTempCurrent.With(prometheus.Labels{"cpu_id": cpuIDStr}).Set(fieldValue.Float64())
-			case dcgm.DCGM_FI_DEV_CPU_POWER_UTIL_CURRENT:
-				metricDCGMFIDevCPUPowerUtilCurrent.With(prometheus.Labels{"cpu_id": cpuIDStr}).Set(fieldValue.Float64())
-			case dcgm.DCGM_FI_DEV_CPU_POWER_LIMIT:
-				metricDCGMFIDevCPUPowerLimit.With(prometheus.Labels{"cpu_id": cpuIDStr}).Set(fieldValue.Float64())
-			case dcgm.DCGM_FI_DEV_CPU_TEMP_WARNING:
-				metricDCGMFIDevCPUTempWarning.With(prometheus.Labels{"cpu_id": cpuIDStr}).Set(fieldValue.Float64())
-			case dcgm.DCGM_FI_DEV_CPU_TEMP_CRITICAL:
-				metricDCGMFIDevCPUTempCritical.With(prometheus.Labels{"cpu_id": cpuIDStr}).Set(fieldValue.Float64())
+				// Use valid value
+				switch fieldValue.FieldID {
+				case dcgm.DCGM_FI_DEV_CPU_TEMP_CURRENT:
+					metricDCGMFIDevCPUTempCurrent.With(prometheus.Labels{"cpu_id": cpuIDStr}).Set(fieldValue.Float64())
+				case dcgm.DCGM_FI_DEV_CPU_POWER_UTIL_CURRENT:
+					metricDCGMFIDevCPUPowerUtilCurrent.With(prometheus.Labels{"cpu_id": cpuIDStr}).Set(fieldValue.Float64())
+				case dcgm.DCGM_FI_DEV_CPU_POWER_LIMIT:
+					metricDCGMFIDevCPUPowerLimit.With(prometheus.Labels{"cpu_id": cpuIDStr}).Set(fieldValue.Float64())
+				case dcgm.DCGM_FI_DEV_CPU_TEMP_WARNING:
+					metricDCGMFIDevCPUTempWarning.With(prometheus.Labels{"cpu_id": cpuIDStr}).Set(fieldValue.Float64())
+				case dcgm.DCGM_FI_DEV_CPU_TEMP_CRITICAL:
+					metricDCGMFIDevCPUTempCritical.With(prometheus.Labels{"cpu_id": cpuIDStr}).Set(fieldValue.Float64())
+				}
 			}
 		}
+
+		// CPU read errors retain the existing informational Healthy policy.
+		cr.health = apiv1.HealthStateTypeHealthy
+		cr.reason = "CPU metrics collected successfully"
 	}
 
-	// CPU metrics are informational only - always return healthy
-	cr.health = apiv1.HealthStateTypeHealthy
-	cr.reason = "CPU metrics collected successfully"
-
+	c.lastMu.Lock()
+	defer c.lastMu.Unlock()
+	// Close can cancel during gauge publication, so check cancellation again.
+	if c.ctx.Err() != nil || inputs.generation != c.resetGeneration {
+		if c.lastCheckResult != nil {
+			return c.lastCheckResult
+		}
+		cr.health = apiv1.HealthStateTypeInitializing
+		cr.reason = "DCGM session changed before a check completed"
+		if c.ctx.Err() != nil {
+			cr.reason = "collector stopped before a check completed"
+		}
+		cr.err = nil
+		return cr
+	}
+	c.lastCheckResult = cr
 	return cr
 }
 

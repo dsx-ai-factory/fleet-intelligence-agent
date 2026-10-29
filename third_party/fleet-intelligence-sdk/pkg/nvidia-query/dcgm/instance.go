@@ -92,6 +92,65 @@ type reconnectCallbackRegistrar interface {
 	RegisterReconnectCallback(callback func())
 }
 
+// AcquireSession prevents session replacement and native teardown until released.
+// Call it before taking collector locks used by reconnect callbacks. A caller
+// must not acquire it again before releasing it. Fixed instances need no gate.
+func AcquireSession(instance Instance) func() {
+	if locker, ok := instance.(interface{ AcquireSession() func() }); ok {
+		return locker.AcquireSession()
+	}
+	return func() {}
+}
+
+// RetainLibraryForRead keeps go-dcgm's library loaded while a cached read runs
+// without the session gate. Reconnecting instances pin their current owner
+// during acquisition. Release the reference once after the read. This uses
+// go-dcgm's existing Init reference count. No mutex is held across the read.
+func RetainLibraryForRead(instance Instance) (func(), error) {
+	if retainer, ok := instance.(interface{ retainLibraryForRead() (func(), error) }); ok {
+		release, err := retainer.retainLibraryForRead()
+		if err != nil && release != nil {
+			release()
+			release = nil
+		}
+		return release, err
+	}
+	return func() {}, nil
+}
+
+// retainLibraryForRead increments the reference count of an initialized library.
+// The initialized owner keeps a reference alive, so Init does not reconnect.
+func (inst *instance) retainLibraryForRead() (func(), error) { return dcgm.Init(dcgm.Standalone) }
+
+// retainLibraryForRead forwards the reference request to the active owner.
+// currentMu is held only for this short acquisition, never for cached reads.
+func (inst *reconnectingInstance) retainLibraryForRead() (func(), error) {
+	owner, release, err := inst.retainReadOwner()
+	if err != nil {
+		return nil, err
+	}
+	if !owner.DCGMExists() {
+		release()
+		return nil, fmt.Errorf("DCGM is not available")
+	}
+	return release, nil
+}
+
+// ReadEntityValues reads DCGM's cached entity fields without holding a lifecycle
+// lock across the native call. Library ownership is acquired inside this layer.
+// The library reference outlives session replacement or shutdown if the read blocks.
+func ReadEntityValues(inst Instance, group dcgm.Field_Entity_Group, id uint, fields []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+	if inst == nil || !inst.DCGMExists() {
+		return nil, fmt.Errorf("DCGM is not available")
+	}
+	releaseLibrary, err := RetainLibraryForRead(inst)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseLibrary()
+	return dcgm.EntityGetLatestValues(group, id, fields)
+}
+
 var newInstanceFunc = newInitializedInstance
 
 // New creates a DCGM instance. It returns a no-op instance when a complete
@@ -520,6 +579,9 @@ var _ Instance = &reconnectingInstance{}
 type reconnectingInstance struct {
 	stateMu   sync.RWMutex
 	currentMu sync.RWMutex
+	// sessionMu makes publication and resource resets atomic to native owners.
+	// Collectors take its read lock before their own setup/cleanup locks.
+	sessionMu sync.RWMutex
 	// reconnectMu serializes reconnect and shutdown transitions.
 	// Long-running connect operations happen outside this lock.
 	reconnectMu sync.Mutex
@@ -626,14 +688,18 @@ func (inst *reconnectingInstance) reconnectLoop() {
 }
 
 func (inst *reconnectingInstance) enrichDeviceInventoryIfIncomplete() error {
-	inst.currentMu.RLock()
-	defer inst.currentMu.RUnlock()
-
-	currentInst := inst.current
-	if currentInst == nil || !currentInst.DCGMExists() {
+	owner, release, err := inst.retainReadOwner()
+	if owner == nil {
+		return nil
+	} // Preserve the unavailable-inventory no-op policy.
+	if err != nil {
+		return err
+	}
+	defer release()
+	if !owner.DCGMExists() {
 		return nil
 	}
-	if enricher, ok := currentInst.(deviceInventoryEnricher); ok {
+	if enricher, ok := owner.(deviceInventoryEnricher); ok {
 		return enricher.enrichDeviceInventoryIfIncomplete()
 	}
 	return nil
@@ -653,6 +719,11 @@ func (inst *reconnectingInstance) reconnectNow() error {
 		return err
 	}
 
+	// Candidate connection stays outside the gate so shutdown can cancel a
+	// blocked initial connection. go-dcgm retains the active connection through
+	// Init reference counting. Publication and all resets form one transaction.
+	inst.sessionMu.Lock()
+	defer inst.sessionMu.Unlock()
 	inst.reconnectMu.Lock()
 	defer inst.reconnectMu.Unlock()
 	if inst.shuttingDown || inst.generation != expectedGeneration {
@@ -739,6 +810,13 @@ func (inst *reconnectingInstance) RegisterReconnectCallback(callback func()) {
 	inst.stateMu.Lock()
 	inst.callbacks = append(inst.callbacks, callback)
 	inst.stateMu.Unlock()
+}
+
+// AcquireSession pins session-owned resources through a native operation.
+// Reconnect callbacks run under the write lock and must not call this method.
+func (inst *reconnectingInstance) AcquireSession() func() {
+	inst.sessionMu.RLock()
+	return inst.sessionMu.RUnlock
 }
 
 func (inst *reconnectingInstance) runReconnectCallbacks() {
@@ -858,14 +936,28 @@ func (inst *reconnectingInstance) RemoveFieldsFromWatch(fields []dcgm.Short) err
 	return nil
 }
 
-func (inst *reconnectingInstance) GetLatestValuesForFields(deviceID uint, fields []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+// retainReadOwner captures the owner and retains its library under one short
+// currentMu scope. Entity reads and inventory queries run after the lock is released.
+func (inst *reconnectingInstance) retainReadOwner() (Instance, func(), error) {
 	inst.currentMu.RLock()
-	currentInst := inst.current
 	defer inst.currentMu.RUnlock()
-	if currentInst == nil {
-		return nil, fmt.Errorf("DCGM is not available")
+	current := inst.current
+	if current == nil {
+		return nil, nil, fmt.Errorf("DCGM is not available")
 	}
-	return currentInst.GetLatestValuesForFields(deviceID, fields)
+	release, err := RetainLibraryForRead(current)
+	return current, release, err
+}
+
+// GetLatestValuesForFields retains the library during the cached query.
+// A blocked query does not hold currentMu or prevent owner replacement.
+func (inst *reconnectingInstance) GetLatestValuesForFields(deviceID uint, fields []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+	current, release, err := inst.retainReadOwner()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return current.GetLatestValuesForFields(deviceID, fields)
 }
 
 func (inst *reconnectingInstance) GetGroupHandle() dcgm.GroupHandle {
@@ -895,7 +987,12 @@ func (inst *reconnectingInstance) Shutdown() error {
 		inst.shuttingDown = true
 		inst.generation++
 		close(inst.stopCh)
+		inst.reconnectMu.Unlock()
 
+		// Do not hold reconnectMu while waiting: reconnect takes sessionMu
+		// before checking its generation under reconnectMu.
+		inst.sessionMu.Lock()
+		defer inst.sessionMu.Unlock()
 		inst.currentMu.Lock()
 		currentInst := inst.current
 		inst.current = nil
@@ -904,7 +1001,6 @@ func (inst *reconnectingInstance) Shutdown() error {
 		if currentInst != nil {
 			shutdownErr = currentInst.Shutdown()
 		}
-		inst.reconnectMu.Unlock()
 	})
 	return shutdownErr
 }

@@ -17,7 +17,16 @@ package prof
 
 import (
 	"context"
+	"encoding/binary"
+	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+	"math"
+	"os"
+	"os/exec"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	apiv1 "github.com/NVIDIA/fleet-intelligence-sdk/api/v1"
@@ -25,6 +34,8 @@ import (
 	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics/scraper"
 	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
+	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNew(t *testing.T) {
@@ -238,6 +249,10 @@ func TestSetupFailureHandling(t *testing.T) {
 	}
 
 	t.Logf("Setup failure correctly returned Degraded: %s", summary)
+	states := c.LastHealthStates()
+	require.NoError(t, c.Close())
+	require.Same(t, result, c.Check())
+	require.Equal(t, states, c.LastHealthStates())
 }
 
 func TestCheckAttemptsDeferredSetupAfterDCGMReconnect(t *testing.T) {
@@ -259,6 +274,7 @@ func TestCheckAttemptsDeferredSetupAfterDCGMReconnect(t *testing.T) {
 		t.Fatal("profiling field setup was attempted while DCGM was unavailable")
 	}
 
+	c.setupDegradedReason = "previous field setup failure"
 	mockInstance.dcgmExists = true
 	result := comp.Check()
 	if !c.fieldSetupComplete {
@@ -306,4 +322,242 @@ func TestNoWatchedFieldsReturnsHealthy(t *testing.T) {
 	}
 
 	t.Logf("No watched fields correctly returned Healthy: %s", result.Summary())
+}
+
+func TestCheckReadsAllCachedFieldsAndStops(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		comp, err := New(&components.GPUdInstance{
+			RootCtx: context.Background(), HealthCheckInterval: 30 * time.Second,
+			DCGMIntervals: nvidiadcgm.CollectionIntervals{FieldProfiles: map[dcgm.Short]nvidiadcgm.FieldProfile{1110: nvidiadcgm.ExtendedProfile}},
+		})
+		require.NoError(t, err)
+		c := comp.(*component)
+		c.dcgmInstance = &mockDCGMInstance{dcgmExists: true, devices: []nvidiadcgm.DeviceInfo{{ID: 0}}}
+		c.fieldSetupComplete = true
+		c.watchedFields = []dcgm.Short{100, 1200}
+		defer func() { require.NoError(t, c.Close()) }()
+		var reads [][]dcgm.Short
+		fail := true
+		c.readFields = func(_ dcgm.Field_Entity_Group, _ uint, fields []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+			reads = append(reads, append([]dcgm.Short(nil), fields...))
+			if fail {
+				return nil, fmt.Errorf("read failed")
+			}
+			return nil, nil
+		}
+		c.Check()
+		time.Sleep(30 * time.Second)
+		fail = false
+		require.Equal(t, apiv1.HealthStateTypeHealthy, c.Check().HealthStateType())
+		time.Sleep(30 * time.Second)
+		c.Check()
+		require.Equal(t, [][]dcgm.Short{c.watchedFields, c.watchedFields, c.watchedFields}, reads)
+
+		require.NoError(t, c.Close())
+		require.NoError(t, c.Close())
+		time.Sleep(time.Hour)
+		c.Check()
+		require.Len(t, reads, 3)
+	})
+}
+
+func TestCloseDoesNotWaitForCachedRead(t *testing.T) {
+	comp, err := New(&components.GPUdInstance{RootCtx: context.Background()})
+	require.NoError(t, err)
+	c := comp.(*component)
+	previous := &checkResult{ts: time.Unix(100, 0).UTC(), health: apiv1.HealthStateTypeDegraded, reason: "previous check failed", err: context.DeadlineExceeded}
+	c.lastCheckResult = previous
+	states := previous.HealthStates()
+	c.dcgmInstance = &mockDCGMInstance{dcgmExists: true, devices: []nvidiadcgm.DeviceInfo{{ID: 0}}}
+	c.fieldSetupComplete = true
+	c.watchedFields = []dcgm.Short{dcgm.DCGM_FI_PROF_SM_ACTIVE}
+	entered, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+		close(entered)
+		<-release
+		// Cleanup can invalidate watches while this read is blocked. A canceled
+		// check must not restart the process because of that late teardown error.
+		return nil, fmt.Errorf("dcgm request failed with error code %d", dcgm.DCGM_ST_NOT_WATCHED)
+	}
+	checked := make(chan components.CheckResult, 1)
+	go func() { checked <- c.Check() }()
+	<-entered
+	closed := make(chan error, 1)
+	go func() { closed <- c.Close() }()
+	<-c.ctx.Done()
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close waited for a blocked cached read")
+	}
+	unblock()
+	require.Equal(t, states, (<-checked).HealthStates(), "an interrupted check must preserve the prior assessment")
+	require.NoError(t, c.Close())
+	require.Equal(t, states, c.Check().HealthStates())
+	require.Equal(t, states, c.LastHealthStates())
+}
+
+func TestStoppedBeforeFirstCheckReturnsInitializing(t *testing.T) {
+	comp, err := New(&components.GPUdInstance{RootCtx: context.Background()})
+	require.NoError(t, err)
+	c := comp.(*component)
+	require.NoError(t, c.Close())
+	for range 2 {
+		result := c.Check()
+		require.Equal(t, apiv1.HealthStateTypeInitializing, result.HealthStateType())
+		require.Equal(t, "collector stopped before a check completed", result.Summary())
+		require.Nil(t, c.lastCheckResult, "a stopped call must not publish a health assessment")
+	}
+}
+
+type reconnectProfilingInstance struct {
+	mockDCGMInstance
+	callback func()
+}
+
+func (m *reconnectProfilingInstance) RegisterReconnectCallback(callback func()) {
+	m.callback = callback
+}
+
+func TestProfilingReconnectResetsSessionResources(t *testing.T) {
+	inst := &reconnectProfilingInstance{}
+	comp, err := New(&components.GPUdInstance{RootCtx: context.Background(), DCGMInstance: inst})
+	require.NoError(t, err)
+	c := comp.(*component)
+	defer func() { require.NoError(t, c.Close()) }()
+	require.NotNil(t, inst.callback)
+	c.fieldWatches = nvidiadcgm.NewFieldWatches([]dcgm.Short{100, 1200}, 30*time.Second, c.watchIntervals)
+	watches := c.fieldWatches
+	c.fieldSetupComplete = true
+	c.watchedFields = []dcgm.Short{100, 1200}
+	c.setupDegradedReason = "old session error"
+	inst.callback()
+	require.Same(t, watches, c.fieldWatches)
+	require.Equal(t, []dcgm.Short{100, 1200}, c.fieldWatches.Fields())
+	require.False(t, c.fieldSetupComplete)
+	require.Empty(t, c.watchedFields)
+	require.Empty(t, c.setupDegradedReason)
+	require.NoError(t, c.Close())
+	inst.callback()
+	require.Equal(t, apiv1.HealthStateTypeInitializing, c.Check().HealthStateType())
+}
+
+func TestProfilingTransientAndEmptyReadsReturnHealthy(t *testing.T) {
+	comp, err := New(&components.GPUdInstance{RootCtx: context.Background()})
+	require.NoError(t, err)
+	c := comp.(*component)
+	defer func() { require.NoError(t, c.Close()) }()
+	c.dcgmInstance = &mockDCGMInstance{dcgmExists: true, devices: []nvidiadcgm.DeviceInfo{{ID: 0}}}
+	c.fieldSetupComplete = true
+	c.watchedFields = []dcgm.Short{100, 1200}
+	readErr := fmt.Errorf("dcgm request failed with error code %d", dcgm.DCGM_ST_NVML_ERROR)
+	c.readFields = func(_ dcgm.Field_Entity_Group, _ uint, fields []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+		require.Equal(t, c.watchedFields, fields)
+		return nil, readErr
+	}
+	require.Equal(t, apiv1.HealthStateTypeUnhealthy, c.Check().HealthStateType())
+	readErr = fmt.Errorf("dcgm request failed with error code %d", dcgm.DCGM_ST_NO_DATA)
+	require.Equal(t, apiv1.HealthStateTypeHealthy, c.Check().HealthStateType(), "transient errors are skipped")
+	readErr = fmt.Errorf("dcgm request failed with error code %d", dcgm.DCGM_ST_NVML_ERROR)
+	require.Equal(t, apiv1.HealthStateTypeUnhealthy, c.Check().HealthStateType())
+	readErr = nil
+	require.Equal(t, apiv1.HealthStateTypeHealthy, c.Check().HealthStateType(), "an empty value list is not an API error")
+	readErr = fmt.Errorf("dcgm request failed with error code %d", dcgm.DCGM_ST_NVML_ERROR)
+	require.Equal(t, apiv1.HealthStateTypeUnhealthy, c.Check().HealthStateType())
+	c.dcgmInstance = &mockDCGMInstance{dcgmExists: true}
+	require.Equal(t, apiv1.HealthStateTypeHealthy, c.Check().HealthStateType(), "no devices produces no read error")
+}
+
+// This gate models reconnect's exclusive session publication. A blocked read
+// must hold neither this gate nor setupMu, and its old batch must be discarded.
+type readLockProfilingInstance struct {
+	reconnectProfilingInstance
+	gate sync.RWMutex
+}
+
+func (m *readLockProfilingInstance) AcquireSession() func() { m.gate.RLock(); return m.gate.RUnlock }
+
+func TestReconnectCanResetDuringCachedRead(t *testing.T) {
+	inst := &readLockProfilingInstance{}
+	inst.dcgmExists = true
+	inst.devices = []nvidiadcgm.DeviceInfo{{ID: 9876, UUID: "lock-test"}}
+	comp, err := New(&components.GPUdInstance{RootCtx: context.Background(), DCGMInstance: inst})
+	require.NoError(t, err)
+	c := comp.(*component)
+	defer func() { require.NoError(t, c.Close()) }()
+	c.fieldSetupComplete = true
+	c.watchedFields = []dcgm.Short{dcgm.DCGM_FI_PROF_SM_ACTIVE}
+	previous := &checkResult{ts: time.Unix(100, 0), health: apiv1.HealthStateTypeHealthy, reason: "previous assessment"}
+	c.lastCheckResult = previous
+	gauge := metricDCGMFIProfSmActive.With(prometheus.Labels{"uuid": "lock-test", "gpu": "9876"})
+	gauge.Set(5)
+	entered, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+		close(entered)
+		<-release
+		value := dcgm.FieldValue_v1{FieldID: dcgm.DCGM_FI_PROF_SM_ACTIVE, FieldType: dcgm.DCGM_FT_DOUBLE}
+		binary.LittleEndian.PutUint64(value.Value[:], math.Float64bits(99))
+		return []dcgm.FieldValue_v1{value}, nil
+	}
+	checked := make(chan components.CheckResult, 1)
+	go func() { checked <- c.Check() }()
+	<-entered
+	reset := make(chan struct{})
+	go func() { inst.gate.Lock(); inst.callback(); inst.gate.Unlock(); close(reset) }()
+	select {
+	case <-reset:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reconnect waited for a blocked cached read")
+	}
+	require.False(t, c.fieldSetupComplete)
+	unblock()
+	require.Same(t, previous, <-checked)
+	require.Same(t, previous, c.lastCheckResult)
+	raw := &dto.Metric{}
+	require.NoError(t, gauge.Write(raw))
+	require.Equal(t, float64(5), raw.GetGauge().GetValue(), "old-session values must not update gauges")
+	// A later check can publish from the new generation, even with reused IDs.
+	c.setupMu.Lock()
+	c.fieldSetupComplete = true
+	c.watchedFields = []dcgm.Short{dcgm.DCGM_FI_PROF_SM_ACTIVE}
+	c.setupMu.Unlock()
+	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) { return nil, nil }
+	require.Equal(t, apiv1.HealthStateTypeHealthy, c.Check().HealthStateType())
+	require.NotSame(t, previous, c.lastCheckResult)
+}
+
+// Active-check fatal errors still request restart even if reconnect invalidated
+// the batch. Only cancellation caused by Close suppresses late teardown errors.
+func TestProfilingRestartPolicySurvivesReconnect(t *testing.T) {
+	const child = "FLEETINT_TEST_PROF_RESTART_AFTER_RESET"
+	if os.Getenv(child) == "1" {
+		comp, err := New(&components.GPUdInstance{RootCtx: context.Background()})
+		if err != nil {
+			os.Exit(2)
+		}
+		c := comp.(*component)
+		c.dcgmInstance = &mockDCGMInstance{dcgmExists: true, devices: []nvidiadcgm.DeviceInfo{{ID: 0}}}
+		c.fieldSetupComplete = true
+		c.watchedFields = []dcgm.Short{dcgm.DCGM_FI_PROF_SM_ACTIVE}
+		c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+			c.resetAfterReconnect()
+			return nil, fmt.Errorf("dcgm request failed with error code %d", dcgm.DCGM_ST_NOT_WATCHED)
+		}
+		c.Check()
+		os.Exit(0)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestProfilingRestartPolicySurvivesReconnect$")
+	cmd.Env = append(os.Environ(), child+"=1")
+	output, err := cmd.CombinedOutput()
+	var exit *exec.ExitError
+	require.ErrorAs(t, err, &exit, string(output))
+	require.Equal(t, 1, exit.ExitCode(), string(output))
+	require.Contains(t, string(output), "DCGM fatal error, exiting for restart")
 }

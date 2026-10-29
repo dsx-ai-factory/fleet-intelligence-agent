@@ -51,7 +51,9 @@ These environment variables are read by `fleetint run` at startup.
 | `FLEETINT_INCLUDE_HEALTHCHECKS` | Include component data and health details in export payloads.                                            | `true`                                                                   | `/etc/default/fleetint` | `env.FLEETINT_INCLUDE_HEALTHCHECKS` |
 | `FLEETINT_METRICS_LOOKBACK`     | Lookback window for metrics included in each export.                                                     | `1m`                                                                     | `/etc/default/fleetint` | `env.FLEETINT_METRICS_LOOKBACK`     |
 | `FLEETINT_EVENTS_LOOKBACK`      | Lookback window for events included in each export.                                                      | `1m`                                                                     | `/etc/default/fleetint` | `env.FLEETINT_EVENTS_LOOKBACK`      |
-| `FLEETINT_CHECK_INTERVAL`       | Component evaluation and metric-scrape interval. Valid range: `1s` to `24h`.                              | `30s`                                                                    | `/etc/default/fleetint` | `env.FLEETINT_CHECK_INTERVAL`       |
+| `FLEETINT_CHECK_INTERVAL`       | Component checks, metric scrapes, and standard DCGM sampling (`1s` to `24h`).                              | `30s`                                                                    | `/etc/default/fleetint` | `env.FLEETINT_CHECK_INTERVAL`       |
+| `FLEETINT_DCGM_EXTENDED_INTERVAL` | Extended DCGM sampling (`1s` to `24h`); never shorter than the standard interval. | `60s` | `/etc/default/fleetint` | `env.FLEETINT_DCGM_EXTENDED_INTERVAL` |
+| `FLEETINT_DCGM_FIELD_PROFILES` | DCGM field-to-profile overrides; see [sampling intervals](#dcgm-sampling-intervals). | unset (built-in assignments below) | `/etc/default/fleetint` | `env.FLEETINT_DCGM_FIELD_PROFILES` |
 | `FLEETINT_DCGM_HEALTH_CHECK_INTERVAL` | DCGM passive-health polling interval. Valid range: `1m` to `24h`.                                  | `1m`                                                                     | `/etc/default/fleetint` | `env.FLEETINT_DCGM_HEALTH_CHECK_INTERVAL` |
 | `FLEETINT_RETRY_MAX_ATTEMPTS`   | Maximum retry attempts for failed exports. Minimum: `0`.                                                 | `3`                                                                      | `/etc/default/fleetint` | `env.FLEETINT_RETRY_MAX_ATTEMPTS`   |
 | `FLEETINT_WORKLOAD_ATTRIBUTION_SOURCE` | Workload assignment source. Currently supported value: `hpc`. Unset disables workload attribution. | unset | `/etc/default/fleetint` | `workloadAttribution.source` |
@@ -72,6 +74,53 @@ Notes:
   supplies ordered TCP fallback endpoints. `DCGM_URL_IS_UNIX_SOCKET` applies
   only to `DCGM_URL`.
 - `MALLOC_ARENA_MAX` is a Linux process-level tuning parameter (not a Fleet Intelligence setting) that caps the number of glibc memory arenas to constrain RSS growth in cgo-heavy workloads such as DCGM integration.
+
+### DCGM sampling intervals
+
+No additional configuration is required. The defaults are:
+
+| Profile | DCGM field IDs | Default interval |
+| --- | --- | --- |
+| `standard` | All other collected fields | `30s` |
+| `extended` | `1200–1219` and `1404–1419`, inclusive | `60s` |
+
+The standard interval is `FLEETINT_CHECK_INTERVAL`. It also controls component
+checks and metric scrapes, including non-DCGM components. Extended fields use the
+longer of the standard interval and `FLEETINT_DCGM_EXTENDED_INTERVAL`. For example,
+`90s` standard and `60s` extended gives `90s` for both profiles.
+
+Both settings accept Go durations from `1s` to `24h` and can be raised or lowered.
+Shorter intervals increase collection overhead.
+
+**Override the defaults**
+
+This example uses `10s` standard sampling, `60s` extended sampling, and assigns
+field `1110` to the extended profile:
+
+```bash
+FLEETINT_CHECK_INTERVAL="10s"
+FLEETINT_DCGM_EXTENDED_INTERVAL="60s"
+FLEETINT_DCGM_FIELD_PROFILES="1110=extended"
+```
+
+Field assignments use comma-separated `ID=profile` or inclusive
+`FIRST-LAST=profile` entries. IDs must be decimal `1`–`65535`. Only `standard`
+and `extended` are supported, with case-sensitive names. Omitted IDs keep their
+defaults; an empty value keeps all defaults. Invalid or overlapping assignments
+prevent startup. **Assignments never enable collection of a field or component.**
+
+Use the same variables under Helm `env`. Restart the agent after changes.
+These overrides apply to `fleetint run`, including offline mode.
+
+**Sampling and export**
+
+Cached reads and scrapes run at the standard interval. A cached read does not
+trigger a new hardware sample. `FLEETINT_COLLECT_INTERVAL` controls export
+frequency separately (default `60s`).
+
+A slower field can return the same sample on successive reads. Exported points
+use scrape timestamps, so values can repeat. Use rate windows that span multiple
+native samples.
 
 ### Send Slurm workload identity to Fleet Intelligence
 

@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	pkgconfigcommon "github.com/NVIDIA/fleet-intelligence-sdk/pkg/config/common"
+	nvidiadcgm "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm"
 )
 
 // ConfigEntry represents a single configuration option as a key-value pair
@@ -119,6 +120,15 @@ type AttestationConfig struct {
 
 // HealthExporterConfig holds configuration for the health data exporter
 type HealthExporterConfig struct {
+	// DCGMExtendedInterval is the native sampling minimum for extended DCGM fields. Standard
+	// fields use HealthCheckInterval. A longer HealthCheckInterval also applies
+	// to extended fields. Zero selects the default minimum of 60s.
+	DCGMExtendedInterval metav1.Duration `json:"dcgm_extended_interval,omitempty"`
+
+	// DCGMFieldProfiles stores ID=profile or FIRST-LAST=profile assignments.
+	// Omitted IDs keep their built-in profile. Assignments never enable fields.
+	DCGMFieldProfiles string `json:"dcgm_field_profiles,omitempty"`
+
 	// MetricsEndpoint is the specific endpoint for sending metrics data
 	MetricsEndpoint string `json:"metrics_endpoint"`
 
@@ -183,6 +193,29 @@ type HealthExporterConfig struct {
 	Duration time.Duration `json:"duration"`
 }
 
+// DCGMCollectionIntervals resolves native watch intervals and field assignments.
+// Standard fields use HealthCheckInterval, which the runtime supplies separately.
+// A nil receiver uses the built-in defaults.
+func (cfg *HealthExporterConfig) DCGMCollectionIntervals() (nvidiadcgm.CollectionIntervals, error) {
+	intervals := nvidiadcgm.CollectionIntervals{Extended: time.Minute}
+	var fieldSettings string
+	if cfg != nil {
+		if value := cfg.DCGMExtendedInterval.Duration; value != 0 {
+			if value < time.Second || value > 24*time.Hour {
+				return nvidiadcgm.CollectionIntervals{}, fmt.Errorf("dcgm_extended_interval must be between 1s and 24h")
+			}
+			intervals.Extended = value
+		}
+		fieldSettings = cfg.DCGMFieldProfiles
+	}
+	var err error
+	intervals.FieldProfiles, err = nvidiadcgm.ParseFieldProfiles(fieldSettings)
+	if err != nil {
+		return nvidiadcgm.CollectionIntervals{}, fmt.Errorf("dcgm_field_profiles: %w", err)
+	}
+	return intervals, nil
+}
+
 // Validate checks if the configuration is valid
 func (config *Config) Validate() error {
 	if err := config.WorkloadAttribution.Validate(); err != nil {
@@ -223,6 +256,10 @@ func (config *Config) Validate() error {
 			if parsed.ForceQuery || strings.HasSuffix(endpoint, "#") {
 				return fmt.Errorf("collector_endpoint must not end with a bare '?' or '#'")
 			}
+		}
+
+		if _, err := config.HealthExporter.DCGMCollectionIntervals(); err != nil {
+			return err
 		}
 
 		// Validate health check interval
