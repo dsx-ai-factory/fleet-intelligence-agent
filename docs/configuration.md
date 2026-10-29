@@ -124,7 +124,8 @@ time; other metrics keep scrape timestamps. Prometheus clients must honor
 explicit timestamps. Timestamp precision is milliseconds in Prometheus, storage,
 and OTLP, and whole seconds in CSV.
 
-Export lookbacks and retention start when a sample is first stored. Overlapping
+Export lookbacks and retention use first-receipt time when `recorded_at` is
+available, falling back to measurement time for legacy rows. Overlapping
 export windows can include the same point with its original timestamp. Use rate
 windows that span multiple native samples.
 
