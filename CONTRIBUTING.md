@@ -36,7 +36,7 @@ git clone https://github.com/dsx-ai-factory/fleet-intelligence-agent.git
 Build Fleet Intelligence Agent from source
 
 ```bash
-cd fleetint
+cd fleet-intelligence-agent
 make all           # or: make fleetint
 
 ./bin/fleetint -h
