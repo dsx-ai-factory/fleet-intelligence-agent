@@ -1,13 +1,16 @@
 # Release Process
 
 Fleet Intelligence Agent releases are created by CI from protected version
-tags. Release artifacts must not be built or published manually.
+tags. Release artifacts must be built and published through the approved
+release process.
 
 ## Ownership and cadence
 
 Project maintainers publish releases as needed. There is no fixed release
-schedule. Only maintainers authorized to create protected `v*` tags may trigger
-an official release.
+schedule. Only authorized NVIDIA employees may create official releases at
+this time. They must have permission to create protected `v*` tags and the
+required release-system access. Maintainer status or GitHub write access alone
+does not grant publishing access.
 
 Contributors may propose release-related changes through pull requests, but
 must not create, move, or replace release tags. Published versions are
@@ -96,6 +99,64 @@ and then:
 
 Prerelease tags produce prerelease artifacts and do not update stable package
 channels or `latest` container tags.
+
+## Release artifacts and NGC publication
+
+Use the `fleet-intelligence` team in the NGC `dsx-ai-factory` staging
+organization. Public images and the chart are distributed through the
+`nvidia/fleet-intelligence` namespace:
+
+| Artifact | Public name or location |
+| --- | --- |
+| Agent image | `nvcr.io/nvidia/fleet-intelligence/agent` |
+| Shared telemetry gateway image | `nvcr.io/nvidia/fleet-intelligence/otel-gateway` |
+| Helm chart name | `fleet-intelligence-agent` |
+| Helm repository | `https://helm.ngc.nvidia.com/nvidia/fleet-intelligence` |
+
+Publish the agent and gateway images and the chart to both NGC and GHCR. Keep
+existing GHCR artifact names available for current consumers. Installation
+documentation uses NGC. This repository owns both image builds; the gateway
+image is also consumed by the OOB collector deployment.
+
+### Publishing access
+
+The authorized release maintainer needs membership in the NGC `dsx-ai-factory`
+staging organization and publishing access to its `fleet-intelligence` team.
+Configure the GitHub environment `ngc-publish` with the environment secret
+`NGC_API_KEY`, selected release branch rules such as `release/*`, and any
+required reviewers. API key authentication is used until the required OIDC
+publishing support is available.
+
+Keep keys in GitHub secrets and internal operational records. Detailed access,
+security review, and promotion instructions remain in NVIDIA's internal
+records.
+
+### Review and promotion
+
+1. Build the final-version images and chart from the reviewed release commit
+   through CI. Upload images to
+   `nvcr.io/<staging-org-id>/fleet-intelligence/agent` and
+   `nvcr.io/<staging-org-id>/fleet-intelligence/otel-gateway`, and the chart to
+   `<staging-org-id>/fleet-intelligence/fleet-intelligence-agent`.
+2. Record the source commit, image digests, chart checksum, SBOMs, and signed
+   provenance, and test those exact artifacts. The chart must use its final
+   public image references before review; staging tests can override image
+   repositories at installation time without changing the package.
+3. Complete NVIDIA's required security and compliance checklists and
+   open-source review requirements. Record approval for the image digests and
+   chart checksum. A successful build alone does not authorize public
+   publication.
+4. Submit the internal publishing request to promote the approved artifacts.
+   Preserve image digests, chart bytes, SBOMs, and provenance; do not rebuild
+   or repackage during promotion.
+5. Verify public access to both images and the chart, compare the public
+   digests and checksum with the approved records, and verify provenance.
+   Include the public NGC links in the release notes. See the
+   [Helm installation guide](docs/install-helm.md) for customer commands.
+
+Failed or pending checks block promotion. Changes to an artifact require
+renewed testing and approval. Linux package signing and Artifactory
+publication follow the release workflow described above.
 
 ## Failure handling
 

@@ -220,8 +220,15 @@ For more information about the DCO, see: https://developercertificate.org/
 
 ## Releases
 
-Maintainers should follow the documented [release process](RELEASE.md). Release
-artifacts are built and published by CI from protected version tags.
+NVIDIA employees and external contributors can propose changes through the
+same contribution workflow. Official releases currently require an authorized
+NVIDIA employee; maintainer status alone does not grant release publishing
+access.
+
+Maintainers should follow the documented [release process](RELEASE.md) for
+artifact names, CI builds, NGC staging, security review, and public promotion.
+Images and charts are published to both NGC and GHCR; customer installation
+documentation uses NGC.
 
 ## Pull Request Process
 
