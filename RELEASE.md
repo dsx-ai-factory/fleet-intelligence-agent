@@ -110,7 +110,7 @@ organization. Public images and the chart are distributed through the
 | --- | --- |
 | Agent image | `nvcr.io/nvidia/fleet-intelligence/agent` |
 | Shared telemetry gateway image | `nvcr.io/nvidia/fleet-intelligence/otel-gateway` |
-| Helm chart name | `fleet-intelligence-agent` |
+| Helm chart name | `agent` |
 | Helm repository | `https://helm.ngc.nvidia.com/nvidia/fleet-intelligence` |
 
 Publish the agent and gateway images and the chart to both NGC and GHCR. Keep
@@ -137,7 +137,7 @@ records.
    through CI. Upload images to
    `nvcr.io/<staging-org-id>/fleet-intelligence/agent` and
    `nvcr.io/<staging-org-id>/fleet-intelligence/otel-gateway`, and the chart to
-   `<staging-org-id>/fleet-intelligence/fleet-intelligence-agent`.
+   `<staging-org-id>/fleet-intelligence/agent`.
 2. Record the source commit, image digests, chart checksum, SBOMs, and signed
    provenance, and test those exact artifacts. The chart must use its final
    public image references before review; staging tests can override image

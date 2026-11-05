@@ -51,7 +51,7 @@ printf '%s' "$ENROLL_TOKEN" | kubectl create secret generic "$ENROLL_TOKEN_SECRE
 Install:
 
 ```bash
-helm install fleet-intelligence-agent fleet-intelligence-agent \
+helm install fleet-intelligence-agent agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
   --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
@@ -65,7 +65,7 @@ helm install fleet-intelligence-agent fleet-intelligence-agent \
 Install (no enrollment):
 
 ```bash
-helm install fleet-intelligence-agent fleet-intelligence-agent \
+helm install fleet-intelligence-agent agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
   --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
@@ -76,7 +76,7 @@ helm install fleet-intelligence-agent fleet-intelligence-agent \
 Upgrade:
 
 ```bash
-helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
   --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
@@ -90,7 +90,7 @@ helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
 Optional: include node metadata during automatic enrollment:
 
 ```bash
-helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
   --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
@@ -110,7 +110,7 @@ Notes:
 Upgrade (no enrollment):
 
 ```bash
-helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
   --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
@@ -121,7 +121,7 @@ helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
 Upgrade and explicitly remove persisted enrollment metadata:
 
 ```bash
-helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
   --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
@@ -209,7 +209,7 @@ kubectl logs -n "$NS" "$POD_NAME" --follow
 Fault injection is disabled by default. To enable it on an existing release:
 
 ```bash
-helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
   --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
@@ -291,7 +291,7 @@ kubectl get pods -n "$NS" "$POD_NAME" -o jsonpath='{.spec.containers[0].env}'
 If DCGM is at a different location, update the URL:
 
 ```bash
-helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
   --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
@@ -330,7 +330,7 @@ The examples below use a generic label to illustrate the override syntax — rep
 Using `--set` (quote the tolerations for zsh, and escape dots in the label key):
 
 ```bash
-helm upgrade --install fleet-intelligence-agent fleet-intelligence-agent \
+helm upgrade --install fleet-intelligence-agent agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
   --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
