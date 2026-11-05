@@ -28,6 +28,8 @@ env:
 
 jobs:
   release:
+    if: ${{ github.ref_type == 'tag' }}
+    environment: ngc-publish
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -41,6 +43,10 @@ jobs:
         id: version
         run: |
           set -euo pipefail
+          if [[ "$VERSION_TAG" != "$GITHUB_REF_NAME" ]]; then
+            echo "::error::Release version must match the selected tag"
+            exit 1
+          fi
           if [[ ! "$VERSION_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Release version must be vMAJOR.MINOR.PATCH with an optional prerelease suffix"
             exit 1

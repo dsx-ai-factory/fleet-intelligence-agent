@@ -108,6 +108,8 @@ same tag and version:
 gh workflow run release-artifacts.yml --ref v1.6.0 -f version=v1.6.0
 ```
 
+Publishing requires a tag ref matching the version input and the `ngc-publish` GitHub environment. Configure that environment to allow only release tags, require reviewer approval with self-review and administrator bypass disabled, and store `NGC_API_KEY` only as an environment secret. Restrict release tag creation, updates, and deletion to authorized maintainers through a tag ruleset.
+
 | Artifact | Location |
 | --- | --- |
 | Agent image | `nvcr.io/nvidia/fleet-intelligence/agent` |
