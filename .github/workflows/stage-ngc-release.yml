@@ -190,7 +190,7 @@ jobs:
           cd dist
           sha256sum --check chart.sha256
           if ! ngc registry chart info "$CHART_TARGET"; then
-            ngc registry chart create "$CHART_TARGET" --short-desc "Fleet Intelligence out-of-band collector"
+            ngc registry chart create "$CHART_TARGET" --short-desc "Fleet Intelligence Agent and telemetry gateway"
           fi
           ngc registry chart push "$CHART_TARGET:$VERSION"
       - name: Remove NGC CLI state

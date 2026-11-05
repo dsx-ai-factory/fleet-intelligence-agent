@@ -89,7 +89,7 @@ This creates in the `dist/` directory:
 
 Authorized NVIDIA release maintainers should follow the [release process](https://github.com/dsx-ai-factory/fleet-intelligence-agent/blob/main/RELEASE.md) for branch preparation, validation, protected tags, signing, and publication. Contributors can propose release fixes through pull requests.
 
-The release process covers agent and shared gateway images and the Helm chart in NGC, alongside GHCR distribution for existing consumers. Use the [Helm installation guide](install-helm.md) for NGC installation commands.
+The release process publishes new agent and shared gateway images and the Helm chart only through NGC. Use the [Helm installation guide](install-helm.md) for installation and [upgrading an existing GHCR deployment](install-helm.md#upgrade-from-ghcr).
 
 ## Testing
 

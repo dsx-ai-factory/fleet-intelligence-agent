@@ -11,7 +11,6 @@ env:
 
 permissions:
   contents: write  # Needed for creating GitHub releases
-  packages: write  # Mirror approved images/charts to GHCR
   attestations: read  # Verify staging provenance for the exact tagged source
 
 concurrency:
@@ -67,7 +66,7 @@ jobs:
         with:
           version: v3.14.4
 
-      - name: Install pinned registry copy tool
+      - name: Install pinned registry inspection tool
         run: |
           set -euo pipefail
           GOBIN="$RUNNER_TEMP/release-tools" go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
@@ -76,7 +75,7 @@ jobs:
       - name: Verify approved public NGC artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 scripts/mirror-ngc-release.py prepare "$RUNNER_TEMP/ngc-approved"
+        run: python3 scripts/verify-ngc-release.py "$RUNNER_TEMP/ngc-approved"
 
       - name: Download dependencies
         run: go mod download
@@ -194,25 +193,7 @@ jobs:
                 data: fs.readFileSync(file),
               });
             }
-      - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Log in to GHCR Helm registry
-        env:
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GHCR_USER" --password-stdin
-
-      - name: Mirror approved NGC artifacts to GHCR
-        run: python3 scripts/mirror-ngc-release.py publish "$RUNNER_TEMP/ngc-approved"
-
-      - name: Retain NGC verification and mirror records
+      - name: Retain NGC verification records
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ngc-approved-release-${{ github.ref_name }}
@@ -243,7 +224,9 @@ jobs:
               repo: context.repo.repo,
               release_id: release.id,
               draft: false,
-              body: `${release.body || ""}\n\n### NGC artifacts\n` +
+              body: `${release.body || ""}\n\n### Registry change\n` +
+                `New container images and Helm charts are published only to NGC. GHCR tags no longer advance. ` +
+                `[Upgrade from GHCR](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${tag}/docs/install-helm.md#upgrade-from-ghcr).\n\n### NGC artifacts\n` +
                 `- Agent: nvcr.io/nvidia/fleet-intelligence/agent:${process.env.RELEASE_TAG.slice(1)}\n` +
                 `- Gateway: nvcr.io/nvidia/fleet-intelligence/otel-gateway:${process.env.RELEASE_TAG.slice(1)}\n` +
                 `- Helm chart: https://helm.ngc.nvidia.com/nvidia/fleet-intelligence/charts/fleet-intelligence-agent-${process.env.RELEASE_TAG.slice(1)}.tgz\n`,

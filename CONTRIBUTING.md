@@ -227,8 +227,8 @@ access.
 
 Maintainers should follow the documented [release process](RELEASE.md) for
 artifact names, CI builds, NGC staging, security review, and public promotion.
-Images and charts are published to both NGC and GHCR; customer installation
-documentation uses NGC.
+New image and chart versions are published only to NGC. Existing deployments
+should follow [Upgrade from GHCR](docs/install-helm.md#upgrade-from-ghcr).
 
 ## Pull Request Process
 

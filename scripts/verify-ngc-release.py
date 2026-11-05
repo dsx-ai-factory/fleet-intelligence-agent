@@ -2,7 +2,7 @@
 # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Verify approved public NGC artifacts and mirror their exact bytes to GHCR."""
+"""Verify public NGC release artifacts against their exact approved source."""
 
 import argparse
 import hashlib
@@ -16,7 +16,7 @@ import sys
 
 PUBLIC_PREFIX = "nvcr.io/nvidia/fleet-intelligence"
 CHART_REPO = "https://helm.ngc.nvidia.com/nvidia/fleet-intelligence"
-IMAGES = {"agent": "fleet-intelligence-agent", "otel-gateway": "fleetint-otelcol"}
+IMAGES = ("agent", "otel-gateway")
 
 
 def run(*args):
@@ -47,7 +47,7 @@ def checksum(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def prepare(directory, environ):
+def verify(directory, environ):
     """Require provenance for the tag's exact source before package publication."""
     version, sha, repository = context(environ)
     directory.mkdir(parents=True, exist_ok=True)
@@ -71,40 +71,14 @@ def prepare(directory, environ):
     (directory / "release-record.json").write_text(json.dumps(record, indent=2) + "\n")
 
 
-def publish(directory, environ):
-    """Copy the verified image indexes and chart without rebuilding or repackaging."""
-    version, sha, repository = context(environ)
-    record = json.loads((directory / "release-record.json").read_text())
-    if (record["version"], record["source_sha"], record["repository"]) != (version, sha, repository):
-        raise ValueError("Verified release record does not match this tag and source")
-    chart = directory / f"fleet-intelligence-agent-{version}.tgz"
-    if checksum(chart) != record["chart_sha256"]:
-        raise ValueError("Verified chart bytes changed before publication")
-    owner = repository.split("/")[0].lower()
-    for image, ghcr_name in IMAGES.items():
-        digest = verified_digest(record["images"][image])
-        destination = f"ghcr.io/{owner}/{ghcr_name}"
-        target = f"{destination}:{version}"
-        run("crane", "copy", "--no-clobber", f"{PUBLIC_PREFIX}/{image}@{digest}", target)
-        copied = verified_digest(run("crane", "digest", target).strip())
-        if copied != digest:
-            raise ValueError(f"GHCR copy changed the approved {image} index digest")
-        if "-" not in version:
-            run("crane", "tag", f"{destination}@{digest}", "latest")
-        (directory / f"{image}.ghcr.json").write_text(
-            json.dumps({"destination": target, "digest": copied}, indent=2) + "\n")
-    run("helm", "push", str(chart), f"oci://ghcr.io/{owner}/charts")
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("prepare", "publish"))
     parser.add_argument("directory", type=Path)
     args = parser.parse_args()
     try:
-        (prepare if args.operation == "prepare" else publish)(args.directory, os.environ)
+        verify(args.directory, os.environ)
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
-        print(f"::error::NGC release {args.operation} failed: {error}", file=sys.stderr)
+        print(f"::error::NGC release verification failed: {error}", file=sys.stderr)
         if isinstance(error, subprocess.CalledProcessError) and error.stderr:
             print(error.stderr, file=sys.stderr)
         return 1

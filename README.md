@@ -135,6 +135,7 @@ For the broader Fleet Intelligence platform documentation, see [docs.nvidia.com/
 - [Configuration](docs/configuration.md)
 - [Architecture](docs/architecture.md)
 - [Development](docs/development.md)
+- [Upgrade from GHCR to NGC](docs/install-helm.md#upgrade-from-ghcr)
 
 ## Contributing
 

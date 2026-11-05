@@ -7,7 +7,7 @@ This chart deploys the `fleet-intelligence-agent` DaemonSet.
 For installation steps (NGC chart, enrollment, and
 `helm install`/`helm upgrade`), see `docs/install-helm.md`.
 
-The chart is distributed as `fleet-intelligence-agent` from `https://helm.ngc.nvidia.com/nvidia/fleet-intelligence`. The installation examples select `nvcr.io/nvidia/fleet-intelligence/agent` and `nvcr.io/nvidia/fleet-intelligence/otel-gateway`. GHCR distribution remains available for existing consumers. See the [release process](../../../RELEASE.md) for publishing ownership and review.
+The chart is distributed as `fleet-intelligence-agent` from `https://helm.ngc.nvidia.com/nvidia/fleet-intelligence`. The installation examples select `nvcr.io/nvidia/fleet-intelligence/agent` and `nvcr.io/nvidia/fleet-intelligence/otel-gateway`. New versions are published only to NGC. Existing installations should follow [Upgrade from GHCR](../../../docs/install-helm.md#upgrade-from-ghcr). See the [release process](../../../RELEASE.md) for publishing ownership and review.
 
 ## Configuration
 

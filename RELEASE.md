@@ -69,8 +69,9 @@ release.
 Complete the [review and promotion](#review-and-promotion) steps for these
 exact artifacts. Keep the release branch at the approved source commit. The
 public NGC artifacts must be available and their provenance must identify that
-commit before the tagged release can copy them to GHCR. Preserve NGC image
-attestation referrers during promotion so the tagged release can verify them.
+commit before the tagged release can publish Linux packages and the GitHub
+release. Preserve NGC image attestation referrers during promotion so the
+tagged release can verify them.
 
 ## Trigger a release
 
@@ -113,15 +114,13 @@ and then:
    GoReleaser.
 3. Signs the Linux packages and checksum manifest and verifies the signatures.
 4. Publishes stable DEB packages to Artifactory.
-5. Copies the approved NGC image indexes to the existing GHCR image names
-   and uploads the same approved chart package to GHCR, without rebuilding or
-   repackaging. The copied image digests must match the NGC digests.
-6. Publishes the verified GitHub release with generated notes and public NGC
-   links.
-7. Publishes the versioned documentation for stable releases.
+5. Publishes the verified GitHub release with generated notes, public NGC
+   links, and the registry migration instructions.
+6. Publishes the versioned documentation for stable releases.
 
 Prerelease tags produce prerelease artifacts and do not update stable package
-channels or `latest` container tags.
+channels. Container image versions are published through NGC; this workflow
+does not update GHCR tags.
 
 ## Release artifacts and NGC publication
 
@@ -136,10 +135,12 @@ organization. Public images and the chart are distributed through the
 | Helm chart name | `fleet-intelligence-agent` |
 | Helm repository | `https://helm.ngc.nvidia.com/nvidia/fleet-intelligence` |
 
-Publish the agent and gateway images and the chart to both NGC and GHCR. Keep
-existing GHCR artifact names available for current consumers. Installation
-documentation uses NGC. This repository owns both image builds; the gateway
-image is also consumed by the OOB collector deployment.
+New releases publish the agent and gateway images and the chart only to NGC.
+GHCR receives no new versions or `latest` updates. Existing installations
+should follow [Upgrade from GHCR](docs/install-helm.md#upgrade-from-ghcr) to
+select the NGC chart and replace saved image repository and version overrides.
+This repository owns both image builds; the gateway image is also consumed by
+the OOB collector deployment.
 
 ### Publishing access
 
@@ -154,8 +155,10 @@ publishing support is available.
 
 The tagged release runner requires Python 3, Helm, and a GitHub
 CLI that supports attestation verification with `--source-digest` and
-`--signer-workflow`. CI installs the pinned Crane CLI to copy all image
-platforms and their blobs between registries.
+`--signer-workflow`. CI installs the pinned Crane CLI to resolve the public
+image digests before verification. The tagged release only reads NGC
+artifacts; public image and chart publication happens through the approved
+NGC promotion process.
 
 Keep keys in GitHub secrets and internal operational records. Detailed access,
 security review, and promotion instructions remain in NVIDIA's internal
