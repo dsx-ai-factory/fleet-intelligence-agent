@@ -74,10 +74,24 @@ helm install fleet-intelligence-agent fleet-intelligence-agent \
   --namespace "$NS"
 ```
 
+Before upgrading, export your saved values to a private file:
+
+```bash
+umask 077
+helm get values fleet-intelligence-agent --namespace "$NS" -o yaml > agent-values.yaml
+```
+
+Review `agent-values.yaml`: set `image.repository` to
+`nvcr.io/nvidia/fleet-intelligence/agent` and `otelGateway.image.repository`
+to `nvcr.io/nvidia/fleet-intelligence/otel-gateway` if overridden. Remove
+`image.tag` and `otelGateway.image.tag` overrides to use the chart's version.
+Keep your other saved settings.
+
 Upgrade:
 
 ```bash
 helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+  --values agent-values.yaml \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
@@ -90,6 +104,7 @@ Optional: include node metadata during automatic enrollment:
 
 ```bash
 helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+  --values agent-values.yaml \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
@@ -108,6 +123,7 @@ Upgrade (no enrollment):
 
 ```bash
 helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+  --values agent-values.yaml \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --version "$CHART_VERSION" \
   --namespace "$NS"
@@ -117,6 +133,7 @@ Upgrade and explicitly remove persisted enrollment metadata:
 
 ```bash
 helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+  --values agent-values.yaml \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
@@ -203,6 +220,7 @@ Fault injection is disabled by default. To enable it on an existing release:
 
 ```bash
 helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+  --values agent-values.yaml \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
@@ -283,6 +301,7 @@ If DCGM is at a different location, update the URL:
 
 ```bash
 helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+  --values agent-values.yaml \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --version "$CHART_VERSION" \
   --namespace "$NS" \

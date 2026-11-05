@@ -40,8 +40,10 @@ first, then cherry-picked into each affected release branch.
    make package-snapshot
    ```
 
-5. Merge any required release fixes through the normal pull request process.
-6. For a patch release, cherry-pick the reviewed fix into the corresponding
+5. Confirm the release runner has its signing tool, signing credentials, and
+   package and checksum signing configuration before creating a tag.
+6. Merge any required release fixes through the normal pull request process.
+7. For a patch release, cherry-pick the reviewed fix into the corresponding
    release branch:
 
    ```bash
@@ -99,7 +101,12 @@ channels.
 
 The **Release** workflow builds and publishes the agent and gateway images and
 the Helm chart for the selected release version. New versions are published
-only to NGC.
+only to NGC. After pushing the release tag, dispatch the workflow using that
+same tag and version:
+
+```bash
+gh workflow run release-artifacts.yml --ref v1.6.0 -f version=v1.6.0
+```
 
 | Artifact | Location |
 | --- | --- |

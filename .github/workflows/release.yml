@@ -59,6 +59,7 @@ jobs:
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: false
 
       - name: Set up Helm
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
@@ -72,6 +73,26 @@ jobs:
         run: |
           rm -rf ./dist || true
 
+      - name: Check signing configuration
+        env:
+          NVSEC_LINUX_PACKAGE_SSA_SCOPE: ${{ vars.NVSEC_LINUX_PACKAGE_SSA_SCOPE }}
+          NVSEC_LINUX_PACKAGE_JOB_TYPE: ${{ vars.NVSEC_LINUX_PACKAGE_JOB_TYPE }}
+          NVSEC_CHECKSUM_SSA_SCOPE: ${{ vars.NVSEC_CHECKSUM_SSA_SCOPE }}
+          NVSEC_CHECKSUM_JOB_TYPE: ${{ vars.NVSEC_CHECKSUM_JOB_TYPE }}
+          NVSEC_SSA_CLIENT_ID: ${{ secrets.NVSEC_SSA_CLIENT_ID }}
+          NVSEC_SSA_CLIENT_SECRET: ${{ secrets.NVSEC_SSA_CLIENT_SECRET }}
+        run: |
+          : "${NVSEC_LINUX_PACKAGE_SSA_SCOPE:?NVSEC_LINUX_PACKAGE_SSA_SCOPE is required}"
+          : "${NVSEC_LINUX_PACKAGE_JOB_TYPE:?NVSEC_LINUX_PACKAGE_JOB_TYPE is required}"
+          : "${NVSEC_CHECKSUM_SSA_SCOPE:?NVSEC_CHECKSUM_SSA_SCOPE is required}"
+          : "${NVSEC_CHECKSUM_JOB_TYPE:?NVSEC_CHECKSUM_JOB_TYPE is required}"
+          : "${NVSEC_SSA_CLIENT_ID:?NVSEC_SSA_CLIENT_ID is required}"
+          : "${NVSEC_SSA_CLIENT_SECRET:?NVSEC_SSA_CLIENT_SECRET is required}"
+          command -v nvsec >/dev/null 2>&1 || {
+            echo "nvsec must be installed on the self-hosted release runner" >&2
+            exit 1
+          }
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@5742e2a039330cbb23ebf35f046f814d4c6ff811 # v5.1.0
         with:
@@ -81,13 +102,6 @@ jobs:
         env:
           GORELEASER_CURRENT_TAG: ${{ env.RELEASE_TAG }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify nvsec is available
-        run: |
-          command -v nvsec >/dev/null 2>&1 || {
-            echo "nvsec must be installed on the self-hosted release runner" >&2
-            exit 1
-          }
 
       - name: Sign and verify DEB and RPM packages
         run: |
