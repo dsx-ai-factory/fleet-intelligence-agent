@@ -87,9 +87,22 @@ This creates in the `dist/` directory:
 
 ### Create a Release
 
-Authorized NVIDIA release maintainers should follow the [release process](https://github.com/dsx-ai-factory/fleet-intelligence-agent/blob/main/RELEASE.md) for branch preparation, validation, protected tags, signing, and publication. Contributors can propose release fixes through pull requests.
+To create an official release, tag a version and push it to GitHub. The GitHub Actions workflow will automatically build and publish the release:
 
-The release process publishes new agent and shared gateway images and the Helm chart only through NGC. Use the [Helm installation guide](install-helm.md) for installation and [upgrading an existing GHCR deployment](install-helm.md#upgrade-from-ghcr).
+```bash
+# Tag a version
+git tag v0.2.0
+
+# Push the tag to trigger the release workflow
+git push origin v0.2.0
+```
+
+The GitHub Actions workflow will:
+- Build packages for all supported platforms (amd64, arm64)
+- Create `.deb` packages for Ubuntu
+- Create `.rpm` packages for RHEL/Rocky/AlmaLinux 8, 9, 10
+- Generate binary tarballs
+- Publish the release with all artifacts to GitHub Releases
 
 ## Testing
 

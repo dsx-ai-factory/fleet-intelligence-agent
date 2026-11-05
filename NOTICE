@@ -196,7 +196,7 @@ Copyright (c) 2024 Lepton AI Inc.
 Attribution Statements: This product includes gpud, which has been modified by NVIDIA CORPORATION & AFFILIATES. The NVIDIA version includes proprietary modifications. These modifications are not contributed back to the original project.
 
 Original Source: https://github.com/leptonai/gpud
-NVIDIA Fork: https://gitlab-master.nvidia.com/gpu-health/gpud
+NVIDIA-modified source: https://github.com/dsx-ai-factory/fleet-intelligence-agent/tree/main/third_party/fleet-intelligence-sdk
 
 // Copyright (c) 2024 Lepton AI Inc.
 // Licensed under the Apache License, Version 2.0
@@ -384,7 +384,7 @@ COMPLETE LIST OF DIRECT DEPENDENCIES
 This NOTICE file covers all direct dependencies of the Fleet Intelligence Agent project:
 
 Apache License 2.0:
-  - gitlab-master.nvidia.com/gpu-health/gpud (NVIDIA modified fork of leptonai/gpud)
+  - third_party/fleet-intelligence-sdk (NVIDIA modified code based on leptonai/gpud)
   - github.com/prometheus/client_golang
   - go.opentelemetry.io/proto/otlp
   - k8s.io/apimachinery

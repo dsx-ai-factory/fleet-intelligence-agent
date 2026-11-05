@@ -220,15 +220,9 @@ For more information about the DCO, see: https://developercertificate.org/
 
 ## Releases
 
-NVIDIA employees and external contributors can propose changes through the
-same contribution workflow. Official releases currently require an authorized
-NVIDIA employee; maintainer status alone does not grant release publishing
-access.
-
-Maintainers should follow the documented [release process](RELEASE.md) for
-artifact names, CI builds, NGC staging, security review, and public promotion.
-New image and chart versions are published only to NGC. Existing deployments
-should follow [Upgrade from GHCR](docs/install-helm.md#upgrade-from-ghcr).
+Maintainers should follow the documented [release process](RELEASE.md). The
+Release workflow publishes images and the Helm chart to NGC. Protected version
+tags build and publish Linux packages.
 
 ## Pull Request Process
 

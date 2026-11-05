@@ -48,6 +48,11 @@ printf '%s' "$ENROLL_TOKEN" | kubectl create secret generic "$ENROLL_TOKEN_SECRE
 
 ## Install or upgrade
 
+For an existing GHCR installation, keep the same release name and namespace.
+Replace saved image repository or version overrides with the NGC references
+for your selected release, while preserving enrollment settings and agent
+state. New image and chart versions are published only to NGC.
+
 Install:
 
 ```bash
@@ -139,69 +144,6 @@ explicit `env.DCGM_URL` override:
 DCGM_URL='<dcgm-hostengine-address>'
 --set env.DCGM_URL="$DCGM_URL"
 ```
-
-## Upgrade from GHCR
-
-New releases publish container images and the Helm chart only to NGC. GHCR tags,
-including `latest`, no longer advance. Select a published NGC version from the
-[release notes](https://github.com/dsx-ai-factory/fleet-intelligence-agent/releases)
-before upgrading.
-
-| Artifact | Previous GHCR location | NGC location |
-| --- | --- | --- |
-| Agent image | `ghcr.io/dsx-ai-factory/fleet-intelligence-agent` | `nvcr.io/nvidia/fleet-intelligence/agent` |
-| Gateway image | `ghcr.io/dsx-ai-factory/fleetint-otelcol` | `nvcr.io/nvidia/fleet-intelligence/otel-gateway` |
-| Chart | `oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent` | `fleet-intelligence-agent` from `https://helm.ngc.nvidia.com/nvidia/fleet-intelligence` |
-
-Keep your existing Helm release name and namespace. Upgrade in place to retain
-host identity and enrollment state under `/var/lib/fleetint`. Ensure nodes can
-reach `nvcr.io` and your Helm client can reach `helm.ngc.nvidia.com`.
-
-1. Save the current user-supplied values to a private file. Keep enrollment
-   Secret references, backend settings, scheduling, and gateway configuration.
-   The file may contain sensitive values; keep it outside the repository.
-
-   ```bash
-   RELEASE_NAME=fleet-intelligence-agent  # Your existing release name
-   NS=fleet-intelligence                # Your existing namespace
-   CHART_VERSION='<NGC-release-version>'
-   VALUES_FILE=$(mktemp "${TMPDIR:-/tmp}/fleetint-upgrade.XXXXXX")
-
-   helm get values "$RELEASE_NAME" --namespace "$NS" --output yaml > "$VALUES_FILE"
-   ```
-
-2. Upgrade to the NGC chart. Explicitly replace both image repositories and
-   version pins so saved GHCR overrides cannot carry into the new release.
-   Clear one-time force-enrollment and unenrollment flags while preserving
-   whether automatic enrollment is enabled.
-
-   ```bash
-   helm upgrade "$RELEASE_NAME" fleet-intelligence-agent \
-     --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
-     --version "$CHART_VERSION" \
-     --namespace "$NS" \
-     --values "$VALUES_FILE" \
-     --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
-     --set-string image.tag="$CHART_VERSION" \
-     --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
-     --set-string otelGateway.image.tag="$CHART_VERSION" \
-     --set enroll.force=false \
-     --set enroll.unenroll=false \
-     --wait --timeout 10m
-   ```
-
-3. Verify the deployment using [Verifying deployment](#verifying-deployment).
-   If the gateway is enabled, also check its Deployment rollout and image.
-   Update your GitOps manifests, values files, registry allowlists, and release
-   automation with these NGC references, then delete the private temporary file.
-
-   ```bash
-   rm "$VALUES_FILE"
-   ```
-
-If you need to roll back, use `helm history "$RELEASE_NAME" --namespace "$NS"`
-and `helm rollback "$RELEASE_NAME" <previous-revision> --namespace "$NS" --wait`.
-A previous GHCR-based revision requires its original images to remain available.
 
 ## Custom labels and annotations
 

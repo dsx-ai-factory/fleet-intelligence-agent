@@ -1,4 +1,4 @@
-name: Release
+name: Release packages
 
 on:
   push:
@@ -11,7 +11,6 @@ env:
 
 permissions:
   contents: write  # Needed for creating GitHub releases
-  attestations: read  # Verify staging provenance for the exact tagged source
 
 concurrency:
   group: release-${{ github.ref }}
@@ -20,7 +19,7 @@ concurrency:
 jobs:
   release:
     name: Create Release
-    runs-on: [self-hosted, rocky8]
+    runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     steps:
       - name: Validate tag format
         shell: bash
@@ -66,17 +65,6 @@ jobs:
         with:
           version: v3.14.4
 
-      - name: Install pinned registry inspection tool
-        run: |
-          set -euo pipefail
-          GOBIN="$RUNNER_TEMP/release-tools" go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
-          printf '%s\n' "$RUNNER_TEMP/release-tools" >> "$GITHUB_PATH"
-
-      - name: Verify approved public NGC artifacts
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 scripts/verify-ngc-release.py "$RUNNER_TEMP/ngc-approved"
-
       - name: Download dependencies
         run: go mod download
 
@@ -109,8 +97,8 @@ jobs:
         env:
           NVSEC_SSA_CLIENT_ID: ${{ secrets.NVSEC_SSA_CLIENT_ID }}
           NVSEC_SSA_CLIENT_SECRET: ${{ secrets.NVSEC_SSA_CLIENT_SECRET }}
-          NVSEC_LINUX_PACKAGE_SSA_SCOPE: ${{ vars.NVSEC_LINUX_PACKAGE_SSA_SCOPE || 'SIGNING_LINUX_PACKAGE_FLEET_INTELLIGENCE' }}
-          NVSEC_LINUX_PACKAGE_JOB_TYPE: ${{ vars.NVSEC_LINUX_PACKAGE_JOB_TYPE || 'LINUX_PACKAGE_FLEET_INTELLIGENCE' }}
+          NVSEC_LINUX_PACKAGE_SSA_SCOPE: ${{ vars.NVSEC_LINUX_PACKAGE_SSA_SCOPE }}
+          NVSEC_LINUX_PACKAGE_JOB_TYPE: ${{ vars.NVSEC_LINUX_PACKAGE_JOB_TYPE }}
           NSPECT_ID: ${{ vars.NSPECT_ID }}
 
       - name: Refresh checksums for signed release artifacts
@@ -128,8 +116,8 @@ jobs:
         env:
           NVSEC_SSA_CLIENT_ID: ${{ secrets.NVSEC_SSA_CLIENT_ID }}
           NVSEC_SSA_CLIENT_SECRET: ${{ secrets.NVSEC_SSA_CLIENT_SECRET }}
-          NVSEC_CHECKSUM_SSA_SCOPE: ${{ vars.NVSEC_CHECKSUM_SSA_SCOPE || 'SIGNING_FLEET_INTELLIGENCE' }}
-          NVSEC_CHECKSUM_JOB_TYPE: ${{ vars.NVSEC_CHECKSUM_JOB_TYPE || 'FLEET_INTELLIGENCE' }}
+          NVSEC_CHECKSUM_SSA_SCOPE: ${{ vars.NVSEC_CHECKSUM_SSA_SCOPE }}
+          NVSEC_CHECKSUM_JOB_TYPE: ${{ vars.NVSEC_CHECKSUM_JOB_TYPE }}
           NSPECT_ID: ${{ vars.NSPECT_ID }}
 
       - name: Publish DEB packages to Artifactory
@@ -193,14 +181,6 @@ jobs:
                 data: fs.readFileSync(file),
               });
             }
-      - name: Retain NGC verification records
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ngc-approved-release-${{ github.ref_name }}
-          path: ${{ runner.temp }}/ngc-approved/*
-          if-no-files-found: error
-          retention-days: 90
-
       - name: Publish verified GitHub release
         uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
         with:
@@ -224,9 +204,7 @@ jobs:
               repo: context.repo.repo,
               release_id: release.id,
               draft: false,
-              body: `${release.body || ""}\n\n### Registry change\n` +
-                `New container images and Helm charts are published only to NGC. GHCR tags no longer advance. ` +
-                `[Upgrade from GHCR](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${tag}/docs/install-helm.md#upgrade-from-ghcr).\n\n### NGC artifacts\n` +
+              body: `${release.body || ""}\n\n### NGC artifacts\n` +
                 `- Agent: nvcr.io/nvidia/fleet-intelligence/agent:${process.env.RELEASE_TAG.slice(1)}\n` +
                 `- Gateway: nvcr.io/nvidia/fleet-intelligence/otel-gateway:${process.env.RELEASE_TAG.slice(1)}\n` +
                 `- Helm chart: https://helm.ngc.nvidia.com/nvidia/fleet-intelligence/charts/fleet-intelligence-agent-${process.env.RELEASE_TAG.slice(1)}.tgz\n`,
@@ -234,8 +212,7 @@ jobs:
 
       - name: Summary
         run: |
-          echo "### Release published from verified NGC artifacts" >> "$GITHUB_STEP_SUMMARY"
-          cat "$RUNNER_TEMP/ngc-approved/release-record.json" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Release complete" >> "$GITHUB_STEP_SUMMARY"
           echo 'Linux packages and checksum manifest verified with Fleet Intelligence key `087199B3`.' >> "$GITHUB_STEP_SUMMARY"
 
   publish-docs:

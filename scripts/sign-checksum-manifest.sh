@@ -15,8 +15,8 @@ fi
 checksums_file="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 public_key="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 nvsec_bin="${NVSEC_BIN:-nvsec}"
-job_type="${NVSEC_CHECKSUM_JOB_TYPE:-FLEET_INTELLIGENCE}"
-scope="${NVSEC_CHECKSUM_SSA_SCOPE:-SIGNING_FLEET_INTELLIGENCE}"
+job_type="${NVSEC_CHECKSUM_JOB_TYPE:?NVSEC_CHECKSUM_JOB_TYPE is required}"
+scope="${NVSEC_CHECKSUM_SSA_SCOPE:?NVSEC_CHECKSUM_SSA_SCOPE is required}"
 signature_name="$(basename "$checksums_file").asc"
 
 : "${NVSEC_SSA_CLIENT_ID:?NVSEC_SSA_CLIENT_ID is required}"
@@ -36,7 +36,6 @@ args=(
   --description "Fleet Intelligence ${GITHUB_REF_NAME:-snapshot} checksum manifest"
   --input_file "$checksums_file"
   --download
-  --print_log
   --auth ssa
   --scope "$scope"
   --timeout 600
@@ -45,13 +44,12 @@ args=(
 )
 [[ -z "${NSPECT_ID:-}" ]] || args+=(--nspect_id "$NSPECT_ID")
 
-echo "Signing $(basename "$checksums_file") with 3S job $job_type"
+echo "Signing $(basename "$checksums_file")"
 "$nvsec_bin" "${args[@]}"
 
 signature="$work_dir/$signature_name"
 [[ -s "$signature" ]] || {
-  echo "3S did not return a detached checksum signature" >&2
-  find "$work_dir" -maxdepth 1 -name 'sign_r*.log' -type f -exec tail -n 100 {} \; >&2
+  echo "Signing did not return a detached checksum signature" >&2
   exit 1
 }
 

@@ -13,8 +13,8 @@ fi
 dist_dir="$(cd "$1" && pwd)"
 public_key="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 nvsec_bin="${NVSEC_BIN:-nvsec}"
-job_type="${NVSEC_LINUX_PACKAGE_JOB_TYPE:-LINUX_PACKAGE_FLEET_INTELLIGENCE}"
-scope="${NVSEC_LINUX_PACKAGE_SSA_SCOPE:-SIGNING_LINUX_PACKAGE_FLEET_INTELLIGENCE}"
+job_type="${NVSEC_LINUX_PACKAGE_JOB_TYPE:?NVSEC_LINUX_PACKAGE_JOB_TYPE is required}"
+scope="${NVSEC_LINUX_PACKAGE_SSA_SCOPE:?NVSEC_LINUX_PACKAGE_SSA_SCOPE is required}"
 
 : "${NVSEC_SSA_CLIENT_ID:?NVSEC_SSA_CLIENT_ID is required}"
 : "${NVSEC_SSA_CLIENT_SECRET:?NVSEC_SSA_CLIENT_SECRET is required}"
@@ -49,7 +49,6 @@ for package in "${packages[@]}"; do
     --description "fleetint ${GITHUB_REF_NAME:-snapshot} package signing: $package_name"
     --input_file "$package"
     --download
-    --print_log
     --auth ssa
     --scope "$scope"
     --timeout 600
@@ -58,13 +57,12 @@ for package in "${packages[@]}"; do
   )
   [[ -z "${NSPECT_ID:-}" ]] || args+=(--nspect_id "$NSPECT_ID")
 
-  echo "Signing $package_name with 3S job $job_type"
+  echo "Signing $package_name"
   "$nvsec_bin" "${args[@]}"
 
   signed_package="$result_dir/$package_name"
   [[ -s "$signed_package" ]] || {
-    echo "3S did not return a signed package for $package_name" >&2
-    find "$result_dir" -maxdepth 1 -name 'sign_r*.log' -type f -exec tail -n 100 {} \; >&2
+    echo "Signing did not return a signed package for $package_name" >&2
     exit 1
   }
 
