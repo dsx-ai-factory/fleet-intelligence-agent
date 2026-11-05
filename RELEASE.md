@@ -54,10 +54,28 @@ first, then cherry-picked into each affected release branch.
    git push origin release/1.5
    ```
 
+## Stage and approve images and the chart
+
+Before creating the protected version tag, run **Stage NGC release** on the
+reviewed `release/<major>.<minor>` branch with the final version, such as
+`v1.6.0` or `v1.6.0-rc.1`. The workflow runs the agent tests, builds the agent
+and gateway images for Linux AMD64 and ARM64, and uploads them and the
+final-version chart to private NGC staging. It attaches SBOMs and provenance
+to the images and retains signed provenance, image digests, the chart
+checksum, and the source commit in review artifacts for 90 days. Staging does
+not update `latest`, create a tag, publish documentation, or publish a GitHub
+release.
+
+Complete the [review and promotion](#review-and-promotion) steps for these
+exact artifacts. Keep the release branch at the approved source commit. The
+public NGC artifacts must be available and their provenance must identify that
+commit before the tagged release can copy them to GHCR. Preserve NGC image
+attestation referrers during promotion so the tagged release can verify them.
+
 ## Trigger a release
 
-An authorized maintainer creates and pushes the protected version tag from the
-corresponding release branch:
+After NGC promotion and verification, an authorized maintainer creates and
+pushes the protected version tag from the approved release branch:
 
 ```bash
 git switch release/1.5
@@ -88,13 +106,18 @@ Pushing the tag starts
 The workflow validates the version, refuses to overwrite an existing release,
 and then:
 
-1. Builds Linux AMD64 and ARM64 archives, DEB packages, and RPM packages with
+1. Verifies the public NGC images and chart have signed provenance from the
+   staging workflow for the exact tagged source commit. Missing or mismatched
+   NGC artifacts stop the release before any package publication.
+2. Builds Linux AMD64 and ARM64 archives, DEB packages, and RPM packages with
    GoReleaser.
-2. Signs the Linux packages and checksum manifest and verifies the signatures.
-3. Publishes stable DEB packages to Artifactory.
-4. Builds and publishes the agent and OTel collector container images to GHCR.
-5. Packages and publishes the Helm chart to GHCR.
-6. Publishes the verified GitHub release and its generated release notes.
+3. Signs the Linux packages and checksum manifest and verifies the signatures.
+4. Publishes stable DEB packages to Artifactory.
+5. Copies the approved NGC image indexes to the existing GHCR image names
+   and uploads the same approved chart package to GHCR, without rebuilding or
+   repackaging. The copied image digests must match the NGC digests.
+6. Publishes the verified GitHub release with generated notes and public NGC
+   links.
 7. Publishes the versioned documentation for stable releases.
 
 Prerelease tags produce prerelease artifacts and do not update stable package
@@ -123,9 +146,16 @@ image is also consumed by the OOB collector deployment.
 The authorized release maintainer needs membership in the NGC `dsx-ai-factory`
 staging organization and publishing access to its `fleet-intelligence` team.
 Configure the GitHub environment `ngc-publish` with the environment secret
-`NGC_API_KEY`, selected release branch rules such as `release/*`, and any
-required reviewers. API key authentication is used until the required OIDC
+`NGC_API_KEY`, environment variable `NGC_ORG` containing the private staging
+organization identifier, selected release branch rules such as `release/*`,
+and any required reviewers. The staging team is fixed to `fleet-intelligence`;
+CI rejects `nvidia` as the staging organization. API key authentication is used until the required OIDC
 publishing support is available.
+
+The tagged release runner requires Python 3, Helm, and a GitHub
+CLI that supports attestation verification with `--source-digest` and
+`--signer-workflow`. CI installs the pinned Crane CLI to copy all image
+platforms and their blobs between registries.
 
 Keep keys in GitHub secrets and internal operational records. Detailed access,
 security review, and promotion instructions remain in NVIDIA's internal

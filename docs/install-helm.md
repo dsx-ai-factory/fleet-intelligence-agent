@@ -53,8 +53,6 @@ Install:
 ```bash
 helm install fleet-intelligence-agent fleet-intelligence-agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
-  --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
-  --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --set enroll.enabled=true \
@@ -67,8 +65,6 @@ Install (no enrollment):
 ```bash
 helm install fleet-intelligence-agent fleet-intelligence-agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
-  --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
-  --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
   --version "$CHART_VERSION" \
   --namespace "$NS"
 ```
@@ -78,8 +74,6 @@ Upgrade:
 ```bash
 helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
-  --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
-  --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --set enroll.enabled=true \
@@ -92,8 +86,6 @@ Optional: include node metadata during automatic enrollment:
 ```bash
 helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
-  --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
-  --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --set enroll.enabled=true \
@@ -112,8 +104,6 @@ Upgrade (no enrollment):
 ```bash
 helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
-  --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
-  --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
   --version "$CHART_VERSION" \
   --namespace "$NS"
 ```
@@ -123,8 +113,6 @@ Upgrade and explicitly remove persisted enrollment metadata:
 ```bash
 helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
-  --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
-  --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --set enroll.enabled=false \
@@ -211,8 +199,6 @@ Fault injection is disabled by default. To enable it on an existing release:
 ```bash
 helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
-  --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
-  --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --reuse-values \
@@ -293,8 +279,6 @@ If DCGM is at a different location, update the URL:
 ```bash
 helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
-  --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
-  --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --reuse-values \
@@ -332,8 +316,6 @@ Using `--set` (quote the tolerations for zsh, and escape dots in the label key):
 ```bash
 helm upgrade --install fleet-intelligence-agent fleet-intelligence-agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
-  --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
-  --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --set-string nodeSelector.my-org\\.com/gpu-node=true \

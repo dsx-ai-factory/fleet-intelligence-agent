@@ -1,0 +1,201 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Stage NGC release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Final candidate version, for example v1.6.0 or v1.6.0-rc.1'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ngc-release-publication
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    environment: ngc-publish
+    outputs:
+      version: ${{ steps.config.outputs.version }}
+      image: ${{ steps.config.outputs.image }}
+      gateway_image: ${{ steps.config.outputs.gateway_image }}
+      chart_target: ${{ steps.config.outputs.chart_target }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Validate staging destination and version
+        id: config
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          NGC_ORG: ${{ vars.NGC_ORG }}
+          NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$NGC_API_KEY" || { echo "::error::NGC_API_KEY is required in ngc-publish"; exit 1; }
+          python3 scripts/release-config.py
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.10'
+      - run: make test
+
+  stage:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: ngc-publish
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      CHART_TARGET: ${{ needs.validate.outputs.chart_target }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Record source metadata
+        id: source
+        run: |
+          printf 'timestamp=%s\n' "$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Log in to private NGC
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: nvcr.io
+          username: '$oauthtoken'
+          password: ${{ secrets.NGC_API_KEY }}
+      - name: Build and stage agent image
+        id: agent
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ needs.validate.outputs.image }}:${{ needs.validate.outputs.version }}
+          build-args: |
+            VERSION=${{ needs.validate.outputs.version }}
+            REVISION=${{ github.sha }}
+            BUILD_TIMESTAMP=${{ steps.source.outputs.timestamp }}
+          provenance: mode=max,version=v1
+          sbom: true
+      - name: Attest agent image
+        id: agent_provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ needs.validate.outputs.image }}
+          subject-digest: ${{ steps.agent.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: Build and stage gateway image
+        id: gateway
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./otelcol/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ needs.validate.outputs.gateway_image }}:${{ needs.validate.outputs.version }}
+          provenance: mode=max,version=v1
+          sbom: true
+      - name: Attest gateway image
+        id: gateway_provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ needs.validate.outputs.gateway_image }}
+          subject-digest: ${{ steps.gateway.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v3.17.3
+      - name: Package final-version chart
+        run: |
+          set -euo pipefail
+          helm lint deployments/helm/fleet-intelligence-agent
+          cp LICENSE deployments/helm/fleet-intelligence-agent/LICENSE
+          helm package deployments/helm/fleet-intelligence-agent --version "$VERSION" --app-version "$VERSION" --destination dist
+          cd dist
+          sha256sum "fleet-intelligence-agent-${VERSION}.tgz" > chart.sha256
+          sha256sum --check chart.sha256
+      - name: Attest chart
+        id: chart_provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/fleet-intelligence-agent-${{ needs.validate.outputs.version }}.tgz
+      - name: Record candidate for security review
+        env:
+          AGENT_IMAGE: ${{ needs.validate.outputs.image }}
+          AGENT_DIGEST: ${{ steps.agent.outputs.digest }}
+          GATEWAY_IMAGE: ${{ needs.validate.outputs.gateway_image }}
+          GATEWAY_DIGEST: ${{ steps.gateway.outputs.digest }}
+          AGENT_BUNDLE: ${{ steps.agent_provenance.outputs.bundle-path }}
+          GATEWAY_BUNDLE: ${{ steps.gateway_provenance.outputs.bundle-path }}
+          CHART_BUNDLE: ${{ steps.chart_provenance.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          cp "$AGENT_BUNDLE" dist/agent.sigstore.json
+          cp "$GATEWAY_BUNDLE" dist/gateway.sigstore.json
+          cp "$CHART_BUNDLE" dist/chart.sigstore.json
+          python3 - <<'PYTHON'
+          import json, os
+          from pathlib import Path
+          keys = ("VERSION", "AGENT_IMAGE", "AGENT_DIGEST", "GATEWAY_IMAGE", "GATEWAY_DIGEST", "CHART_TARGET", "GITHUB_SHA", "GITHUB_RUN_ID")
+          Path("dist/release-record.json").write_text(json.dumps({key: os.environ[key] for key in keys}, indent=2) + "\n")
+          PYTHON
+          cat dist/release-record.json >> "$GITHUB_STEP_SUMMARY"
+          cat dist/chart.sha256 >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain review artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ngc-release-candidate-${{ needs.validate.outputs.version }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 90
+      - name: Install pinned NGC CLI
+        env:
+          NGC_CLI_VERSION: '4.36.6'
+          NGC_CLI_SHA256: '2972dbe54e80cedae18e82923a9a67a60aef23d041c5790336f8f4b51752bab6'
+        run: |
+          set -euo pipefail
+          ngc_dir=$(mktemp -d "$RUNNER_TEMP/ngc-cli.XXXXXX")
+          ngc_home=$(mktemp -d "$RUNNER_TEMP/ngc-home.XXXXXX")
+          printf 'NGC_CLI_HOME=%s\n' "$ngc_home" >> "$GITHUB_ENV"
+          curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
+            -o "$ngc_dir/ngccli_linux.zip" \
+            "https://api.ngc.nvidia.com/v2/resources/nvidia/ngc-apps/ngc_cli/versions/${NGC_CLI_VERSION}/files/ngccli_linux.zip"
+          printf '%s  %s\n' "$NGC_CLI_SHA256" "$ngc_dir/ngccli_linux.zip" | sha256sum --check -
+          unzip -q "$ngc_dir/ngccli_linux.zip" -d "$ngc_dir"
+          chmod +x "$ngc_dir/ngc-cli/ngc"
+          printf '%s\n' "$ngc_dir/ngc-cli" >> "$GITHUB_PATH"
+          NGC_CLI_HOME="$ngc_home" "$ngc_dir/ngc-cli/ngc" --version
+      - name: Stage chart in private NGC
+        env:
+          NGC_CLI_API_KEY: ${{ secrets.NGC_API_KEY }}
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum --check chart.sha256
+          if ! ngc registry chart info "$CHART_TARGET"; then
+            ngc registry chart create "$CHART_TARGET" --short-desc "Fleet Intelligence out-of-band collector"
+          fi
+          ngc registry chart push "$CHART_TARGET:$VERSION"
+      - name: Remove NGC CLI state
+        if: always()
+        run: |
+          if [[ -n "${NGC_CLI_HOME:-}" ]]; then
+            rm -rf "$NGC_CLI_HOME"
+          fi

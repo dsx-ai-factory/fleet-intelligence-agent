@@ -15,7 +15,7 @@ Common values (defaults from `values.yaml`):
 
 | Value | Default | Description |
 | --- | --- | --- |
-| `image.repository` | `ghcr.io/dsx-ai-factory/fleet-intelligence-agent` | Agent image repository. |
+| `image.repository` | `nvcr.io/nvidia/fleet-intelligence/agent` | Agent image repository. |
 | `image.tag` | `""` | Image tag (empty uses chart `appVersion`). |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy. |
 | `imagePullSecrets` | `[]` | Optional image pull secrets (set when pulling from private registries). |

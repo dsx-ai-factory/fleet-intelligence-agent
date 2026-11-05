@@ -11,7 +11,8 @@ env:
 
 permissions:
   contents: write  # Needed for creating GitHub releases
-  packages: write  # Needed for pushing images/charts to GHCR
+  packages: write  # Mirror approved images/charts to GHCR
+  attestations: read  # Verify staging provenance for the exact tagged source
 
 concurrency:
   group: release-${{ github.ref }}
@@ -51,19 +52,31 @@ jobs:
             }
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Set up Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
         with:
           version: v3.14.4
+
+      - name: Install pinned registry copy tool
+        run: |
+          set -euo pipefail
+          GOBIN="$RUNNER_TEMP/release-tools" go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
+          printf '%s\n' "$RUNNER_TEMP/release-tools" >> "$GITHUB_PATH"
+
+      - name: Verify approved public NGC artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/mirror-ngc-release.py prepare "$RUNNER_TEMP/ngc-approved"
 
       - name: Download dependencies
         run: go mod download
@@ -181,119 +194,32 @@ jobs:
                 data: fs.readFileSync(file),
               });
             }
-      - name: Get version and commit info
-        id: version
-        run: |
-          VERSION="${RELEASE_TAG#v}"
-          COMMIT_SHORT=$(git rev-parse --short=7 HEAD)
-          BUILD_TIMESTAMP=$(git show -s --format=%cI HEAD)
-          BRANCH="release"
-          SOURCE="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${RELEASE_TAG}.tar.gz"
-          
-          # Check if version contains hyphen (pre-release)
-          if [[ "$VERSION" == *"-"* ]]; then
-            IS_PRERELEASE="true"
-            echo "This is a pre-release version: $VERSION"
-          else
-            IS_PRERELEASE="false"
-            echo "This is a stable release version: $VERSION"
-          fi
-          
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "commit=$COMMIT_SHORT" >> $GITHUB_OUTPUT
-          echo "build_timestamp=$BUILD_TIMESTAMP" >> $GITHUB_OUTPUT
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-          echo "source=$SOURCE" >> $GITHUB_OUTPUT
-          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
-
-      - name: Prepare fleet-intelligence-agent GHCR image tags
-        id: agent_image_ghcr
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
-          OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
-          IMAGE="ghcr.io/${OWNER_LC}/fleet-intelligence-agent"
-          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
-          echo "owner_lc=${OWNER_LC}" >> "$GITHUB_OUTPUT"
-          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
-          echo "${IMAGE}:${VERSION}" >> "$GITHUB_OUTPUT"
-          if [ "${{ steps.version.outputs.is_prerelease }}" = "false" ]; then
-            echo "${IMAGE}:latest" >> "$GITHUB_OUTPUT"
-          fi
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
-      - name: Prepare fleetint-otelcol image tags
-        id: otelcol_image
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
-          OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
-          GHCR_IMAGE="ghcr.io/${OWNER_LC}/fleetint-otelcol"
-          echo "ghcr_image=${GHCR_IMAGE}" >> "$GITHUB_OUTPUT"
-          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
-          echo "${GHCR_IMAGE}:${VERSION}" >> "$GITHUB_OUTPUT"
-          if [ "${{ steps.version.outputs.is_prerelease }}" = "false" ]; then
-            echo "${GHCR_IMAGE}:latest" >> "$GITHUB_OUTPUT"
-          fi
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GHCR (ghcr.io)
-        uses: docker/login-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push fleet-intelligence-agent image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ steps.agent_image_ghcr.outputs.tags }}
-          build-args: |
-            VERSION=${{ steps.version.outputs.version }}
-            REVISION=${{ steps.version.outputs.commit }}
-            BUILD_TIMESTAMP=${{ steps.version.outputs.build_timestamp }}
-
-      - name: Build and push fleetint-otelcol image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./otelcol/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.otelcol_image.outputs.tags }}
-
-      - name: Package Helm chart
-        run: |
-          helm package deployments/helm/fleet-intelligence-agent \
-            --destination dist \
-            --version "${{ steps.version.outputs.version }}" \
-            --app-version "${{ steps.version.outputs.version }}"
-
-      - name: Login to GHCR Helm registry
+      - name: Log in to GHCR Helm registry
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io \
-            --username "${{ github.actor }}" \
-            --password-stdin
+          printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GHCR_USER" --password-stdin
 
-      - name: Push Helm chart to GHCR (OCI)
-        run: |
-          set -euo pipefail
-          CHART_VERSION="${{ steps.version.outputs.version }}"
-          OWNER_LC="${{ steps.agent_image_ghcr.outputs.owner_lc }}"
-          helm push "dist/fleet-intelligence-agent-${CHART_VERSION}.tgz" "oci://ghcr.io/${OWNER_LC}/charts"
-      
+      - name: Mirror approved NGC artifacts to GHCR
+        run: python3 scripts/mirror-ngc-release.py publish "$RUNNER_TEMP/ngc-approved"
+
+      - name: Retain NGC verification and mirror records
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ngc-approved-release-${{ github.ref_name }}
+          path: ${{ runner.temp }}/ngc-approved/*
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Publish verified GitHub release
         uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
         with:
@@ -317,34 +243,18 @@ jobs:
               repo: context.repo.repo,
               release_id: release.id,
               draft: false,
+              body: `${release.body || ""}\n\n### NGC artifacts\n` +
+                `- Agent: nvcr.io/nvidia/fleet-intelligence/agent:${process.env.RELEASE_TAG.slice(1)}\n` +
+                `- Gateway: nvcr.io/nvidia/fleet-intelligence/otel-gateway:${process.env.RELEASE_TAG.slice(1)}\n` +
+                `- Helm chart: https://helm.ngc.nvidia.com/nvidia/fleet-intelligence/charts/fleet-intelligence-agent-${process.env.RELEASE_TAG.slice(1)}.tgz\n`,
             });
 
       - name: Summary
         run: |
-          echo "### Release Build Complete" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit:** ${{ steps.version.outputs.commit }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Pre-release:** ${{ steps.version.outputs.is_prerelease }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**fleet-intelligence-agent image tags:**" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.agent_image_ghcr.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**fleetint-otelcol image tags:**" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.otelcol_image.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Helm chart (GHCR OCI):**" >> $GITHUB_STEP_SUMMARY
-          echo "repo: oci://ghcr.io/${{ steps.agent_image_ghcr.outputs.owner_lc }}/charts" >> $GITHUB_STEP_SUMMARY
-          echo "chart: fleet-intelligence-agent:${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Linux packages and checksum manifest:** verified with Fleet Intelligence key \`087199B3\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [[ "${{ steps.version.outputs.is_prerelease }}" == "true" ]]; then
-            echo "GitHub release created (pre-release)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "GitHub release created" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "### Release published from verified NGC artifacts" >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/ngc-approved/release-record.json" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Linux packages and checksum manifest verified with Fleet Intelligence key `087199B3`.' >> "$GITHUB_STEP_SUMMARY"
+
   publish-docs:
     name: Publish Fern docs
     needs: release
