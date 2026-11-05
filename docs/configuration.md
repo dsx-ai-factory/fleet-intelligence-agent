@@ -255,7 +255,7 @@ Apply with:
 
 ```bash
 helm upgrade --install fleet-intelligence-agent \
-  agent \
+  fleet-intelligence-agent \
   --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --set image.repository=nvcr.io/nvidia/fleet-intelligence/agent \
   --set otelGateway.image.repository=nvcr.io/nvidia/fleet-intelligence/otel-gateway \
