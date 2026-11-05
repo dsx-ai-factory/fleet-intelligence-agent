@@ -101,8 +101,8 @@ channels.
 
 The **Release** workflow builds and publishes the agent and gateway images and
 the Helm chart for the selected release version. New versions are published
-only to NGC. After pushing the release tag, dispatch the workflow using that
-same tag and version:
+only to NGC. Pushing a version tag automatically starts the workflow and waits
+for environment approval. To run it manually, select the same tag and version:
 
 ```bash
 gh workflow run release-artifacts.yml --ref v1.6.0 -f version=v1.6.0

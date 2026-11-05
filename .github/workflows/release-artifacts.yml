@@ -4,6 +4,9 @@
 name: Release
 
 on:
+  push:
+    tags:
+      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       version:
@@ -24,7 +27,7 @@ concurrency:
 
 env:
   NGC_NAMESPACE: ${{ vars.NGC_NAMESPACE }}
-  VERSION_TAG: ${{ inputs.version }}
+  VERSION_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
 
 jobs:
   release:
