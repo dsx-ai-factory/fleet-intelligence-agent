@@ -102,7 +102,7 @@ The agent documentation lives in `docs/` and is published to
 [docs.nvidia.com/fleet-intel/agent](https://docs.nvidia.com/fleet-intel/agent).
 Published docs are built from release tags — editing `docs/*.md` on your branch
 is all that is needed; the CI publish workflow handles versioning automatically
-when a release is cut.
+when a stable GitHub release is published.
 
 ### Prerequisites
 
@@ -222,7 +222,9 @@ For more information about the DCO, see: https://developercertificate.org/
 
 Maintainers should follow the documented [release process](RELEASE.md). The
 Release workflow publishes images and the Helm chart to NGC. Protected version
-tags build and publish Linux packages.
+tags build signed Linux packages and prepare a draft GitHub release. After
+verifying public NGC availability, maintainers publish the draft; stable GitHub
+releases trigger documentation publishing.
 
 ## Pull Request Process
 

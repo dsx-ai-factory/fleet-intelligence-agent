@@ -1,7 +1,7 @@
 # Release Process
 
-Fleet Intelligence Agent releases are created by CI from protected version
-tags. Release artifacts must not be built or published manually.
+Fleet Intelligence Agent artifacts are built by CI from protected version
+tags. Maintainers publish the prepared GitHub release after verifying public NGC availability.
 
 ## Ownership and cadence
 
@@ -91,8 +91,9 @@ and then:
    GoReleaser.
 2. Signs the Linux packages and checksum manifest and verifies the signatures.
 3. Publishes stable DEB packages.
-4. Publishes the verified GitHub release with release notes and NGC links.
-5. Publishes the versioned documentation for stable releases.
+4. Updates the draft GitHub release with verified signed packages, release notes, and NGC links.
+
+After both release workflows succeed, verify that the public NGC images and chart for that version are downloadable and match the built image digests and chart checksum. Then review and publish the draft GitHub release. Publishing a stable GitHub release automatically publishes versioned Fern documentation; creating a tag or draft does not. Mark RC releases as prereleases; they do not publish docs.
 
 Prerelease tags produce prerelease artifacts and do not update stable package
 channels.

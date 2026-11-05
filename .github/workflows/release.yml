@@ -195,7 +195,7 @@ jobs:
                 data: fs.readFileSync(file),
               });
             }
-      - name: Publish verified GitHub release
+      - name: Prepare GitHub release for review
         uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -217,7 +217,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: release.id,
-              draft: false,
+              draft: true,
               body: `${release.body || ""}\n\n### NGC artifacts\n` +
                 `- Agent: nvcr.io/nvidia/fleet-intelligence/agent:${process.env.RELEASE_TAG.slice(1)}\n` +
                 `- Gateway: nvcr.io/nvidia/fleet-intelligence/otel-gateway:${process.env.RELEASE_TAG.slice(1)}\n` +
@@ -226,12 +226,6 @@ jobs:
 
       - name: Summary
         run: |
-          echo "### Release complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Draft release ready for review" >> "$GITHUB_STEP_SUMMARY"
           echo 'Linux packages and checksum manifest verified with Fleet Intelligence key `087199B3`.' >> "$GITHUB_STEP_SUMMARY"
-
-  publish-docs:
-    name: Publish Fern docs
-    needs: release
-    uses: ./.github/workflows/publish-fern-docs.yml
-    secrets:
-      DOCS_FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}
+          echo 'Verify public NGC artifact availability before publishing the GitHub release.' >> "$GITHUB_STEP_SUMMARY"

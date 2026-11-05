@@ -22,7 +22,7 @@ defaults:
     shell: bash
 
 concurrency:
-  group: release-artifacts
+  group: release-artifacts-${{ github.ref }}
   cancel-in-progress: false
 
 env:
