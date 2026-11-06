@@ -51,7 +51,6 @@ RUN set -eux; \
     gnupg \
     gnupg2 \
   ; \
-  dpkg --compare-versions "$(dpkg-query --show --showformat='${Version}' libssl3)" ge "3.0.2-0ubuntu1.30"; \
   arch="$(dpkg --print-architecture)"; \
   case "${arch}" in \
     amd64) cuda_arch="x86_64" ;; \
