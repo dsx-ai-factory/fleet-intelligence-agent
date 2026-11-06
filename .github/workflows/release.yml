@@ -1,4 +1,4 @@
-name: Release
+name: Release packages
 
 on:
   push:
@@ -11,7 +11,6 @@ env:
 
 permissions:
   contents: write  # Needed for creating GitHub releases
-  packages: write  # Needed for pushing images/charts to GHCR
 
 concurrency:
   group: release-${{ github.ref }}
@@ -20,7 +19,7 @@ concurrency:
 jobs:
   release:
     name: Create Release
-    runs-on: [self-hosted, rocky8]
+    runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
     steps:
       - name: Validate tag format
         shell: bash
@@ -51,17 +50,19 @@ jobs:
             }
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: false
 
       - name: Set up Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
         with:
           version: v3.14.4
 
@@ -71,6 +72,26 @@ jobs:
       - name: Clean previous dist directory
         run: |
           rm -rf ./dist || true
+
+      - name: Check signing configuration
+        env:
+          NVSEC_LINUX_PACKAGE_SSA_SCOPE: ${{ vars.NVSEC_LINUX_PACKAGE_SSA_SCOPE }}
+          NVSEC_LINUX_PACKAGE_JOB_TYPE: ${{ vars.NVSEC_LINUX_PACKAGE_JOB_TYPE }}
+          NVSEC_CHECKSUM_SSA_SCOPE: ${{ vars.NVSEC_CHECKSUM_SSA_SCOPE }}
+          NVSEC_CHECKSUM_JOB_TYPE: ${{ vars.NVSEC_CHECKSUM_JOB_TYPE }}
+          NVSEC_SSA_CLIENT_ID: ${{ secrets.NVSEC_SSA_CLIENT_ID }}
+          NVSEC_SSA_CLIENT_SECRET: ${{ secrets.NVSEC_SSA_CLIENT_SECRET }}
+        run: |
+          : "${NVSEC_LINUX_PACKAGE_SSA_SCOPE:?NVSEC_LINUX_PACKAGE_SSA_SCOPE is required}"
+          : "${NVSEC_LINUX_PACKAGE_JOB_TYPE:?NVSEC_LINUX_PACKAGE_JOB_TYPE is required}"
+          : "${NVSEC_CHECKSUM_SSA_SCOPE:?NVSEC_CHECKSUM_SSA_SCOPE is required}"
+          : "${NVSEC_CHECKSUM_JOB_TYPE:?NVSEC_CHECKSUM_JOB_TYPE is required}"
+          : "${NVSEC_SSA_CLIENT_ID:?NVSEC_SSA_CLIENT_ID is required}"
+          : "${NVSEC_SSA_CLIENT_SECRET:?NVSEC_SSA_CLIENT_SECRET is required}"
+          command -v nvsec >/dev/null 2>&1 || {
+            echo "nvsec must be installed on the self-hosted release runner" >&2
+            exit 1
+          }
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@5742e2a039330cbb23ebf35f046f814d4c6ff811 # v5.1.0
@@ -82,13 +103,6 @@ jobs:
           GORELEASER_CURRENT_TAG: ${{ env.RELEASE_TAG }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify nvsec is available
-        run: |
-          command -v nvsec >/dev/null 2>&1 || {
-            echo "nvsec must be installed on the self-hosted release runner" >&2
-            exit 1
-          }
-
       - name: Sign and verify DEB and RPM packages
         run: |
           scripts/sign-linux-packages.sh \
@@ -97,8 +111,8 @@ jobs:
         env:
           NVSEC_SSA_CLIENT_ID: ${{ secrets.NVSEC_SSA_CLIENT_ID }}
           NVSEC_SSA_CLIENT_SECRET: ${{ secrets.NVSEC_SSA_CLIENT_SECRET }}
-          NVSEC_LINUX_PACKAGE_SSA_SCOPE: ${{ vars.NVSEC_LINUX_PACKAGE_SSA_SCOPE || 'SIGNING_LINUX_PACKAGE_FLEET_INTELLIGENCE' }}
-          NVSEC_LINUX_PACKAGE_JOB_TYPE: ${{ vars.NVSEC_LINUX_PACKAGE_JOB_TYPE || 'LINUX_PACKAGE_FLEET_INTELLIGENCE' }}
+          NVSEC_LINUX_PACKAGE_SSA_SCOPE: ${{ vars.NVSEC_LINUX_PACKAGE_SSA_SCOPE }}
+          NVSEC_LINUX_PACKAGE_JOB_TYPE: ${{ vars.NVSEC_LINUX_PACKAGE_JOB_TYPE }}
           NSPECT_ID: ${{ vars.NSPECT_ID }}
 
       - name: Refresh checksums for signed release artifacts
@@ -116,8 +130,8 @@ jobs:
         env:
           NVSEC_SSA_CLIENT_ID: ${{ secrets.NVSEC_SSA_CLIENT_ID }}
           NVSEC_SSA_CLIENT_SECRET: ${{ secrets.NVSEC_SSA_CLIENT_SECRET }}
-          NVSEC_CHECKSUM_SSA_SCOPE: ${{ vars.NVSEC_CHECKSUM_SSA_SCOPE || 'SIGNING_FLEET_INTELLIGENCE' }}
-          NVSEC_CHECKSUM_JOB_TYPE: ${{ vars.NVSEC_CHECKSUM_JOB_TYPE || 'FLEET_INTELLIGENCE' }}
+          NVSEC_CHECKSUM_SSA_SCOPE: ${{ vars.NVSEC_CHECKSUM_SSA_SCOPE }}
+          NVSEC_CHECKSUM_JOB_TYPE: ${{ vars.NVSEC_CHECKSUM_JOB_TYPE }}
           NSPECT_ID: ${{ vars.NSPECT_ID }}
 
       - name: Publish DEB packages to Artifactory
@@ -181,120 +195,7 @@ jobs:
                 data: fs.readFileSync(file),
               });
             }
-      - name: Get version and commit info
-        id: version
-        run: |
-          VERSION="${RELEASE_TAG#v}"
-          COMMIT_SHORT=$(git rev-parse --short=7 HEAD)
-          BUILD_TIMESTAMP=$(git show -s --format=%cI HEAD)
-          BRANCH="release"
-          SOURCE="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${RELEASE_TAG}.tar.gz"
-          
-          # Check if version contains hyphen (pre-release)
-          if [[ "$VERSION" == *"-"* ]]; then
-            IS_PRERELEASE="true"
-            echo "This is a pre-release version: $VERSION"
-          else
-            IS_PRERELEASE="false"
-            echo "This is a stable release version: $VERSION"
-          fi
-          
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "commit=$COMMIT_SHORT" >> $GITHUB_OUTPUT
-          echo "build_timestamp=$BUILD_TIMESTAMP" >> $GITHUB_OUTPUT
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-          echo "source=$SOURCE" >> $GITHUB_OUTPUT
-          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
-
-      - name: Prepare fleet-intelligence-agent GHCR image tags
-        id: agent_image_ghcr
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
-          OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
-          IMAGE="ghcr.io/${OWNER_LC}/fleet-intelligence-agent"
-          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
-          echo "owner_lc=${OWNER_LC}" >> "$GITHUB_OUTPUT"
-          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
-          echo "${IMAGE}:${VERSION}" >> "$GITHUB_OUTPUT"
-          if [ "${{ steps.version.outputs.is_prerelease }}" = "false" ]; then
-            echo "${IMAGE}:latest" >> "$GITHUB_OUTPUT"
-          fi
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
-      - name: Prepare fleetint-otelcol image tags
-        id: otelcol_image
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
-          OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
-          GHCR_IMAGE="ghcr.io/${OWNER_LC}/fleetint-otelcol"
-          echo "ghcr_image=${GHCR_IMAGE}" >> "$GITHUB_OUTPUT"
-          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
-          echo "${GHCR_IMAGE}:${VERSION}" >> "$GITHUB_OUTPUT"
-          if [ "${{ steps.version.outputs.is_prerelease }}" = "false" ]; then
-            echo "${GHCR_IMAGE}:latest" >> "$GITHUB_OUTPUT"
-          fi
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GHCR (ghcr.io)
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push fleet-intelligence-agent image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ steps.agent_image_ghcr.outputs.tags }}
-          build-args: |
-            VERSION=${{ steps.version.outputs.version }}
-            REVISION=${{ steps.version.outputs.commit }}
-            BUILD_TIMESTAMP=${{ steps.version.outputs.build_timestamp }}
-
-      - name: Build and push fleetint-otelcol image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./otelcol/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.otelcol_image.outputs.tags }}
-
-      - name: Package Helm chart
-        run: |
-          helm package deployments/helm/fleet-intelligence-agent \
-            --destination dist \
-            --version "${{ steps.version.outputs.version }}" \
-            --app-version "${{ steps.version.outputs.version }}"
-
-      - name: Login to GHCR Helm registry
-        run: |
-          set -euo pipefail
-          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io \
-            --username "${{ github.actor }}" \
-            --password-stdin
-
-      - name: Push Helm chart to GHCR (OCI)
-        run: |
-          set -euo pipefail
-          CHART_VERSION="${{ steps.version.outputs.version }}"
-          OWNER_LC="${{ steps.agent_image_ghcr.outputs.owner_lc }}"
-          helm push "dist/fleet-intelligence-agent-${CHART_VERSION}.tgz" "oci://ghcr.io/${OWNER_LC}/charts"
-      
-      - name: Publish verified GitHub release
+      - name: Prepare GitHub release for review
         uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -316,38 +217,15 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: release.id,
-              draft: false,
+              draft: true,
+              body: `${release.body || ""}\n\n### NGC artifacts\n` +
+                `- Agent: nvcr.io/nvidia/fleet-intelligence/agent:${process.env.RELEASE_TAG.slice(1)}\n` +
+                `- Gateway: nvcr.io/nvidia/fleet-intelligence/otel-gateway:${process.env.RELEASE_TAG.slice(1)}\n` +
+                `- Helm chart: https://helm.ngc.nvidia.com/nvidia/fleet-intelligence/charts/fleet-intelligence-agent-${process.env.RELEASE_TAG.slice(1)}.tgz\n`,
             });
 
       - name: Summary
         run: |
-          echo "### Release Build Complete" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit:** ${{ steps.version.outputs.commit }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Pre-release:** ${{ steps.version.outputs.is_prerelease }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**fleet-intelligence-agent image tags:**" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.agent_image_ghcr.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**fleetint-otelcol image tags:**" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.otelcol_image.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Helm chart (GHCR OCI):**" >> $GITHUB_STEP_SUMMARY
-          echo "repo: oci://ghcr.io/${{ steps.agent_image_ghcr.outputs.owner_lc }}/charts" >> $GITHUB_STEP_SUMMARY
-          echo "chart: fleet-intelligence-agent:${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Linux packages and checksum manifest:** verified with Fleet Intelligence key \`087199B3\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [[ "${{ steps.version.outputs.is_prerelease }}" == "true" ]]; then
-            echo "GitHub release created (pre-release)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "GitHub release created" >> $GITHUB_STEP_SUMMARY
-          fi
-  publish-docs:
-    name: Publish Fern docs
-    needs: release
-    uses: ./.github/workflows/publish-fern-docs.yml
-    secrets:
-      DOCS_FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}
+          echo "### Draft release ready for review" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Linux packages and checksum manifest verified with Fleet Intelligence key `087199B3`.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Verify public NGC artifact availability before publishing the GitHub release.' >> "$GITHUB_STEP_SUMMARY"

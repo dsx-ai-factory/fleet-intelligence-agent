@@ -4,8 +4,10 @@ This chart deploys the `fleet-intelligence-agent` DaemonSet.
 
 ## Install
 
-For installation steps (GHCR OCI chart, enrollment, and
+For installation steps (NGC chart, enrollment, and
 `helm install`/`helm upgrade`), see `docs/install-helm.md`.
+
+The chart is published as `fleet-intelligence-agent` at `https://helm.ngc.nvidia.com/nvidia/fleet-intelligence`.
 
 ## Configuration
 
@@ -13,7 +15,7 @@ Common values (defaults from `values.yaml`):
 
 | Value | Default | Description |
 | --- | --- | --- |
-| `image.repository` | `ghcr.io/dsx-ai-factory/fleet-intelligence-agent` | Agent image repository. |
+| `image.repository` | `nvcr.io/nvidia/fleet-intelligence/agent` | Agent image repository. |
 | `image.tag` | `""` | Image tag (empty uses chart `appVersion`). |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy. |
 | `imagePullSecrets` | `[]` | Optional image pull secrets (set when pulling from private registries). |

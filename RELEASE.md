@@ -1,7 +1,7 @@
 # Release Process
 
-Fleet Intelligence Agent releases are created by CI from protected version
-tags. Release artifacts must not be built or published manually.
+Fleet Intelligence Agent artifacts are built by CI from protected version
+tags. Maintainers publish the prepared GitHub release after verifying public NGC availability.
 
 ## Ownership and cadence
 
@@ -40,8 +40,10 @@ first, then cherry-picked into each affected release branch.
    make package-snapshot
    ```
 
-5. Merge any required release fixes through the normal pull request process.
-6. For a patch release, cherry-pick the reviewed fix into the corresponding
+5. Confirm the release runner has its signing tool, signing credentials, and
+   package and checksum signing configuration before creating a tag.
+6. Merge any required release fixes through the normal pull request process.
+7. For a patch release, cherry-pick the reviewed fix into the corresponding
    release branch:
 
    ```bash
@@ -88,14 +90,36 @@ and then:
 1. Builds Linux AMD64 and ARM64 archives, DEB packages, and RPM packages with
    GoReleaser.
 2. Signs the Linux packages and checksum manifest and verifies the signatures.
-3. Publishes stable DEB packages to Artifactory.
-4. Builds and publishes the agent and OTel collector container images to GHCR.
-5. Packages and publishes the Helm chart to GHCR.
-6. Publishes the verified GitHub release and its generated release notes.
-7. Publishes the versioned documentation for stable releases.
+3. Publishes stable DEB packages.
+4. Updates the draft GitHub release with verified signed packages, release notes, and NGC links.
+
+After both release workflows succeed, verify that the public NGC images and chart for that version are downloadable and match the built image digests and chart checksum. Then review and publish the draft GitHub release. Publishing a stable GitHub release automatically publishes versioned Fern documentation; creating a tag or draft does not. Mark RC releases as prereleases; they do not publish docs.
 
 Prerelease tags produce prerelease artifacts and do not update stable package
-channels or `latest` container tags.
+channels.
+
+## Container images and Helm chart
+
+The **Release** workflow builds and publishes the agent and gateway images and
+the Helm chart for the selected release version. New versions are published
+only to NGC. Pushing a version tag automatically starts the workflow and waits
+for environment approval. To run it manually, select the same tag and version:
+
+```bash
+gh workflow run release-artifacts.yml --ref v1.6.0 -f version=v1.6.0
+```
+
+Publishing requires a tag ref matching the version input and the `ngc-publish` GitHub environment. Configure that environment to allow only release tags, require reviewer approval with self-review and administrator bypass disabled, and store `NGC_API_KEY` only as an environment secret. Restrict release tag creation, updates, and deletion to authorized maintainers through a tag ruleset.
+
+| Artifact | Location |
+| --- | --- |
+| Agent image | `nvcr.io/nvidia/fleet-intelligence/agent` |
+| Gateway image | `nvcr.io/nvidia/fleet-intelligence/otel-gateway` |
+| Helm chart | `fleet-intelligence-agent` |
+| Helm repository | `https://helm.ngc.nvidia.com/nvidia/fleet-intelligence` |
+
+See [Helm installation](docs/install-helm.md) for installation and upgrade
+commands.
 
 ## Failure handling
 

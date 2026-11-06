@@ -154,7 +154,7 @@ release:
     owner: dsx-ai-factory
     name: fleet-intelligence-agent
   # Keep unsigned GoReleaser output private until the release workflow replaces
-  # DEB/RPM assets with verified 3S-signed versions, refreshes checksums, and
+  # DEB/RPM assets with verified signed versions, refreshes checksums, and
   # adds a verified detached signature for the final checksum manifest.
   draft: true
   header: |

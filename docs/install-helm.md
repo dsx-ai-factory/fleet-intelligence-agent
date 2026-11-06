@@ -10,7 +10,7 @@
 - A DCGM service endpoint reachable from the cluster. The chart automatically
   tries the ClusterPolicy service (`nvidia-dcgm`) and the DRA GPUCluster service
   (`nvidia-dcgm-dra`) in the `gpu-operator` namespace.
-- Access to GitHub Container Registry (`ghcr.io`) from your cluster/network.
+- Access to NGC container images (`nvcr.io`) and Helm charts (`helm.ngc.nvidia.com`) from your cluster/network.
 
 Set shared variables once for the examples below:
 
@@ -48,10 +48,16 @@ printf '%s' "$ENROLL_TOKEN" | kubectl create secret generic "$ENROLL_TOKEN_SECRE
 
 ## Install or upgrade
 
+For an existing GHCR installation, keep the same release name and namespace.
+Replace saved image repository or version overrides with the NGC references
+for your selected release, while preserving enrollment settings and agent
+state. New image and chart versions are published only to NGC.
+
 Install:
 
 ```bash
-helm install fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
+helm install fleet-intelligence-agent fleet-intelligence-agent \
+  --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --set enroll.enabled=true \
@@ -62,15 +68,31 @@ helm install fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-
 Install (no enrollment):
 
 ```bash
-helm install fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
+helm install fleet-intelligence-agent fleet-intelligence-agent \
+  --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --version "$CHART_VERSION" \
   --namespace "$NS"
 ```
 
+Before upgrading, export your saved values to a private file:
+
+```bash
+umask 077
+helm get values fleet-intelligence-agent --namespace "$NS" -o yaml > agent-values.yaml
+```
+
+Review `agent-values.yaml`: set `image.repository` to
+`nvcr.io/nvidia/fleet-intelligence/agent` and `otelGateway.image.repository`
+to `nvcr.io/nvidia/fleet-intelligence/otel-gateway` if overridden. Remove
+`image.tag` and `otelGateway.image.tag` overrides to use the chart's version.
+Keep your other saved settings.
+
 Upgrade:
 
 ```bash
-helm upgrade fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+  --values agent-values.yaml \
+  --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --set enroll.enabled=true \
@@ -81,7 +103,9 @@ helm upgrade fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-
 Optional: include node metadata during automatic enrollment:
 
 ```bash
-helm upgrade fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+  --values agent-values.yaml \
+  --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --set enroll.enabled=true \
@@ -98,7 +122,9 @@ Notes:
 Upgrade (no enrollment):
 
 ```bash
-helm upgrade fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+  --values agent-values.yaml \
+  --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --version "$CHART_VERSION" \
   --namespace "$NS"
 ```
@@ -106,7 +132,9 @@ helm upgrade fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-
 Upgrade and explicitly remove persisted enrollment metadata:
 
 ```bash
-helm upgrade fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+  --values agent-values.yaml \
+  --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --set enroll.enabled=false \
@@ -191,7 +219,9 @@ kubectl logs -n "$NS" "$POD_NAME" --follow
 Fault injection is disabled by default. To enable it on an existing release:
 
 ```bash
-helm upgrade fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+  --values agent-values.yaml \
+  --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --reuse-values \
@@ -235,7 +265,7 @@ kubectl describe pod -n "$NS" -l app.kubernetes.io/name=fleet-intelligence-agent
 ```
 
 Common issues:
-- **ImagePullBackOff**: Verify nodes can reach `ghcr.io` and the image tag exists
+- **ImagePullBackOff**: Verify nodes can reach `nvcr.io` and the image tag exists
 - **Pending**: Check the node has either `nvidia.com/gpu.deploy.dcgm=true` or
   `nvidia.com/gpu.deploy.dcgm-dra=true`
 - **CrashLoopBackOff**: Check logs for errors
@@ -270,7 +300,9 @@ kubectl get pods -n "$NS" "$POD_NAME" -o jsonpath='{.spec.containers[0].env}'
 If DCGM is at a different location, update the URL:
 
 ```bash
-helm upgrade fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
+helm upgrade fleet-intelligence-agent fleet-intelligence-agent \
+  --values agent-values.yaml \
+  --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --reuse-values \
@@ -306,7 +338,8 @@ The examples below use a generic label to illustrate the override syntax — rep
 Using `--set` (quote the tolerations for zsh, and escape dots in the label key):
 
 ```bash
-helm upgrade --install fleet-intelligence-agent oci://ghcr.io/dsx-ai-factory/charts/fleet-intelligence-agent \
+helm upgrade --install fleet-intelligence-agent fleet-intelligence-agent \
+  --repo https://helm.ngc.nvidia.com/nvidia/fleet-intelligence \
   --version "$CHART_VERSION" \
   --namespace "$NS" \
   --set-string nodeSelector.my-org\\.com/gpu-node=true \

@@ -87,7 +87,7 @@ This creates in the `dist/` directory:
 
 ### Create a Release
 
-To create an official release, tag a version and push it to GitHub. The GitHub Actions workflow will automatically build and publish the release:
+To prepare a release, tag a version and push it to GitHub. GitHub Actions builds the artifacts and prepares a draft release:
 
 ```bash
 # Tag a version
@@ -102,7 +102,9 @@ The GitHub Actions workflow will:
 - Create `.deb` packages for Ubuntu
 - Create `.rpm` packages for RHEL/Rocky/AlmaLinux 8, 9, 10
 - Generate binary tarballs
-- Publish the release with all artifacts to GitHub Releases
+- Attach signed packages and other artifacts to a draft GitHub release
+
+After verifying public NGC image and chart availability, review and publish the draft GitHub release. Stable GitHub releases trigger documentation publishing. See the [release process](https://github.com/dsx-ai-factory/fleet-intelligence-agent/blob/main/RELEASE.md) for the complete procedure.
 
 ## Testing
 

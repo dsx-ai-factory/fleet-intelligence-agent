@@ -15,7 +15,7 @@
 
 apiVersion: v2
 name: fleet-intelligence-agent
-description: Fleet Intelligence Agent daemonset
+description: Fleet Intelligence Host Agent
 type: application
 version: 0.0.1
 appVersion: "0.0.1"
