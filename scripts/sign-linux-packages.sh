@@ -13,8 +13,8 @@ fi
 dist_dir="$(cd "$1" && pwd)"
 public_key="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 nvsec_bin="${NVSEC_BIN:-nvsec}"
-job_type="${NVSEC_LINUX_PACKAGE_JOB_TYPE:?NVSEC_LINUX_PACKAGE_JOB_TYPE is required}"
-scope="${NVSEC_LINUX_PACKAGE_SSA_SCOPE:?NVSEC_LINUX_PACKAGE_SSA_SCOPE is required}"
+job_type="${NVSEC_LINUX_PACKAGE_JOB_TYPE:-LINUX_PACKAGE_FLEET_INTELLIGENCE}"
+scope="${NVSEC_LINUX_PACKAGE_SSA_SCOPE:-SIGNING_LINUX_PACKAGE_FLEET_INTELLIGENCE}"
 
 : "${NVSEC_SSA_CLIENT_ID:?NVSEC_SSA_CLIENT_ID is required}"
 : "${NVSEC_SSA_CLIENT_SECRET:?NVSEC_SSA_CLIENT_SECRET is required}"
