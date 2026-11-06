@@ -15,8 +15,8 @@ fi
 checksums_file="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 public_key="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 nvsec_bin="${NVSEC_BIN:-nvsec}"
-job_type="${NVSEC_CHECKSUM_JOB_TYPE:?NVSEC_CHECKSUM_JOB_TYPE is required}"
-scope="${NVSEC_CHECKSUM_SSA_SCOPE:?NVSEC_CHECKSUM_SSA_SCOPE is required}"
+job_type="${NVSEC_CHECKSUM_JOB_TYPE:-FLEET_INTELLIGENCE}"
+scope="${NVSEC_CHECKSUM_SSA_SCOPE:-SIGNING_FLEET_INTELLIGENCE}"
 signature_name="$(basename "$checksums_file").asc"
 
 : "${NVSEC_SSA_CLIENT_ID:?NVSEC_SSA_CLIENT_ID is required}"
