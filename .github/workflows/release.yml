@@ -19,7 +19,7 @@ concurrency:
 jobs:
   release:
     name: Create Release
-    runs-on: ${{ fromJSON(vars.RELEASE_RUNNER_LABELS) }}
+    runs-on: [self-hosted, rocky8]
     steps:
       - name: Validate tag format
         shell: bash
