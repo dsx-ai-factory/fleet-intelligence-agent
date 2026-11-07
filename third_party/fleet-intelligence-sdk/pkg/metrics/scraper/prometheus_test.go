@@ -8,6 +8,7 @@ import (
 	"errors"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -15,6 +16,28 @@ import (
 
 	pkgmetrics "github.com/NVIDIA/fleet-intelligence-sdk/pkg/metrics"
 )
+
+func TestPrometheusScraperMeasurementTimestampAndFallback(t *testing.T) {
+	for _, sourceTime := range []int64{time.Now().Add(-time.Hour).UnixMicro(), 0, -1} {
+		reg := prometheus.NewRegistry()
+		vec := pkgmetrics.NewSampledGaugeVec(prometheus.GaugeOpts{Name: "measured_value", Help: "source value"},
+			[]string{pkgmetrics.MetricComponentLabelKey})
+		require.NoError(t, reg.Register(vec))
+		vec.With(prometheus.Labels{pkgmetrics.MetricComponentLabelKey: "test"}).SetWithTimestamp(42, sourceTime)
+		scraper, err := NewPrometheusScraper(reg)
+		require.NoError(t, err)
+		before := time.Now().UnixMilli()
+		ms, err := scraper.Scrape(context.Background())
+		require.NoError(t, err)
+		require.Len(t, ms, 1)
+		if sourceTime > 0 {
+			require.Equal(t, sourceTime/1000, ms[0].UnixMilliseconds)
+		} else {
+			require.GreaterOrEqual(t, ms[0].UnixMilliseconds, before)
+			require.LessOrEqual(t, ms[0].UnixMilliseconds, time.Now().UnixMilli())
+		}
+	}
+}
 
 func TestPrometheusScraper(t *testing.T) {
 	t.Parallel()

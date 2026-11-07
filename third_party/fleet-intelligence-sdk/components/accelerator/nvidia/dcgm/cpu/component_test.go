@@ -18,6 +18,7 @@ package cpu
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -546,14 +547,14 @@ func TestReconnectCanResetDuringCachedRead(t *testing.T) {
 	previous := &checkResult{ts: time.Unix(100, 0), health: apiv1.HealthStateTypeHealthy, reason: "previous assessment"}
 	c.lastCheckResult = previous
 	gauge := metricDCGMFIDevCPUTempCurrent.With(prometheus.Labels{"cpu_id": "cpu-9876"})
-	gauge.Set(5)
+	gauge.SetWithTimestamp(5, 1_000_000)
 	entered, release := make(chan struct{}), make(chan struct{})
 	unblock := sync.OnceFunc(func() { close(release) })
 	defer unblock()
 	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
 		close(entered)
 		<-release
-		value := dcgm.FieldValue_v1{FieldID: dcgm.DCGM_FI_DEV_CPU_TEMP_CURRENT, FieldType: dcgm.DCGM_FT_DOUBLE}
+		value := dcgm.FieldValue_v1{FieldID: dcgm.DCGM_FI_DEV_CPU_TEMP_CURRENT, FieldType: dcgm.DCGM_FT_DOUBLE, TS: 2_000_000}
 		binary.LittleEndian.PutUint64(value.Value[:], math.Float64bits(99))
 		return []dcgm.FieldValue_v1{value}, nil
 	}
@@ -571,9 +572,21 @@ func TestReconnectCanResetDuringCachedRead(t *testing.T) {
 	unblock()
 	require.Same(t, previous, <-checked)
 	require.Same(t, previous, c.lastCheckResult)
-	raw := &dto.Metric{}
-	require.NoError(t, gauge.Write(raw))
+	reg := prometheus.NewRegistry()
+	require.NoError(t, reg.Register(metricDCGMFIDevCPUTempCurrent))
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	var raw *dto.Metric
+	for _, sample := range families[0].GetMetric() {
+		for _, label := range sample.GetLabel() {
+			if label.GetName() == "cpu_id" && label.GetValue() == "cpu-9876" {
+				raw = sample
+			}
+		}
+	}
+	require.NotNil(t, raw)
 	require.Equal(t, float64(5), raw.GetGauge().GetValue(), "old-session values must not update gauges")
+	require.Equal(t, int64(1000), raw.GetTimestampMs(), "an old-session timestamp must also be discarded")
 	// A later check can publish from the new generation, even with reused IDs.
 	c.setupMu.Lock()
 	c.fieldSetupComplete = true
@@ -583,4 +596,59 @@ func TestReconnectCanResetDuringCachedRead(t *testing.T) {
 	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) { return nil, nil }
 	require.Equal(t, apiv1.HealthStateTypeHealthy, c.Check().HealthStateType())
 	require.NotSame(t, previous, c.lastCheckResult)
+}
+
+func TestCheckPreservesMeasurementTimeAcrossReadFailureAndRecovery(t *testing.T) {
+	comp, err := New(&components.GPUdInstance{RootCtx: context.Background()})
+	require.NoError(t, err)
+	c := comp.(*component)
+	c.dcgmInstance = &mockDCGMInstance{dcgmExists: true}
+	c.cpuEntities = []uint{8765}
+	c.fieldSetupComplete = true
+	c.cpuGroupHandle.SetHandle(1)
+	defer func() {
+		c.cpuGroupHandle = dcgm.GroupHandle{} // This fixture does not allocate native resources.
+		require.NoError(t, c.Close())
+	}()
+	labels := prometheus.Labels{"cpu_id": "cpu-8765"}
+	defer metricDCGMFIDevCPUTempCurrent.Delete(labels)
+	reg := prometheus.NewRegistry()
+	require.NoError(t, reg.Register(metricDCGMFIDevCPUTempCurrent))
+	sourceTime := time.Date(2026, 10, 28, 12, 0, 0, 123456000, time.UTC).UnixMicro()
+	fail := false
+	c.readFields = func(dcgm.Field_Entity_Group, uint, []dcgm.Short) ([]dcgm.FieldValue_v1, error) {
+		if fail {
+			return nil, errors.New("cached read failed")
+		}
+		value := dcgm.FieldValue_v1{FieldID: dcgm.DCGM_FI_DEV_CPU_TEMP_CURRENT, FieldType: dcgm.DCGM_FT_DOUBLE, TS: sourceTime}
+		binary.LittleEndian.PutUint64(value.Value[:], math.Float64bits(42))
+		return []dcgm.FieldValue_v1{value}, nil
+	}
+	initialTime := sourceTime
+	for _, step := range []struct {
+		timestamp int64
+		fail      bool
+		want      int64
+	}{
+		{initialTime, false, initialTime},
+		{initialTime, false, initialTime},
+		{initialTime + 60_000_000, true, initialTime},
+		{initialTime + 60_000_000, false, initialTime + 60_000_000},
+	} {
+		sourceTime, fail = step.timestamp, step.fail
+		c.Check()
+		families, err := reg.Gather()
+		require.NoError(t, err)
+		var sample *dto.Metric
+		for _, metric := range families[0].GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetValue() == "cpu-8765" {
+					sample = metric
+				}
+			}
+		}
+		require.NotNil(t, sample)
+		require.Equal(t, step.want/1000, sample.GetTimestampMs())
+		require.Equal(t, float64(42), sample.GetGauge().GetValue())
+	}
 }

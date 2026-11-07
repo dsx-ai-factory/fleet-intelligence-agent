@@ -25,9 +25,9 @@ import (
 
 // clockFields defines the DCGM fields to monitor for clock metrics
 var clockFields = []dcgm.Short{
-	dcgm.DCGM_FI_DEV_SM_CLOCK,              // SM clock for the device
-	dcgm.DCGM_FI_DEV_MEM_CLOCK,             // Memory clock for the device
-	dcgm.DCGM_FI_DEV_CLOCKS_EVENT_REASONS,  // Clock event reasons bitmask
+	dcgm.DCGM_FI_DEV_SM_CLOCK,             // SM clock for the device
+	dcgm.DCGM_FI_DEV_MEM_CLOCK,            // Memory clock for the device
+	dcgm.DCGM_FI_DEV_CLOCKS_EVENT_REASONS, // Clock event reasons bitmask
 }
 
 var (
@@ -35,7 +35,7 @@ var (
 		pkgmetrics.MetricComponentLabelKey: Name,
 	}
 
-	metricDCGMFIDevSMClock = prometheus.NewGaugeVec(
+	metricDCGMFIDevSMClock = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -45,7 +45,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevMemClock = prometheus.NewGaugeVec(
+	metricDCGMFIDevMemClock = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",
@@ -55,7 +55,7 @@ var (
 		[]string{pkgmetrics.MetricComponentLabelKey, "uuid", "gpu"},
 	).MustCurryWith(componentLabel)
 
-	metricDCGMFIDevClocksEventReasons = prometheus.NewGaugeVec(
+	metricDCGMFIDevClocksEventReasons = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "",
 			Subsystem: "",

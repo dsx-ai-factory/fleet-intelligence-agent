@@ -20,7 +20,8 @@ const (
 
 // Metric represents a metric row in the database table.
 type Metric struct {
-	// UnixMilliseconds represents the Unix timestamp of the metric.
+	// UnixMilliseconds is the source measurement time when supplied; otherwise
+	// it is the scrape time. Repeated source samples keep the same timestamp.
 	UnixMilliseconds int64 `json:"unix_milliseconds"`
 	// Component represents the name of the component this metric belongs to.
 	Component string `json:"component"`
@@ -54,10 +55,12 @@ type Store interface {
 	// Record records metric data points.
 	Record(ctx context.Context, ms ...Metric) error
 
-	// Returns all the data points since the given time.
-	// If since is zero, returns all metrics.
+	// Read returns data points matching the options. WithSince filters by
+	// measurement time; WithRecordedSince filters by first receipt time.
+	// Without options, Read returns all metrics.
 	Read(ctx context.Context, opts ...OpOption) (Metrics, error)
 
-	// Purge purges the metrics data points before the given time.
+	// Purge removes data points first recorded before the given time. Legacy
+	// rows without a receipt timestamp use their measurement time.
 	Purge(ctx context.Context, before time.Time) (int, error)
 }

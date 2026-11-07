@@ -7,6 +7,7 @@ import "time"
 
 type Op struct {
 	Since              time.Time
+	RecordedSince      time.Time
 	SelectedComponents map[string]struct{}
 }
 
@@ -23,6 +24,15 @@ func (op *Op) ApplyOpts(opts []OpOption) error {
 func WithSince(t time.Time) OpOption {
 	return func(op *Op) {
 		op.Since = t
+	}
+}
+
+// WithRecordedSince selects samples first stored at or after t, regardless of
+// measurement time. Exporters use it to include late-arriving measurements.
+// WithSince still filters by measurement time; both filters can be combined.
+func WithRecordedSince(t time.Time) OpOption {
+	return func(op *Op) {
+		op.RecordedSince = t
 	}
 }
 

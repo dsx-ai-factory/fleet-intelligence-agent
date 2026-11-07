@@ -219,7 +219,9 @@ func (c *collector) collectMetrics(ctx context.Context, data *HealthData) error 
 	}
 
 	since := time.Now().Add(-c.config.MetricsLookback.Duration)
-	metrics, err := c.metricsStore.Read(ctx, pkgmetrics.WithSince(since))
+	// A new source sample can have an older measurement time. Select by first
+	// receipt so the export lookback includes it without changing its timestamp.
+	metrics, err := c.metricsStore.Read(ctx, pkgmetrics.WithRecordedSince(since))
 	if err != nil {
 		return fmt.Errorf("failed to read metrics: %w", err)
 	}

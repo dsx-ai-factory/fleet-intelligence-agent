@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -28,6 +29,14 @@ type SettableConstMetricVec struct {
 type settableConstMetricSample struct {
 	labelValues []string
 	value       float64
+	// timestampMicroseconds is the source measurement time; zero uses scrape time.
+	timestampMicroseconds int64
+}
+
+// NewSampledGaugeVec creates a gauge collector for externally measured samples.
+// SetWithTimestamp preserves source measurement times; Set uses scrape time.
+func NewSampledGaugeVec(opts prometheus.GaugeOpts, variableLabels []string) *SettableConstMetricVec {
+	return newSettableConstMetricVec(prometheus.Opts(opts), prometheus.GaugeValue, variableLabels, nil)
 }
 
 // NewSettableCounterVec creates a collector for counters whose absolute values
@@ -153,6 +162,9 @@ func (v *SettableConstMetricVec) Collect(ch chan<- prometheus.Metric) {
 			ch <- prometheus.NewInvalidMetric(v.desc, err)
 			continue
 		}
+		if sample.timestampMicroseconds > 0 {
+			metric = prometheus.NewMetricWithTimestamp(time.UnixMicro(sample.timestampMicroseconds), metric)
+		}
 		ch <- metric
 	}
 }
@@ -166,11 +178,20 @@ type SettableConstMetric struct {
 
 // Set stores the current absolute value for this sample.
 func (m *SettableConstMetric) Set(value float64) {
+	m.SetWithTimestamp(value, 0)
+}
+
+// SetWithTimestamp atomically stores the value and its Unix measurement time in
+// microseconds, as supplied by DCGM. Prometheus exposes millisecond precision.
+// A nonpositive timestamp omits the explicit time, so scrapers use observation
+// time. Repeated source samples retain the same measurement timestamp.
+func (m *SettableConstMetric) SetWithTimestamp(value float64, timestampMicroseconds int64) {
 	m.vec.mu.Lock()
 	defer m.vec.mu.Unlock()
 	m.vec.samples[m.key] = settableConstMetricSample{
-		labelValues: append([]string(nil), m.labelValues...),
-		value:       value,
+		labelValues:           append([]string(nil), m.labelValues...),
+		value:                 value,
+		timestampMicroseconds: timestampMicroseconds,
 	}
 }
 

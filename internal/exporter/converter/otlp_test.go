@@ -97,6 +97,8 @@ func TestOTLPConverter_Convert_WithMetrics(t *testing.T) {
 	// Verify first metric
 	assert.Equal(t, "temperature", metrics[0].Name)
 	assert.Contains(t, metrics[0].Description, "gpu")
+	assert.Equal(t, uint64(1699200000000)*1_000_000, metrics[0].GetGauge().GetDataPoints()[0].GetTimeUnixNano(),
+		"export must retain the supplied measurement time, regardless of collection time")
 }
 
 func TestOTLPConverter_Convert_WorkloadGPUInstanceID(t *testing.T) {
