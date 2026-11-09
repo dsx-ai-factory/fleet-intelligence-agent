@@ -75,7 +75,6 @@ jobs:
             VERSION=${{ steps.version.outputs.version }}
             REVISION=${{ github.sha }}
             BUILD_TIMESTAMP=${{ steps.version.outputs.timestamp }}
-          # Temporary NGC publishing workaround: disable BuildKit attestations.
           provenance: false
           sbom: false
       - name: Publish gateway image
@@ -87,7 +86,6 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: nvcr.io/1070195845945670/fleet-intelligence/otel-gateway:${{ steps.version.outputs.version }}
-          # Temporary NGC publishing workaround: disable BuildKit attestations.
           provenance: false
           sbom: false
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
