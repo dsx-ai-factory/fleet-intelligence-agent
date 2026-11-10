@@ -49,23 +49,16 @@ Shows detailed information about the machine:
 - Network interfaces
 - Hardware system UUID and the deprecated OS machine ID
 
-On supported platforms, each GPU also reports its chassis slot number
-(`slotNumber`, including switch slots), compute-tray index (`trayIndex`,
-excluding switches), host index within the slot (`hostID`), and GPU module
-position within the node (`moduleID`). These describe physical placement;
-the slot number is not automatically a rack-unit (U) position.
+On supported platforms, GPU information also includes:
 
-The optional `peerType` field reports the platform's NVLink peer connection
-type, such as switch connected or direct connected. It preserves the raw
-numeric code, including unrecognized codes, as connection-type metadata.
-It does not identify specific peer devices or indicate current link health.
+- `slotNumber`: Slot within the chassis, including switch slots. This is not necessarily a rack-unit (U) position.
+- `trayIndex`: Compute-tray index within the chassis, excluding switch slots.
+- `hostID`: Host index within the slot.
+- `moduleID`: GPU identifier within the host.
+- `peerType`: Raw numeric NVLink peer connection type, such as switch connected or direct connected. Unrecognized codes are preserved; this field does not identify specific peers or report current link health.
+- `fabricGUID`: Platform-reported GPU fabric identifier, formatted as a lowercase hexadecimal string such as `0xb74a5c8b016b6418`, independently of the GPU UUID.
 
-`fabricGUID` preserves the platform-reported GPU fabric identifier as a
-lowercase hexadecimal string, such as `0xb74a5c8b016b6418`, independently of
-the GPU UUID. Unavailable platform fields are omitted from JSON inventory;
-reported numeric zero values are retained. Available fields appear in the
-machine-info table, CSV export, OTLP GPU information, and backend inventory
-requests. Support depends on the platform, driver, and DCGM version.
+Available fields appear in the machine-info table, CSV export, OTLP GPU information, and backend inventory requests. Support depends on the platform, driver, and DCGM version. Unavailable fields are omitted from JSON inventory; reported numeric zero values are retained.
 
 ### View/Update Metadata
 
