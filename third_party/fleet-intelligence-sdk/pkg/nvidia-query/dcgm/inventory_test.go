@@ -148,6 +148,18 @@ func TestQueryDeviceInventoryUsesOneLiveBatch(t *testing.T) {
 		if !slices.Equal(fields, deviceInventoryFields) {
 			t.Fatalf("fields = %v, want %v", fields, deviceInventoryFields)
 		}
+		for _, required := range []dcgm.Short{
+			dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER,
+			dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX,
+			dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID,
+			dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID,
+			dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE,
+			dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID,
+		} {
+			if !slices.Contains(fields, required) {
+				t.Fatalf("platform field %d missing from live inventory batch", required)
+			}
+		}
 		if flags != dcgm.DCGM_FV_FLAG_LIVE_DATA {
 			t.Fatalf("flags = %v, want DCGM_FV_FLAG_LIVE_DATA", flags)
 		}
@@ -341,6 +353,299 @@ func TestFramebufferMemoryBytes(t *testing.T) {
 				t.Fatalf("framebufferMemoryBytes(%d) = %d, want %d", tt.totalMiB, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDeviceInventoryPlatformFields(t *testing.T) {
+	devices, complete := deviceInventoryFromFieldValues([]uint{1, 2, 3, 4}, []dcgm.FieldValue_v2{
+		int64Field(2, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, 0),
+		int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER, 26),
+		int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX, 16),
+		int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID, 1),
+		int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, 3),
+		int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE, 1),
+		stringField(1, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, "0xB74A5C8B016B6418"),
+		int64Field(2, dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER, 0),
+		int64Field(2, dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX, 0),
+		int64Field(2, dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID, 0),
+		int64Field(2, dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE, 0),
+		stringField(2, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, "0x42"),
+		int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE, 7),
+	})
+	if !complete {
+		t.Fatal("valid platform inventory is incomplete")
+	}
+	want := []DeviceInfo{
+		{ID: 1, MinorNumber: -1, SlotNumber: 26, SlotNumberValid: true, TrayIndex: 16, TrayIndexValid: true,
+			HostID: 1, HostIDValid: true, ModuleID: 3, ModuleIDValid: true, PeerType: 1, PeerTypeValid: true,
+			FabricGUID: "0xb74a5c8b016b6418"},
+		{ID: 2, MinorNumber: -1, SlotNumberValid: true, TrayIndexValid: true,
+			HostIDValid: true, ModuleIDValid: true, PeerTypeValid: true, FabricGUID: "0x0000000000000042"},
+		{ID: 3, MinorNumber: -1, PeerType: 7, PeerTypeValid: true},
+		{ID: 4, MinorNumber: -1},
+	}
+	if !slices.Equal(devices, want) {
+		t.Fatalf("platform inventory = %+v, want %+v", devices, want)
+	}
+}
+
+func TestDeviceInventoryUnavailablePlatformFields(t *testing.T) {
+	fields := []dcgm.Short{
+		dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER,
+		dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX,
+		dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID,
+		dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID,
+		dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE,
+		dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID,
+	}
+	for _, tc := range []struct {
+		name     string
+		status   int
+		sentinel bool
+		complete bool
+	}{
+		{name: "unsupported status", status: dcgm.DCGM_ST_NOT_SUPPORTED, complete: true},
+		{name: "unsupported sentinel", sentinel: true, complete: true},
+		{name: "transient status", status: dcgm.DCGM_ST_TIMEOUT},
+		{name: "blank sentinel", sentinel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			values := []dcgm.FieldValue_v2{stringField(1, dcgm.DCGM_FI_DEV_UUID, "GPU-1")}
+			for _, fieldID := range fields {
+				value := int64Field(1, fieldID, 1)
+				if fieldID == dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID {
+					value = stringField(1, fieldID, "0xb74a5c8b016b6418")
+				}
+				if tc.sentinel {
+					if fieldID == dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID {
+						sentinel := dcgm.DCGM_FT_STR_BLANK
+						if tc.complete {
+							sentinel = dcgm.DCGM_FT_STR_NOT_SUPPORTED
+						}
+						value = stringField(1, fieldID, sentinel)
+					} else {
+						sentinel := int64(dcgm.DCGM_FT_INT64_BLANK)
+						if tc.complete {
+							sentinel = dcgm.DCGM_FT_INT64_NOT_SUPPORTED
+						}
+						value = int64Field(1, fieldID, sentinel)
+					}
+				} else {
+					value.Status = tc.status
+				}
+				values = append(values, value)
+			}
+			devices, complete := deviceInventoryFromFieldValues([]uint{1}, values)
+			if complete != tc.complete {
+				t.Fatalf("complete = %v, want %v", complete, tc.complete)
+			}
+			if !slices.Equal(devices, []DeviceInfo{{ID: 1, UUID: "GPU-1", MinorNumber: -1}}) {
+				t.Fatalf("unavailable platform fields must not remove GPU or populate values: %+v", devices)
+			}
+		})
+	}
+}
+
+func TestInventoryPlatformValueValidation(t *testing.T) {
+	for _, n := range []int64{-1, 255, 256, 1 << 32} {
+		value := int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, n)
+		if got, valid := inventoryPlatformValue(&value); valid || got != 0 {
+			t.Errorf("platform index %d = (%d, %v), want (0, false)", n, got, valid)
+		}
+	}
+	value := stringField(1, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, "3")
+	if _, valid := inventoryPlatformValue(&value); valid {
+		t.Fatal("wrong field type must not populate platform position")
+	}
+	value = int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, 254)
+	if got, valid := inventoryPlatformValue(&value); !valid || got != 254 {
+		t.Fatal("valid unsigned-byte position must be retained")
+	}
+}
+
+func TestInventoryFabricGUIDValidation(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"0xb74a5c8b016b6418", "0xb74a5c8b016b6418"},
+		{" 0X00000000000000AB ", "0x00000000000000ab"},
+		{"0x1", "0x0000000000000001"},
+		{"0xffffffffffffffff", "0xffffffffffffffff"},
+		{"", ""}, {"N/A", ""}, {"b74a5c8b016b6418", ""}, {"0x", ""},
+		{"0x10000000000000000", ""}, {"0xnot-a-guid", ""}, {"0x-1", ""},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			value := stringField(1, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, tc.input)
+			if got := inventoryFabricGUID(&value); got != tc.want {
+				t.Fatalf("GUID = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	value := int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, 42)
+	if got := inventoryFabricGUID(&value); got != "" {
+		t.Fatal("numeric field must not be accepted as GUID")
+	}
+}
+
+func TestDeviceInventoryOwnsOptionalPlatformValues(t *testing.T) {
+	want := []DeviceInfo{{ID: 1, SlotNumber: 26, SlotNumberValid: true, TrayIndex: 16, TrayIndexValid: true,
+		HostID: 1, HostIDValid: true, ModuleID: 3, ModuleIDValid: true}}
+	devices := slices.Clone(want)
+	inventory := newDeviceInventory(devices, true)
+	devices[0] = DeviceInfo{}
+	first := inventory.snapshot()
+	if !slices.Equal(first, want) {
+		t.Fatal("input mutation changed cached platform positions")
+	}
+	first[0] = DeviceInfo{}
+	second := inventory.snapshot()
+	if !slices.Equal(second, want) {
+		t.Fatal("snapshot mutation changed cached platform positions")
+	}
+}
+
+func TestDeviceInventoryEnrichmentPublishesPartialRecovery(t *testing.T) {
+	originalGetSupportedDevices := getSupportedDevicesForInventory
+	originalGetLatestValues := getLatestInventoryValues
+	t.Cleanup(func() {
+		getSupportedDevicesForInventory = originalGetSupportedDevices
+		getLatestInventoryValues = originalGetLatestValues
+	})
+	getSupportedDevicesForInventory = func() ([]uint, error) {
+		t.Fatal("inventory enrichment must not re-enumerate membership")
+		return nil, nil
+	}
+	queryCount := 0
+	getLatestInventoryValues = func(entities []dcgm.GroupEntityPair, _ []dcgm.Short, _ uint) ([]dcgm.FieldValue_v2, error) {
+		wantEntities := []dcgm.GroupEntityPair{
+			{EntityGroupId: dcgm.FE_GPU, EntityId: 7},
+			{EntityGroupId: dcgm.FE_GPU, EntityId: 3},
+		}
+		if !slices.Equal(entities, wantEntities) {
+			t.Fatalf("queried entities = %+v, want fixed membership %+v", entities, wantEntities)
+		}
+		queryCount++
+		switch queryCount {
+		case 1:
+			return []dcgm.FieldValue_v2{
+				stringField(3, dcgm.DCGM_FI_DEV_UUID, "GPU-3"),
+				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER, 26),
+				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX, 16),
+				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID, 0),
+				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, 3),
+				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE, 1),
+				stringField(3, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, dcgm.DCGM_FT_STR_BLANK),
+			}, nil
+		case 2:
+			return []dcgm.FieldValue_v2{
+				stringField(3, dcgm.DCGM_FI_DEV_UUID, dcgm.DCGM_FT_STR_BLANK),
+				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE, dcgm.DCGM_FT_INT64_BLANK),
+				stringField(3, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, "0xb74a5c8b016b6418"),
+			}, nil
+		case 3:
+			return []dcgm.FieldValue_v2{
+				stringField(7, dcgm.DCGM_FI_DEV_UUID, "GPU-7"),
+				stringField(3, dcgm.DCGM_FI_DEV_UUID, "GPU-3"),
+				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE, 0),
+				stringField(3, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, "0xb74a5c8b016b6418"),
+			}, nil
+		default:
+			t.Fatal("complete inventory must stop enrichment queries")
+			return nil, nil
+		}
+	}
+	inventory := newDeviceInventory([]DeviceInfo{
+		{ID: 7, UUID: "GPU-7", MinorNumber: -1},
+		{ID: 3, MinorNumber: -1},
+	}, false)
+	want := []DeviceInfo{
+		{ID: 7, UUID: "GPU-7", MinorNumber: -1},
+		{ID: 3, UUID: "GPU-3", MinorNumber: -1, SlotNumber: 26, SlotNumberValid: true,
+			TrayIndex: 16, TrayIndexValid: true, HostIDValid: true, ModuleID: 3, ModuleIDValid: true,
+			PeerType: 1, PeerTypeValid: true},
+	}
+	for query := 1; query <= 4; query++ {
+		if err := inventory.enrichIfIncomplete(); err != nil {
+			t.Fatalf("enrichment %d failed: %v", query, err)
+		}
+		if query >= 2 {
+			want[1].FabricGUID = "0xb74a5c8b016b6418"
+		}
+		if query >= 3 {
+			want[1].PeerType = 0
+		}
+		if got := inventory.snapshot(); !slices.Equal(got, want) {
+			t.Fatalf("enrichment %d snapshot = %+v, want recovered inventory %+v", query, got, want)
+		}
+		if got, wantComplete := inventory.complete, query >= 3; got != wantComplete {
+			t.Fatalf("enrichment %d complete = %v, want %v", query, got, wantComplete)
+		}
+	}
+	if queryCount != 3 {
+		t.Fatalf("query count = %d, want 3", queryCount)
+	}
+}
+
+func TestDeviceInventoryEnrichmentRetainsKnownValuesOnUnavailableFields(t *testing.T) {
+	originalGetLatestValues := getLatestInventoryValues
+	t.Cleanup(func() { getLatestInventoryValues = originalGetLatestValues })
+	want := []DeviceInfo{{
+		ID: 3, UUID: "GPU-3", BusID: "0000:17:00.0", Brand: "NVIDIA", Model: "GB200",
+		Serial: "serial-3", VBIOSVersion: "96.00.5E.00.01", DriverVersion: "570.86.15",
+		CUDADriverVersion: 12080, MinorNumber: 0, ComputeCapability: 10 << 16,
+		FabricClusterUUID: "cluster-3", FabricCliqueID: 0, FabricCliqueIDValid: true,
+		ChassisSerial: "chassis-3", SlotNumber: 26, SlotNumberValid: true,
+		TrayIndex: 16, TrayIndexValid: true, HostID: 1, HostIDValid: true,
+		ModuleID: 3, ModuleIDValid: true, FabricGUID: "0xb74a5c8b016b6418",
+		PeerType: 7, PeerTypeValid: true,
+		FramebufferMemoryBytes: 80 * 1024 * 1024 * 1024,
+	}}
+	inventory := newDeviceInventory(want, false)
+	getLatestInventoryValues = func([]dcgm.GroupEntityPair, []dcgm.Short, uint) ([]dcgm.FieldValue_v2, error) {
+		unavailableTray := int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX, 0)
+		unavailableTray.Status = dcgm.DCGM_ST_NO_DATA
+		unsupportedBrand := stringField(3, dcgm.DCGM_FI_DEV_BRAND, "changed")
+		unsupportedBrand.Status = dcgm.DCGM_ST_NOT_SUPPORTED
+		return []dcgm.FieldValue_v2{
+			int64Field(3, dcgm.DCGM_FI_DEV_UUID, 3),
+			stringField(3, dcgm.DCGM_FI_DEV_PCI_BUSID, ""),
+			unsupportedBrand,
+			stringField(3, dcgm.DCGM_FI_DEV_NAME, dcgm.DCGM_FT_STR_NOT_SUPPORTED),
+			stringField(3, dcgm.DCGM_FI_DEV_SERIAL, dcgm.DCGM_FT_STR_BLANK),
+			int64Field(3, dcgm.DCGM_FI_DEV_VBIOS_VERSION, 0),
+			stringField(3, dcgm.DCGM_FI_DRIVER_VERSION, ""),
+			int64Field(3, dcgm.DCGM_FI_CUDA_DRIVER_VERSION, -1),
+			int64Field(3, dcgm.DCGM_FI_DEV_MINOR_NUMBER, -1),
+			int64Field(3, dcgm.DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY, 0),
+			int64Field(3, dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID, -1),
+			stringField(3, dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER, ""),
+			int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER, 0),
+			unavailableTray,
+			int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID, dcgm.DCGM_FT_INT64_BLANK),
+			int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, 255),
+			stringField(3, dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE, "wrong type"),
+			stringField(3, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, "invalid"),
+			int64Field(3, dcgm.DCGM_FI_DEV_FB_TOTAL, -1),
+		}, nil
+	}
+	if err := inventory.enrichIfIncomplete(); err != nil {
+		t.Fatal(err)
+	}
+	want[0].SlotNumber = 0
+	if got := inventory.snapshot(); !slices.Equal(got, want) {
+		t.Fatalf("snapshot = %+v, want retained values and valid zero update %+v", got, want)
+	}
+	if inventory.complete {
+		t.Fatal("blank fields must remain eligible for retry")
+	}
+
+	expectedErr := errors.New("field query failed")
+	getLatestInventoryValues = func([]dcgm.GroupEntityPair, []dcgm.Short, uint) ([]dcgm.FieldValue_v2, error) {
+		return nil, expectedErr
+	}
+	if err := inventory.enrichIfIncomplete(); !errors.Is(err, expectedErr) {
+		t.Fatalf("transport error = %v, want %v", err, expectedErr)
+	}
+	if got := inventory.snapshot(); !slices.Equal(got, want) {
+		t.Fatalf("transport failure changed known inventory: %+v", got)
 	}
 }
 

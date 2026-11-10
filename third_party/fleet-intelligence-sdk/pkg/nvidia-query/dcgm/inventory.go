@@ -20,6 +20,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 
 	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
@@ -48,6 +50,17 @@ type DeviceInfo struct {
 	FabricCliqueID         uint32
 	FabricCliqueIDValid    bool
 	ChassisSerial          string
+	SlotNumber             uint32
+	SlotNumberValid        bool
+	TrayIndex              uint32
+	TrayIndexValid         bool
+	HostID                 uint32
+	HostIDValid            bool
+	ModuleID               uint32
+	ModuleIDValid          bool
+	PeerType               uint32
+	PeerTypeValid          bool
+	FabricGUID             string
 	FramebufferMemoryBytes uint64
 }
 
@@ -65,6 +78,12 @@ var deviceInventoryFields = []dcgm.Short{
 	dcgm.DCGM_FI_DEV_FABRIC_CLUSTER_UUID,
 	dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID,
 	dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER,
+	dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER,
+	dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX,
+	dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID,
+	dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID,
+	dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE,
+	dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID,
 	dcgm.DCGM_FI_DEV_FB_TOTAL,
 }
 
@@ -103,8 +122,8 @@ func (inventory *deviceInventory) snapshot() []DeviceInfo {
 }
 
 // enrichIfIncomplete retries inventory fields for the membership established
-// at session creation. Once a complete snapshot is available, inventory fields
-// are static enough that subsequent collection cycles can skip the live query.
+// at session creation, retaining each recovered field even while others remain
+// unavailable. A complete batch stops further live inventory queries.
 func (inventory *deviceInventory) enrichIfIncomplete() error {
 	if inventory == nil {
 		return nil
@@ -120,24 +139,23 @@ func (inventory *deviceInventory) enrichIfIncomplete() error {
 		inventory.mu.RUnlock()
 		return nil
 	}
-	deviceIDs := make([]uint, 0, len(inventory.devices))
-	for _, device := range inventory.devices {
+	devices := slices.Clone(inventory.devices)
+	deviceIDs := make([]uint, 0, len(devices))
+	for _, device := range devices {
 		deviceIDs = append(deviceIDs, device.ID)
 	}
 	inventory.mu.RUnlock()
 
-	devices, complete, err := queryDeviceInventoryFields(deviceIDs)
+	values, err := getDeviceInventoryFieldValues(deviceIDs)
 	if err != nil {
 		return err
 	}
-	if !complete {
-		return nil
-	}
+	complete := updateDeviceInventoryFromFieldValues(devices, values)
 
 	inventory.mu.Lock()
 	if !inventory.complete {
-		inventory.devices = slices.Clone(devices)
-		inventory.complete = true
+		inventory.devices = devices
+		inventory.complete = complete
 	}
 	inventory.mu.Unlock()
 	return nil
@@ -217,6 +235,21 @@ func queryDeviceInventoryFields(deviceIDs []uint) ([]DeviceInfo, bool, error) {
 		return nil, true, nil
 	}
 
+	values, err := getDeviceInventoryFieldValues(deviceIDs)
+	devices, complete := deviceInventoryFromFieldValues(deviceIDs, values)
+	if err != nil {
+		// Enumeration established GPU presence even if enrichment failed.
+		return devices, false, err
+	}
+	return devices, complete, nil
+}
+
+// getDeviceInventoryFieldValues reads one live batch for the fixed GPU membership.
+func getDeviceInventoryFieldValues(deviceIDs []uint) ([]dcgm.FieldValue_v2, error) {
+	if len(deviceIDs) == 0 {
+		return nil, nil
+	}
+
 	entities := make([]dcgm.GroupEntityPair, 0, len(deviceIDs))
 	for _, deviceID := range deviceIDs {
 		entities = append(entities, dcgm.GroupEntityPair{
@@ -227,22 +260,27 @@ func queryDeviceInventoryFields(deviceIDs []uint) ([]DeviceInfo, bool, error) {
 
 	values, err := getLatestInventoryValues(entities, deviceInventoryFields, dcgm.DCGM_FV_FLAG_LIVE_DATA)
 	if err != nil {
-		// GetSupportedDevices already established GPU presence. Preserve those
-		// entities even when the batched query cannot enrich their inventory.
-		devices, _ := deviceInventoryFromFieldValues(deviceIDs, nil)
-		return devices, false, fmt.Errorf("get live DCGM inventory fields: %w", err)
+		return nil, fmt.Errorf("get live DCGM inventory fields: %w", err)
 	}
-	devices, complete := deviceInventoryFromFieldValues(deviceIDs, values)
-	return devices, complete, nil
+	return values, nil
 }
 
 func deviceInventoryFromFieldValues(deviceIDs []uint, values []dcgm.FieldValue_v2) ([]DeviceInfo, bool) {
 	devices := make([]DeviceInfo, len(deviceIDs))
-	deviceIndex := make(map[uint]int, len(deviceIDs))
 	for index, deviceID := range deviceIDs {
 		devices[index].ID = deviceID
 		devices[index].MinorNumber = -1
-		deviceIndex[deviceID] = index
+	}
+	complete := updateDeviceInventoryFromFieldValues(devices, values)
+	return devices, complete
+}
+
+// updateDeviceInventoryFromFieldValues applies valid observations to an owned
+// snapshot. Missing, unsupported, and invalid fields retain their previous values.
+func updateDeviceInventoryFromFieldValues(devices []DeviceInfo, values []dcgm.FieldValue_v2) bool {
+	deviceIndex := make(map[uint]int, len(devices))
+	for index, device := range devices {
+		deviceIndex[device.ID] = index
 	}
 
 	complete := true
@@ -280,19 +318,19 @@ func deviceInventoryFromFieldValues(deviceIDs []uint, values []dcgm.FieldValue_v
 		device := &devices[index]
 		switch value.FieldID {
 		case dcgm.DCGM_FI_DEV_UUID:
-			device.UUID = inventoryString(value)
+			updateInventoryString(value, &device.UUID)
 		case dcgm.DCGM_FI_DEV_PCI_BUSID:
-			device.BusID = inventoryString(value)
+			updateInventoryString(value, &device.BusID)
 		case dcgm.DCGM_FI_DEV_BRAND:
-			device.Brand = inventoryString(value)
+			updateInventoryString(value, &device.Brand)
 		case dcgm.DCGM_FI_DEV_NAME:
-			device.Model = inventoryString(value)
+			updateInventoryString(value, &device.Model)
 		case dcgm.DCGM_FI_DEV_SERIAL:
-			device.Serial = inventoryString(value)
+			updateInventoryString(value, &device.Serial)
 		case dcgm.DCGM_FI_DEV_VBIOS_VERSION:
-			device.VBIOSVersion = inventoryString(value)
+			updateInventoryString(value, &device.VBIOSVersion)
 		case dcgm.DCGM_FI_DRIVER_VERSION:
-			device.DriverVersion = inventoryString(value)
+			updateInventoryString(value, &device.DriverVersion)
 		case dcgm.DCGM_FI_CUDA_DRIVER_VERSION:
 			if cudaDriverVersion, ok := positiveInventoryInt64(value); ok {
 				device.CUDADriverVersion = cudaDriverVersion
@@ -306,23 +344,57 @@ func deviceInventoryFromFieldValues(deviceIDs []uint, values []dcgm.FieldValue_v
 				device.ComputeCapability = computeCapability
 			}
 		case dcgm.DCGM_FI_DEV_FABRIC_CLUSTER_UUID:
-			device.FabricClusterUUID = inventoryString(value)
+			updateInventoryString(value, &device.FabricClusterUUID)
 		case dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID:
 			if cliqueID, ok := inventoryInt64(value); ok && cliqueID >= 0 && uint64(cliqueID) <= uint64(^uint32(0)) {
 				device.FabricCliqueID = uint32(cliqueID)
 				device.FabricCliqueIDValid = true
 			}
 		case dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER:
-			device.ChassisSerial = inventoryString(value)
+			updateInventoryString(value, &device.ChassisSerial)
+		case dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER:
+			if index, valid := inventoryPlatformValue(value); valid {
+				device.SlotNumber, device.SlotNumberValid = index, true
+			}
+		case dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX:
+			if index, valid := inventoryPlatformValue(value); valid {
+				device.TrayIndex, device.TrayIndexValid = index, true
+			}
+		case dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID:
+			if index, valid := inventoryPlatformValue(value); valid {
+				device.HostID, device.HostIDValid = index, true
+			}
+		case dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID:
+			if index, valid := inventoryPlatformValue(value); valid {
+				device.ModuleID, device.ModuleIDValid = index, true
+			}
+		case dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE:
+			if peerType, valid := inventoryPlatformValue(value); valid {
+				device.PeerType, device.PeerTypeValid = peerType, true
+			}
+		case dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID:
+			if guid := inventoryFabricGUID(value); guid != "" {
+				device.FabricGUID = guid
+			}
 		case dcgm.DCGM_FI_DEV_FB_TOTAL:
 			if framebufferTotal, ok := inventoryInt64(value); ok {
-				device.FramebufferMemoryBytes = framebufferMemoryBytes(framebufferTotal)
+				if bytes := framebufferMemoryBytes(framebufferTotal); bytes > 0 {
+					device.FramebufferMemoryBytes = bytes
+				}
 			}
 		}
 	}
 
-	return devices, complete
+	return complete
 }
+
+// updateInventoryString retains the last known value when a string is unavailable.
+func updateInventoryString(value *dcgm.FieldValue_v2, target *string) {
+	if text := inventoryString(value); text != "" {
+		*target = text
+	}
+}
+
 func inventoryString(value *dcgm.FieldValue_v2) string {
 	if value.FieldType != dcgm.DCGM_FT_STRING {
 		return ""
@@ -335,6 +407,27 @@ func inventoryInt64(value *dcgm.FieldValue_v2) (int64, bool) {
 		return 0, false
 	}
 	return value.Int64(), true
+}
+
+func inventoryPlatformValue(value *dcgm.FieldValue_v2) (uint32, bool) {
+	index, ok := inventoryInt64(value)
+	// NVML platform values are unsigned bytes; 0xff is an unavailable value.
+	if !ok || index < 0 || index >= 0xff {
+		return 0, false
+	}
+	return uint32(index), true
+}
+
+func inventoryFabricGUID(value *dcgm.FieldValue_v2) string {
+	guid := strings.ToLower(strings.TrimSpace(inventoryString(value)))
+	if !strings.HasPrefix(guid, "0x") || len(guid) < 3 || len(guid) > 18 {
+		return ""
+	}
+	id, err := strconv.ParseUint(guid[2:], 16, 64)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("0x%016x", id)
 }
 
 func positiveInventoryInt64(value *dcgm.FieldValue_v2) (int64, bool) {

@@ -227,6 +227,38 @@ func TestCSVConverter_Convert_MachineInfo(t *testing.T) {
 	assert.Contains(t, records, []string{"DCGM Version", "4.2.3"})
 }
 
+func TestCSVConverter_MachineInfoPlatformFields(t *testing.T) {
+	slot, tray, host, module := uint32(26), uint32(16), uint32(1), uint32(0)
+	unknownPeerType := uint32(7)
+	data := &collector.HealthData{MachineInfo: &machineinfo.MachineInfo{
+		GPUInfo: &apiv1.MachineGPUInfo{GPUs: []apiv1.MachineGPUInstance{
+			{UUID: "GPU-0", SlotNumber: &slot, TrayIndex: &tray, HostID: &host, ModuleID: &module, PeerType: &module, FabricGUID: "0xb74a5c8b016b6418"},
+			{UUID: "GPU-1", PeerType: &unknownPeerType},
+			{UUID: "GPU-2"},
+		}},
+	}}
+	dir := t.TempDir()
+	files, err := NewCSVConverter().Convert(data, dir, "platform")
+	require.NoError(t, err)
+	file, err := os.Open(filepath.Join(dir, files.MachineInfoFile))
+	require.NoError(t, err)
+	defer file.Close()
+	records, err := csv.NewReader(file).ReadAll()
+	require.NoError(t, err)
+	for _, row := range [][]string{
+		{"GPU 1 Slot Number", "26"}, {"GPU 1 Tray Index", "16"},
+		{"GPU 1 Host ID", "1"}, {"GPU 1 Module ID", "0"},
+		{"GPU 1 Peer Type", "0"}, {"GPU 2 Peer Type", "7"},
+		{"GPU 1 GPU Fabric GUID", "0xb74a5c8b016b6418"},
+	} {
+		assert.Contains(t, records, row)
+	}
+	for _, row := range records {
+		assert.NotContains(t, []string{"GPU 2 Slot Number", "GPU 2 Tray Index", "GPU 2 Host ID", "GPU 2 Module ID", "GPU 2 GPU Fabric GUID"}, row[0])
+		assert.NotEqual(t, "GPU 3 Peer Type", row[0])
+	}
+}
+
 func TestCSVConverter_Convert_EmptyData(t *testing.T) {
 	tmpDir := t.TempDir()
 	timestamp := "20251105_120000"

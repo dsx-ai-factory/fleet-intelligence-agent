@@ -97,6 +97,12 @@ type GPUDevice struct {
 	VBIOSVersion string
 	ChassisSN    string
 	GPUIndex     string
+	SlotNumber   *uint32
+	TrayIndex    *uint32
+	HostID       *uint32
+	PeerType     *uint32
+	ModuleID     *uint32
+	FabricGUID   string
 }
 
 type DiskInfo struct {

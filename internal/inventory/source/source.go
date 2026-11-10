@@ -105,22 +105,23 @@ func (s *machineInfoSource) Collect(ctx context.Context) (*inventory.Snapshot, e
 		if len(info.GPUInfo.GPUs) > 0 {
 			snap.Resources.GPUInfo.GPUs = make([]inventory.GPUDevice, 0, len(info.GPUInfo.GPUs))
 			for _, gpu := range info.GPUInfo.GPUs {
-				var cliqueID *uint32
-				if gpu.CliqueID != nil {
-					id := *gpu.CliqueID
-					cliqueID = &id
-				}
 				snap.Resources.GPUInfo.GPUs = append(snap.Resources.GPUInfo.GPUs, inventory.GPUDevice{
 					UUID:         gpu.UUID,
 					BusID:        gpu.BusID,
 					ClusterUUID:  gpu.ClusterUUID,
-					CliqueID:     cliqueID,
+					CliqueID:     cloneUint32(gpu.CliqueID),
 					SN:           gpu.SN,
 					MinorID:      gpu.MinorID,
 					BoardID:      int(gpu.BoardID),
 					VBIOSVersion: gpu.VBIOSVersion,
 					ChassisSN:    gpu.ChassisSN,
 					GPUIndex:     gpu.GPUIndex,
+					SlotNumber:   cloneUint32(gpu.SlotNumber),
+					TrayIndex:    cloneUint32(gpu.TrayIndex),
+					HostID:       cloneUint32(gpu.HostID),
+					PeerType:     cloneUint32(gpu.PeerType),
+					ModuleID:     cloneUint32(gpu.ModuleID),
+					FabricGUID:   gpu.FabricGUID,
 				})
 			}
 		}
@@ -158,4 +159,12 @@ func (s *machineInfoSource) Collect(ctx context.Context) (*inventory.Snapshot, e
 	}
 
 	return snap, nil
+}
+
+func cloneUint32(value *uint32) *uint32 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }

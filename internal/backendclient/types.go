@@ -97,6 +97,12 @@ type GPUDevice struct {
 	VBIOSVersion string  `json:"vbiosVersion"`
 	ChassisSN    string  `json:"chassisSN"`
 	GPUIndex     string  `json:"gpuIndex,omitempty"`
+	SlotNumber   *uint32 `json:"slotNumber,omitempty"`
+	TrayIndex    *uint32 `json:"trayIndex,omitempty"`
+	HostID       *uint32 `json:"hostID,omitempty"`
+	PeerType     *uint32 `json:"peerType,omitempty"`
+	ModuleID     *uint32 `json:"moduleID,omitempty"`
+	FabricGUID   string  `json:"fabricGUID,omitempty"`
 }
 
 type DiskInfo struct {
