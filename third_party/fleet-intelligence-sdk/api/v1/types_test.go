@@ -9,6 +9,67 @@ import (
 	"testing"
 )
 
+func TestMachineGPUInstancePlatformJSON(t *testing.T) {
+	zero := uint32(0)
+	slot, tray, host := uint32(26), uint32(16), uint32(1)
+	for _, guid := range []string{"0xb74a5c8b016b6418", "0x0000000000000001"} {
+		t.Run(guid, func(t *testing.T) {
+			gpu := MachineGPUInstance{
+				UUID: "GPU-123", SlotNumber: &slot, TrayIndex: &tray,
+				HostID: &host, ModuleID: &zero, FabricGUID: guid,
+			}
+			data, err := json.Marshal(gpu)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(data, &fields); err != nil {
+				t.Fatal(err)
+			}
+			for key, want := range map[string]string{
+				"slotNumber": "26", "trayIndex": "16", "hostID": "1",
+				"moduleID": "0", "fabricGUID": `"` + guid + `"`,
+			} {
+				if string(fields[key]) != want {
+					t.Errorf("JSON %s = %s, want %s", key, fields[key], want)
+				}
+			}
+			var decoded MachineGPUInstance
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if decoded.ModuleID == nil || *decoded.ModuleID != 0 || decoded.FabricGUID != guid {
+				t.Fatalf("zero module ID or GUID changed on round trip: %+v", decoded)
+			}
+		})
+	}
+	data, err := json.Marshal(MachineGPUInstance{UUID: "GPU-123"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != `{"uuid":"GPU-123"}` {
+		t.Fatalf("unavailable platform fields changed existing JSON: %s", data)
+	}
+}
+
+func TestMachineGPUInfoPlatformTable(t *testing.T) {
+	zero := uint32(0)
+	info := MachineGPUInfo{GPUs: []MachineGPUInstance{
+		{UUID: "GPU-123", ModuleID: &zero, FabricGUID: "0xb74a5c8b016b6418"},
+		{UUID: "GPU-456"},
+	}}
+	var buf bytes.Buffer
+	info.RenderTable(&buf)
+	for _, value := range []string{"SLOT NUMBER", "TRAY INDEX", "HOST ID", "MODULE ID", "GPU FABRIC GUID", "0xb74a5c8b016b6418", "GPU-456"} {
+		if !bytes.Contains(buf.Bytes(), []byte(value)) {
+			t.Errorf("missing %q from table: %s", value, buf.String())
+		}
+	}
+	if !bytes.Contains(buf.Bytes(), []byte(" 0 ")) {
+		t.Fatalf("reported zero module ID missing from table: %s", buf.String())
+	}
+}
+
 func TestHealthState_JSONIncludesIncidents(t *testing.T) {
 	state := HealthState{
 		Component: "accelerator-nvidia-dcgm-power",
@@ -298,7 +359,7 @@ func TestMachineGPUInfo_RenderTable(t *testing.T) {
 				},
 			},
 			wantContains:    []string{"UUID", "GPU INDEX", "SN", "MINOR ID", "GPU-abc123", "SN12345", "0"},
-			wantNotContains: []string{"BOARD ID"},
+			wantNotContains: []string{"BOARD ID", "SLOT NUMBER", "TRAY INDEX", "HOST ID", "MODULE ID", "GPU FABRIC GUID"},
 		},
 		{
 			name: "Multiple GPUs",

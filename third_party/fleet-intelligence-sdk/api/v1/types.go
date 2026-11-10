@@ -433,15 +433,29 @@ type MachineGPUInstance struct {
 	// ChassisSN is reported by the DCGM platform-info field.
 	// It is typically identical across GPUs on the same node, but is stored per GPU.
 	ChassisSN string `json:"chassisSN,omitempty"`
+
+	// Platform positions are optional so a valid zero differs from unavailable data.
+	// SlotNumber includes switch slots; TrayIndex counts compute slots only.
+	SlotNumber *uint32 `json:"slotNumber,omitempty"`
+	TrayIndex  *uint32 `json:"trayIndex,omitempty"`
+	HostID     *uint32 `json:"hostID,omitempty"`
+	ModuleID   *uint32 `json:"moduleID,omitempty"`
+
+	// FabricGUID is the platform-reported GPU GUID, preserved as a hexadecimal
+	// string independently of the GPU UUID and fabric cluster UUID.
+	FabricGUID string `json:"fabricGUID,omitempty"`
 }
 
 func (gi *MachineGPUInfo) RenderTable(wr io.Writer) {
 	if len(gi.GPUs) > 0 {
 		showBoardID := false
+		showPlatform := false
 		for _, gpu := range gi.GPUs {
 			if gpu.BoardID != 0 {
 				showBoardID = true
-				break
+			}
+			if gpu.SlotNumber != nil || gpu.TrayIndex != nil || gpu.HostID != nil || gpu.ModuleID != nil || gpu.FabricGUID != "" {
+				showPlatform = true
 			}
 		}
 
@@ -452,6 +466,9 @@ func (gi *MachineGPUInfo) RenderTable(wr io.Writer) {
 			header = append(header, "Board ID")
 		}
 		header = append(header, "VBIOS Version", "Chassis SN")
+		if showPlatform {
+			header = append(header, "Slot Number", "Tray Index", "Host ID", "Module ID", "GPU Fabric GUID")
+		}
 		table.SetHeader(header)
 
 		for _, gpu := range gi.GPUs {
@@ -473,6 +490,16 @@ func (gi *MachineGPUInfo) RenderTable(wr io.Writer) {
 				gpu.VBIOSVersion,
 				gpu.ChassisSN,
 			)
+			if showPlatform {
+				for _, index := range []*uint32{gpu.SlotNumber, gpu.TrayIndex, gpu.HostID, gpu.ModuleID} {
+					value := ""
+					if index != nil {
+						value = strconv.FormatUint(uint64(*index), 10)
+					}
+					row = append(row, value)
+				}
+				row = append(row, gpu.FabricGUID)
+			}
 			table.Append(row)
 		}
 

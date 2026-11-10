@@ -49,6 +49,19 @@ Shows detailed information about the machine:
 - Network interfaces
 - Hardware system UUID and the deprecated OS machine ID
 
+On supported platforms, each GPU also reports its chassis slot number
+(`slotNumber`, including switch slots), compute-tray index (`trayIndex`,
+excluding switches), host index within the slot (`hostID`), and GPU module
+position within the node (`moduleID`). These describe physical placement;
+the slot number is not automatically a rack-unit (U) position.
+
+`fabricGUID` preserves the platform-reported GPU fabric identifier as a
+lowercase hexadecimal string, such as `0xb74a5c8b016b6418`, independently of
+the GPU UUID. Unavailable platform fields are omitted from JSON inventory;
+reported numeric zero values are retained. Available fields appear in the
+machine-info table, CSV export, OTLP GPU information, and backend inventory
+requests. Support depends on the platform, driver, and DCGM version.
+
 ### View/Update Metadata
 
 ```bash

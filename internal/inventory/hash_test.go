@@ -155,3 +155,34 @@ func TestComputeHashRejectsNilSnapshot(t *testing.T) {
 	_, err := ComputeHash(nil)
 	require.ErrorContains(t, err, "inventory snapshot is nil")
 }
+
+func TestComputeHashDetectsGPUPlatformInfoChanges(t *testing.T) {
+	zero, one := uint32(0), uint32(1)
+	tests := []struct {
+		name   string
+		before GPUDevice
+		after  GPUDevice
+	}{
+		{"slot becomes known", GPUDevice{}, GPUDevice{SlotNumber: &zero}},
+		{"slot changes", GPUDevice{SlotNumber: &zero}, GPUDevice{SlotNumber: &one}},
+		{"tray becomes known", GPUDevice{}, GPUDevice{TrayIndex: &zero}},
+		{"tray changes", GPUDevice{TrayIndex: &zero}, GPUDevice{TrayIndex: &one}},
+		{"host becomes known", GPUDevice{}, GPUDevice{HostID: &zero}},
+		{"host changes", GPUDevice{HostID: &zero}, GPUDevice{HostID: &one}},
+		{"module becomes known", GPUDevice{}, GPUDevice{ModuleID: &zero}},
+		{"module changes", GPUDevice{ModuleID: &zero}, GPUDevice{ModuleID: &one}},
+		{"GUID becomes known", GPUDevice{}, GPUDevice{FabricGUID: "0x0000000000000001"}},
+		{"GUID changes", GPUDevice{FabricGUID: "0x0000000000000001"}, GPUDevice{FabricGUID: "0xb74a5c8b016b6418"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := &Snapshot{Resources: Resources{GPUInfo: GPUInfo{GPUs: []GPUDevice{tt.before}}}}
+			after := &Snapshot{Resources: Resources{GPUInfo: GPUInfo{GPUs: []GPUDevice{tt.after}}}}
+			beforeHash, err := ComputeHash(before)
+			require.NoError(t, err)
+			afterHash, err := ComputeHash(after)
+			require.NoError(t, err)
+			require.NotEqual(t, beforeHash, afterHash)
+		})
+	}
+}

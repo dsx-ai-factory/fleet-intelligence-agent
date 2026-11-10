@@ -148,6 +148,17 @@ func TestQueryDeviceInventoryUsesOneLiveBatch(t *testing.T) {
 		if !slices.Equal(fields, deviceInventoryFields) {
 			t.Fatalf("fields = %v, want %v", fields, deviceInventoryFields)
 		}
+		for _, required := range []dcgm.Short{
+			dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER,
+			dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX,
+			dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID,
+			dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID,
+			dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID,
+		} {
+			if !slices.Contains(fields, required) {
+				t.Fatalf("platform field %d missing from live inventory batch", required)
+			}
+		}
 		if flags != dcgm.DCGM_FV_FLAG_LIVE_DATA {
 			t.Fatalf("flags = %v, want DCGM_FV_FLAG_LIVE_DATA", flags)
 		}
@@ -341,6 +352,146 @@ func TestFramebufferMemoryBytes(t *testing.T) {
 				t.Fatalf("framebufferMemoryBytes(%d) = %d, want %d", tt.totalMiB, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDeviceInventoryPlatformFields(t *testing.T) {
+	devices, complete := deviceInventoryFromFieldValues([]uint{1, 2, 3}, []dcgm.FieldValue_v2{
+		int64Field(2, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, 0),
+		int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER, 26),
+		int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX, 16),
+		int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID, 1),
+		int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, 3),
+		stringField(1, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, "0xB74A5C8B016B6418"),
+		int64Field(2, dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER, 0),
+		int64Field(2, dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX, 0),
+		int64Field(2, dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID, 0),
+		stringField(2, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, "0x42"),
+	})
+	if !complete {
+		t.Fatal("valid platform inventory is incomplete")
+	}
+	want := []DeviceInfo{
+		{ID: 1, MinorNumber: -1, SlotNumber: 26, SlotNumberValid: true, TrayIndex: 16, TrayIndexValid: true,
+			HostID: 1, HostIDValid: true, ModuleID: 3, ModuleIDValid: true, FabricGUID: "0xb74a5c8b016b6418"},
+		{ID: 2, MinorNumber: -1, SlotNumberValid: true, TrayIndexValid: true,
+			HostIDValid: true, ModuleIDValid: true, FabricGUID: "0x0000000000000042"},
+		{ID: 3, MinorNumber: -1},
+	}
+	if !slices.Equal(devices, want) {
+		t.Fatalf("platform inventory = %+v, want %+v", devices, want)
+	}
+}
+
+func TestDeviceInventoryUnavailablePlatformFields(t *testing.T) {
+	fields := []dcgm.Short{
+		dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER,
+		dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX,
+		dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID,
+		dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID,
+		dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID,
+	}
+	for _, tc := range []struct {
+		name     string
+		status   int
+		sentinel bool
+		complete bool
+	}{
+		{name: "unsupported status", status: dcgm.DCGM_ST_NOT_SUPPORTED, complete: true},
+		{name: "unsupported sentinel", sentinel: true, complete: true},
+		{name: "transient status", status: dcgm.DCGM_ST_TIMEOUT},
+		{name: "blank sentinel", sentinel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			values := []dcgm.FieldValue_v2{stringField(1, dcgm.DCGM_FI_DEV_UUID, "GPU-1")}
+			for _, fieldID := range fields {
+				value := int64Field(1, fieldID, 1)
+				if fieldID == dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID {
+					value = stringField(1, fieldID, "0xb74a5c8b016b6418")
+				}
+				if tc.sentinel {
+					if fieldID == dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID {
+						sentinel := dcgm.DCGM_FT_STR_BLANK
+						if tc.complete {
+							sentinel = dcgm.DCGM_FT_STR_NOT_SUPPORTED
+						}
+						value = stringField(1, fieldID, sentinel)
+					} else {
+						sentinel := int64(dcgm.DCGM_FT_INT64_BLANK)
+						if tc.complete {
+							sentinel = dcgm.DCGM_FT_INT64_NOT_SUPPORTED
+						}
+						value = int64Field(1, fieldID, sentinel)
+					}
+				} else {
+					value.Status = tc.status
+				}
+				values = append(values, value)
+			}
+			devices, complete := deviceInventoryFromFieldValues([]uint{1}, values)
+			if complete != tc.complete {
+				t.Fatalf("complete = %v, want %v", complete, tc.complete)
+			}
+			if !slices.Equal(devices, []DeviceInfo{{ID: 1, UUID: "GPU-1", MinorNumber: -1}}) {
+				t.Fatalf("unavailable platform fields must not remove GPU or populate values: %+v", devices)
+			}
+		})
+	}
+}
+
+func TestInventoryPlatformIndexValidation(t *testing.T) {
+	for _, n := range []int64{-1, 255, 256, 1 << 32} {
+		value := int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, n)
+		if got, valid := inventoryPlatformIndex(&value); valid || got != 0 {
+			t.Errorf("platform index %d = (%d, %v), want (0, false)", n, got, valid)
+		}
+	}
+	value := stringField(1, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, "3")
+	if _, valid := inventoryPlatformIndex(&value); valid {
+		t.Fatal("wrong field type must not populate platform position")
+	}
+	value = int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, 254)
+	if got, valid := inventoryPlatformIndex(&value); !valid || got != 254 {
+		t.Fatal("valid unsigned-byte position must be retained")
+	}
+}
+
+func TestInventoryFabricGUIDValidation(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"0xb74a5c8b016b6418", "0xb74a5c8b016b6418"},
+		{" 0X00000000000000AB ", "0x00000000000000ab"},
+		{"0x1", "0x0000000000000001"},
+		{"0xffffffffffffffff", "0xffffffffffffffff"},
+		{"", ""}, {"N/A", ""}, {"b74a5c8b016b6418", ""}, {"0x", ""},
+		{"0x10000000000000000", ""}, {"0xnot-a-guid", ""}, {"0x-1", ""},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			value := stringField(1, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, tc.input)
+			if got := inventoryFabricGUID(&value); got != tc.want {
+				t.Fatalf("GUID = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	value := int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, 42)
+	if got := inventoryFabricGUID(&value); got != "" {
+		t.Fatal("numeric field must not be accepted as GUID")
+	}
+}
+
+func TestDeviceInventoryOwnsOptionalPlatformValues(t *testing.T) {
+	want := []DeviceInfo{{ID: 1, SlotNumber: 26, SlotNumberValid: true, TrayIndex: 16, TrayIndexValid: true,
+		HostID: 1, HostIDValid: true, ModuleID: 3, ModuleIDValid: true}}
+	devices := slices.Clone(want)
+	inventory := newDeviceInventory(devices, true)
+	devices[0] = DeviceInfo{}
+	first := inventory.snapshot()
+	if !slices.Equal(first, want) {
+		t.Fatal("input mutation changed cached platform positions")
+	}
+	first[0] = DeviceInfo{}
+	second := inventory.snapshot()
+	if !slices.Equal(second, want) {
+		t.Fatal("snapshot mutation changed cached platform positions")
 	}
 }
 

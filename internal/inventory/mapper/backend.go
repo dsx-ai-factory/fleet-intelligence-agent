@@ -31,22 +31,22 @@ func ToNodeUpsertRequest(s *inventory.Snapshot) *backendclient.NodeUpsertRequest
 	}
 	gpus := make([]backendclient.GPUDevice, 0, len(s.Resources.GPUInfo.GPUs))
 	for _, gpu := range s.Resources.GPUInfo.GPUs {
-		var cliqueID *uint32
-		if gpu.CliqueID != nil {
-			id := *gpu.CliqueID
-			cliqueID = &id
-		}
 		gpus = append(gpus, backendclient.GPUDevice{
 			UUID:         gpu.UUID,
 			BusID:        gpu.BusID,
 			ClusterUUID:  gpu.ClusterUUID,
-			CliqueID:     cliqueID,
+			CliqueID:     cloneUint32(gpu.CliqueID),
 			SN:           gpu.SN,
 			MinorID:      gpu.MinorID,
 			BoardID:      gpu.BoardID,
 			VBIOSVersion: gpu.VBIOSVersion,
 			ChassisSN:    gpu.ChassisSN,
 			GPUIndex:     gpu.GPUIndex,
+			SlotNumber:   cloneUint32(gpu.SlotNumber),
+			TrayIndex:    cloneUint32(gpu.TrayIndex),
+			HostID:       cloneUint32(gpu.HostID),
+			ModuleID:     cloneUint32(gpu.ModuleID),
+			FabricGUID:   gpu.FabricGUID,
 		})
 	}
 
@@ -131,6 +131,14 @@ func ToNodeUpsertRequest(s *inventory.Snapshot) *backendclient.NodeUpsertRequest
 			},
 		},
 	}
+}
+
+func cloneUint32(value *uint32) *uint32 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func cloneStringSlice(values []string) []string {

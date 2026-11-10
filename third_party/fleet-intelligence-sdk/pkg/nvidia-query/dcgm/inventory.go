@@ -20,6 +20,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 
 	dcgm "github.com/NVIDIA/go-dcgm/pkg/dcgm"
@@ -48,6 +50,15 @@ type DeviceInfo struct {
 	FabricCliqueID         uint32
 	FabricCliqueIDValid    bool
 	ChassisSerial          string
+	SlotNumber             uint32
+	SlotNumberValid        bool
+	TrayIndex              uint32
+	TrayIndexValid         bool
+	HostID                 uint32
+	HostIDValid            bool
+	ModuleID               uint32
+	ModuleIDValid          bool
+	FabricGUID             string
 	FramebufferMemoryBytes uint64
 }
 
@@ -65,6 +76,11 @@ var deviceInventoryFields = []dcgm.Short{
 	dcgm.DCGM_FI_DEV_FABRIC_CLUSTER_UUID,
 	dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID,
 	dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER,
+	dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER,
+	dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX,
+	dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID,
+	dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID,
+	dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID,
 	dcgm.DCGM_FI_DEV_FB_TOTAL,
 }
 
@@ -314,6 +330,16 @@ func deviceInventoryFromFieldValues(deviceIDs []uint, values []dcgm.FieldValue_v
 			}
 		case dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER:
 			device.ChassisSerial = inventoryString(value)
+		case dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER:
+			device.SlotNumber, device.SlotNumberValid = inventoryPlatformIndex(value)
+		case dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX:
+			device.TrayIndex, device.TrayIndexValid = inventoryPlatformIndex(value)
+		case dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID:
+			device.HostID, device.HostIDValid = inventoryPlatformIndex(value)
+		case dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID:
+			device.ModuleID, device.ModuleIDValid = inventoryPlatformIndex(value)
+		case dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID:
+			device.FabricGUID = inventoryFabricGUID(value)
 		case dcgm.DCGM_FI_DEV_FB_TOTAL:
 			if framebufferTotal, ok := inventoryInt64(value); ok {
 				device.FramebufferMemoryBytes = framebufferMemoryBytes(framebufferTotal)
@@ -335,6 +361,27 @@ func inventoryInt64(value *dcgm.FieldValue_v2) (int64, bool) {
 		return 0, false
 	}
 	return value.Int64(), true
+}
+
+func inventoryPlatformIndex(value *dcgm.FieldValue_v2) (uint32, bool) {
+	index, ok := inventoryInt64(value)
+	// NVML platform positions are unsigned bytes; 0xff is an unavailable value.
+	if !ok || index < 0 || index >= 0xff {
+		return 0, false
+	}
+	return uint32(index), true
+}
+
+func inventoryFabricGUID(value *dcgm.FieldValue_v2) string {
+	guid := strings.ToLower(strings.TrimSpace(inventoryString(value)))
+	if !strings.HasPrefix(guid, "0x") || len(guid) < 3 || len(guid) > 18 {
+		return ""
+	}
+	id, err := strconv.ParseUint(guid[2:], 16, 64)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("0x%016x", id)
 }
 
 func positiveInventoryInt64(value *dcgm.FieldValue_v2) (int64, bool) {

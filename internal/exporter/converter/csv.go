@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -367,6 +368,22 @@ func (c *csvConverter) writeMachineInfoCSV(outputDir, filename string, data *col
 				[]string{prefix + " VBIOS Version", gpu.VBIOSVersion},
 				[]string{prefix + " Chassis SN", gpu.ChassisSN},
 			)
+			for _, field := range []struct {
+				name  string
+				value *uint32
+			}{
+				{"Slot Number", gpu.SlotNumber},
+				{"Tray Index", gpu.TrayIndex},
+				{"Host ID", gpu.HostID},
+				{"Module ID", gpu.ModuleID},
+			} {
+				if field.value != nil {
+					records = append(records, []string{prefix + " " + field.name, strconv.FormatUint(uint64(*field.value), 10)})
+				}
+			}
+			if gpu.FabricGUID != "" {
+				records = append(records, []string{prefix + " GPU Fabric GUID", gpu.FabricGUID})
+			}
 		}
 	}
 
