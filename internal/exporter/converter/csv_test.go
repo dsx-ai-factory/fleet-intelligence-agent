@@ -229,10 +229,12 @@ func TestCSVConverter_Convert_MachineInfo(t *testing.T) {
 
 func TestCSVConverter_MachineInfoPlatformFields(t *testing.T) {
 	slot, tray, host, module := uint32(26), uint32(16), uint32(1), uint32(0)
+	unknownPeerType := uint32(7)
 	data := &collector.HealthData{MachineInfo: &machineinfo.MachineInfo{
 		GPUInfo: &apiv1.MachineGPUInfo{GPUs: []apiv1.MachineGPUInstance{
-			{UUID: "GPU-0", SlotNumber: &slot, TrayIndex: &tray, HostID: &host, ModuleID: &module, FabricGUID: "0xb74a5c8b016b6418"},
-			{UUID: "GPU-1"},
+			{UUID: "GPU-0", SlotNumber: &slot, TrayIndex: &tray, HostID: &host, ModuleID: &module, PeerType: &module, FabricGUID: "0xb74a5c8b016b6418"},
+			{UUID: "GPU-1", PeerType: &unknownPeerType},
+			{UUID: "GPU-2"},
 		}},
 	}}
 	dir := t.TempDir()
@@ -246,12 +248,14 @@ func TestCSVConverter_MachineInfoPlatformFields(t *testing.T) {
 	for _, row := range [][]string{
 		{"GPU 1 Slot Number", "26"}, {"GPU 1 Tray Index", "16"},
 		{"GPU 1 Host ID", "1"}, {"GPU 1 Module ID", "0"},
+		{"GPU 1 Peer Type", "0"}, {"GPU 2 Peer Type", "7"},
 		{"GPU 1 GPU Fabric GUID", "0xb74a5c8b016b6418"},
 	} {
 		assert.Contains(t, records, row)
 	}
 	for _, row := range records {
 		assert.NotContains(t, []string{"GPU 2 Slot Number", "GPU 2 Tray Index", "GPU 2 Host ID", "GPU 2 Module ID", "GPU 2 GPU Fabric GUID"}, row[0])
+		assert.NotEqual(t, "GPU 3 Peer Type", row[0])
 	}
 }
 

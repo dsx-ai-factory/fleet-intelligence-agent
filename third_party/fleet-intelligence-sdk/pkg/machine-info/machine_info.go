@@ -374,10 +374,11 @@ func GetMachineGPUInfo(devices []nvidiadcgm.DeviceInfo) (*apiv1.MachineGPUInfo, 
 			BusID:        strings.TrimSpace(dev.BusID),
 			VBIOSVersion: strings.TrimSpace(dev.VBIOSVersion),
 			ChassisSN:    strings.TrimSpace(dev.ChassisSerial),
-			SlotNumber:   gpuPlatformIndex(dev.SlotNumber, dev.SlotNumberValid),
-			TrayIndex:    gpuPlatformIndex(dev.TrayIndex, dev.TrayIndexValid),
-			HostID:       gpuPlatformIndex(dev.HostID, dev.HostIDValid),
-			ModuleID:     gpuPlatformIndex(dev.ModuleID, dev.ModuleIDValid),
+			SlotNumber:   gpuPlatformValue(dev.SlotNumber, dev.SlotNumberValid),
+			TrayIndex:    gpuPlatformValue(dev.TrayIndex, dev.TrayIndexValid),
+			HostID:       gpuPlatformValue(dev.HostID, dev.HostIDValid),
+			ModuleID:     gpuPlatformValue(dev.ModuleID, dev.ModuleIDValid),
+			PeerType:     gpuPlatformValue(dev.PeerType, dev.PeerTypeValid),
 			FabricGUID:   dev.FabricGUID,
 		})
 	}
@@ -385,7 +386,7 @@ func GetMachineGPUInfo(devices []nvidiadcgm.DeviceInfo) (*apiv1.MachineGPUInfo, 
 	return info, driverVersion, cudaVersion, nil
 }
 
-func gpuPlatformIndex(value uint32, valid bool) *uint32 {
+func gpuPlatformValue(value uint32, valid bool) *uint32 {
 	if !valid {
 		return nil
 	}

@@ -441,6 +441,10 @@ type MachineGPUInstance struct {
 	HostID     *uint32 `json:"hostID,omitempty"`
 	ModuleID   *uint32 `json:"moduleID,omitempty"`
 
+	// PeerType is the raw platform-reported NVLink peer connection type.
+	// Preserve unknown codes and distinguish a reported zero from unavailable data.
+	PeerType *uint32 `json:"peerType,omitempty"`
+
 	// FabricGUID is the platform-reported GPU GUID, preserved as a hexadecimal
 	// string independently of the GPU UUID and fabric cluster UUID.
 	FabricGUID string `json:"fabricGUID,omitempty"`
@@ -454,7 +458,7 @@ func (gi *MachineGPUInfo) RenderTable(wr io.Writer) {
 			if gpu.BoardID != 0 {
 				showBoardID = true
 			}
-			if gpu.SlotNumber != nil || gpu.TrayIndex != nil || gpu.HostID != nil || gpu.ModuleID != nil || gpu.FabricGUID != "" {
+			if gpu.SlotNumber != nil || gpu.TrayIndex != nil || gpu.HostID != nil || gpu.ModuleID != nil || gpu.PeerType != nil || gpu.FabricGUID != "" {
 				showPlatform = true
 			}
 		}
@@ -467,7 +471,7 @@ func (gi *MachineGPUInfo) RenderTable(wr io.Writer) {
 		}
 		header = append(header, "VBIOS Version", "Chassis SN")
 		if showPlatform {
-			header = append(header, "Slot Number", "Tray Index", "Host ID", "Module ID", "GPU Fabric GUID")
+			header = append(header, "Slot Number", "Tray Index", "Host ID", "Peer Type", "Module ID", "GPU Fabric GUID")
 		}
 		table.SetHeader(header)
 
@@ -491,10 +495,10 @@ func (gi *MachineGPUInfo) RenderTable(wr io.Writer) {
 				gpu.ChassisSN,
 			)
 			if showPlatform {
-				for _, index := range []*uint32{gpu.SlotNumber, gpu.TrayIndex, gpu.HostID, gpu.ModuleID} {
+				for _, platformValue := range []*uint32{gpu.SlotNumber, gpu.TrayIndex, gpu.HostID, gpu.PeerType, gpu.ModuleID} {
 					value := ""
-					if index != nil {
-						value = strconv.FormatUint(uint64(*index), 10)
+					if platformValue != nil {
+						value = strconv.FormatUint(uint64(*platformValue), 10)
 					}
 					row = append(row, value)
 				}

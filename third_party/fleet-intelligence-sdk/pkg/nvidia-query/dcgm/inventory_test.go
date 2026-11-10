@@ -153,6 +153,7 @@ func TestQueryDeviceInventoryUsesOneLiveBatch(t *testing.T) {
 			dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX,
 			dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID,
 			dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID,
+			dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE,
 			dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID,
 		} {
 			if !slices.Contains(fields, required) {
@@ -356,27 +357,32 @@ func TestFramebufferMemoryBytes(t *testing.T) {
 }
 
 func TestDeviceInventoryPlatformFields(t *testing.T) {
-	devices, complete := deviceInventoryFromFieldValues([]uint{1, 2, 3}, []dcgm.FieldValue_v2{
+	devices, complete := deviceInventoryFromFieldValues([]uint{1, 2, 3, 4}, []dcgm.FieldValue_v2{
 		int64Field(2, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, 0),
 		int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER, 26),
 		int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX, 16),
 		int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID, 1),
 		int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, 3),
+		int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE, 1),
 		stringField(1, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, "0xB74A5C8B016B6418"),
 		int64Field(2, dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER, 0),
 		int64Field(2, dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX, 0),
 		int64Field(2, dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID, 0),
+		int64Field(2, dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE, 0),
 		stringField(2, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, "0x42"),
+		int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE, 7),
 	})
 	if !complete {
 		t.Fatal("valid platform inventory is incomplete")
 	}
 	want := []DeviceInfo{
 		{ID: 1, MinorNumber: -1, SlotNumber: 26, SlotNumberValid: true, TrayIndex: 16, TrayIndexValid: true,
-			HostID: 1, HostIDValid: true, ModuleID: 3, ModuleIDValid: true, FabricGUID: "0xb74a5c8b016b6418"},
+			HostID: 1, HostIDValid: true, ModuleID: 3, ModuleIDValid: true, PeerType: 1, PeerTypeValid: true,
+			FabricGUID: "0xb74a5c8b016b6418"},
 		{ID: 2, MinorNumber: -1, SlotNumberValid: true, TrayIndexValid: true,
-			HostIDValid: true, ModuleIDValid: true, FabricGUID: "0x0000000000000042"},
-		{ID: 3, MinorNumber: -1},
+			HostIDValid: true, ModuleIDValid: true, PeerTypeValid: true, FabricGUID: "0x0000000000000042"},
+		{ID: 3, MinorNumber: -1, PeerType: 7, PeerTypeValid: true},
+		{ID: 4, MinorNumber: -1},
 	}
 	if !slices.Equal(devices, want) {
 		t.Fatalf("platform inventory = %+v, want %+v", devices, want)
@@ -389,6 +395,7 @@ func TestDeviceInventoryUnavailablePlatformFields(t *testing.T) {
 		dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX,
 		dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID,
 		dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID,
+		dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE,
 		dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID,
 	}
 	for _, tc := range []struct {
@@ -439,19 +446,19 @@ func TestDeviceInventoryUnavailablePlatformFields(t *testing.T) {
 	}
 }
 
-func TestInventoryPlatformIndexValidation(t *testing.T) {
+func TestInventoryPlatformValueValidation(t *testing.T) {
 	for _, n := range []int64{-1, 255, 256, 1 << 32} {
 		value := int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, n)
-		if got, valid := inventoryPlatformIndex(&value); valid || got != 0 {
+		if got, valid := inventoryPlatformValue(&value); valid || got != 0 {
 			t.Errorf("platform index %d = (%d, %v), want (0, false)", n, got, valid)
 		}
 	}
 	value := stringField(1, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, "3")
-	if _, valid := inventoryPlatformIndex(&value); valid {
+	if _, valid := inventoryPlatformValue(&value); valid {
 		t.Fatal("wrong field type must not populate platform position")
 	}
 	value = int64Field(1, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, 254)
-	if got, valid := inventoryPlatformIndex(&value); !valid || got != 254 {
+	if got, valid := inventoryPlatformValue(&value); !valid || got != 254 {
 		t.Fatal("valid unsigned-byte position must be retained")
 	}
 }
@@ -524,17 +531,20 @@ func TestDeviceInventoryEnrichmentPublishesPartialRecovery(t *testing.T) {
 				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX, 16),
 				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID, 0),
 				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, 3),
+				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE, 1),
 				stringField(3, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, dcgm.DCGM_FT_STR_BLANK),
 			}, nil
 		case 2:
 			return []dcgm.FieldValue_v2{
 				stringField(3, dcgm.DCGM_FI_DEV_UUID, dcgm.DCGM_FT_STR_BLANK),
+				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE, dcgm.DCGM_FT_INT64_BLANK),
 				stringField(3, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, "0xb74a5c8b016b6418"),
 			}, nil
 		case 3:
 			return []dcgm.FieldValue_v2{
 				stringField(7, dcgm.DCGM_FI_DEV_UUID, "GPU-7"),
 				stringField(3, dcgm.DCGM_FI_DEV_UUID, "GPU-3"),
+				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE, 0),
 				stringField(3, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, "0xb74a5c8b016b6418"),
 			}, nil
 		default:
@@ -549,7 +559,8 @@ func TestDeviceInventoryEnrichmentPublishesPartialRecovery(t *testing.T) {
 	want := []DeviceInfo{
 		{ID: 7, UUID: "GPU-7", MinorNumber: -1},
 		{ID: 3, UUID: "GPU-3", MinorNumber: -1, SlotNumber: 26, SlotNumberValid: true,
-			TrayIndex: 16, TrayIndexValid: true, HostIDValid: true, ModuleID: 3, ModuleIDValid: true},
+			TrayIndex: 16, TrayIndexValid: true, HostIDValid: true, ModuleID: 3, ModuleIDValid: true,
+			PeerType: 1, PeerTypeValid: true},
 	}
 	for query := 1; query <= 4; query++ {
 		if err := inventory.enrichIfIncomplete(); err != nil {
@@ -557,6 +568,9 @@ func TestDeviceInventoryEnrichmentPublishesPartialRecovery(t *testing.T) {
 		}
 		if query >= 2 {
 			want[1].FabricGUID = "0xb74a5c8b016b6418"
+		}
+		if query >= 3 {
+			want[1].PeerType = 0
 		}
 		if got := inventory.snapshot(); !slices.Equal(got, want) {
 			t.Fatalf("enrichment %d snapshot = %+v, want recovered inventory %+v", query, got, want)
@@ -581,6 +595,7 @@ func TestDeviceInventoryEnrichmentRetainsKnownValuesOnUnavailableFields(t *testi
 		ChassisSerial: "chassis-3", SlotNumber: 26, SlotNumberValid: true,
 		TrayIndex: 16, TrayIndexValid: true, HostID: 1, HostIDValid: true,
 		ModuleID: 3, ModuleIDValid: true, FabricGUID: "0xb74a5c8b016b6418",
+		PeerType: 7, PeerTypeValid: true,
 		FramebufferMemoryBytes: 80 * 1024 * 1024 * 1024,
 	}}
 	inventory := newDeviceInventory(want, false)
@@ -606,6 +621,7 @@ func TestDeviceInventoryEnrichmentRetainsKnownValuesOnUnavailableFields(t *testi
 			unavailableTray,
 			int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID, dcgm.DCGM_FT_INT64_BLANK),
 			int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, 255),
+			stringField(3, dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE, "wrong type"),
 			stringField(3, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, "invalid"),
 			int64Field(3, dcgm.DCGM_FI_DEV_FB_TOTAL, -1),
 		}, nil

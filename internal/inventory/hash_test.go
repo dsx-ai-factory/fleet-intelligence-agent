@@ -158,6 +158,7 @@ func TestComputeHashRejectsNilSnapshot(t *testing.T) {
 
 func TestComputeHashDetectsGPUPlatformInfoChanges(t *testing.T) {
 	zero, one := uint32(0), uint32(1)
+	unknownPeerType := uint32(7)
 	tests := []struct {
 		name   string
 		before GPUDevice
@@ -169,6 +170,9 @@ func TestComputeHashDetectsGPUPlatformInfoChanges(t *testing.T) {
 		{"tray changes", GPUDevice{TrayIndex: &zero}, GPUDevice{TrayIndex: &one}},
 		{"host becomes known", GPUDevice{}, GPUDevice{HostID: &zero}},
 		{"host changes", GPUDevice{HostID: &zero}, GPUDevice{HostID: &one}},
+		{"peer type becomes known", GPUDevice{}, GPUDevice{PeerType: &zero}},
+		{"peer type changes", GPUDevice{PeerType: &zero}, GPUDevice{PeerType: &one}},
+		{"unknown peer type retained", GPUDevice{PeerType: &one}, GPUDevice{PeerType: &unknownPeerType}},
 		{"module becomes known", GPUDevice{}, GPUDevice{ModuleID: &zero}},
 		{"module changes", GPUDevice{ModuleID: &zero}, GPUDevice{ModuleID: &one}},
 		{"GUID becomes known", GPUDevice{}, GPUDevice{FabricGUID: "0x0000000000000001"}},

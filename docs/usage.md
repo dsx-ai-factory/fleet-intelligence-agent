@@ -55,6 +55,11 @@ excluding switches), host index within the slot (`hostID`), and GPU module
 position within the node (`moduleID`). These describe physical placement;
 the slot number is not automatically a rack-unit (U) position.
 
+The optional `peerType` field reports the platform's NVLink peer connection
+type, such as switch connected or direct connected. It preserves the raw
+numeric code, including unrecognized codes, as connection-type metadata.
+It does not identify specific peer devices or indicate current link health.
+
 `fabricGUID` preserves the platform-reported GPU fabric identifier as a
 lowercase hexadecimal string, such as `0xb74a5c8b016b6418`, independently of
 the GPU UUID. Unavailable platform fields are omitted from JSON inventory;

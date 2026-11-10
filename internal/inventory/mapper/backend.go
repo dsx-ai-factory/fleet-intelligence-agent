@@ -45,6 +45,7 @@ func ToNodeUpsertRequest(s *inventory.Snapshot) *backendclient.NodeUpsertRequest
 			SlotNumber:   cloneUint32(gpu.SlotNumber),
 			TrayIndex:    cloneUint32(gpu.TrayIndex),
 			HostID:       cloneUint32(gpu.HostID),
+			PeerType:     cloneUint32(gpu.PeerType),
 			ModuleID:     cloneUint32(gpu.ModuleID),
 			FabricGUID:   gpu.FabricGUID,
 		})

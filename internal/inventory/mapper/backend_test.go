@@ -192,16 +192,18 @@ func TestToNodeUpsertRequest(t *testing.T) {
 
 func TestToNodeUpsertRequestGPUPlatformInfoJSON(t *testing.T) {
 	slot, tray, host, module, zero := uint32(26), uint32(16), uint32(1), uint32(3), uint32(0)
+	peerType, unknownPeerType := uint32(1), uint32(7)
 	gpus := []inventory.GPUDevice{
 		{
 			UUID: "GPU-1", SlotNumber: &slot, TrayIndex: &tray,
-			HostID: &host, ModuleID: &module, FabricGUID: "0xb74a5c8b016b6418",
+			HostID: &host, PeerType: &peerType, ModuleID: &module, FabricGUID: "0xb74a5c8b016b6418",
 		},
 		{
 			UUID: "GPU-2", SlotNumber: &zero, TrayIndex: &zero,
-			HostID: &zero, ModuleID: &zero, FabricGUID: "0x0000000000000001",
+			HostID: &zero, PeerType: &zero, ModuleID: &zero, FabricGUID: "0x0000000000000001",
 		},
 		{UUID: "GPU-3"},
+		{UUID: "GPU-4", PeerType: &unknownPeerType},
 	}
 	req := ToNodeUpsertRequest(&inventory.Snapshot{
 		Resources: inventory.Resources{GPUInfo: inventory.GPUInfo{GPUs: gpus}},
@@ -210,6 +212,7 @@ func TestToNodeUpsertRequestGPUPlatformInfoJSON(t *testing.T) {
 		require.NotSame(t, gpus[index].SlotNumber, gpu.SlotNumber)
 		require.NotSame(t, gpus[index].TrayIndex, gpu.TrayIndex)
 		require.NotSame(t, gpus[index].HostID, gpu.HostID)
+		require.NotSame(t, gpus[index].PeerType, gpu.PeerType)
 		require.NotSame(t, gpus[index].ModuleID, gpu.ModuleID)
 	}
 
@@ -221,19 +224,25 @@ func TestToNodeUpsertRequestGPUPlatformInfoJSON(t *testing.T) {
 	require.Equal(t, uint32(26), *decoded[0].SlotNumber)
 	require.Equal(t, uint32(16), *decoded[0].TrayIndex)
 	require.Equal(t, uint32(1), *decoded[0].HostID)
+	require.Equal(t, uint32(1), *decoded[0].PeerType)
+	require.Equal(t, uint32(7), *decoded[3].PeerType)
 	require.Equal(t, uint32(3), *decoded[0].ModuleID)
 	require.Equal(t, "0xb74a5c8b016b6418", decoded[0].FabricGUID)
 	require.Equal(t, "0x0000000000000001", decoded[1].FabricGUID)
 
 	var wire []map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(payload, &wire))
-	for _, field := range []string{"slotNumber", "trayIndex", "hostID", "moduleID"} {
+	for _, field := range []string{"slotNumber", "trayIndex", "hostID", "peerType", "moduleID"} {
 		require.Equal(t, json.RawMessage("0"), wire[1][field], field)
 		require.NotContains(t, wire[2], field)
 	}
 	require.NotContains(t, wire[2], "fabricGUID")
 	module = 2
 	zero = 4
+	peerType, unknownPeerType = 2, 8
 	require.Equal(t, uint32(3), *req.Resources.GPUInfo.GPUs[0].ModuleID)
 	require.Equal(t, uint32(0), *req.Resources.GPUInfo.GPUs[1].ModuleID)
+	require.Equal(t, uint32(1), *req.Resources.GPUInfo.GPUs[0].PeerType)
+	require.Equal(t, uint32(0), *req.Resources.GPUInfo.GPUs[1].PeerType)
+	require.Equal(t, uint32(7), *req.Resources.GPUInfo.GPUs[3].PeerType)
 }

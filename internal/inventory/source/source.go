@@ -119,6 +119,7 @@ func (s *machineInfoSource) Collect(ctx context.Context) (*inventory.Snapshot, e
 					SlotNumber:   cloneUint32(gpu.SlotNumber),
 					TrayIndex:    cloneUint32(gpu.TrayIndex),
 					HostID:       cloneUint32(gpu.HostID),
+					PeerType:     cloneUint32(gpu.PeerType),
 					ModuleID:     cloneUint32(gpu.ModuleID),
 					FabricGUID:   gpu.FabricGUID,
 				})

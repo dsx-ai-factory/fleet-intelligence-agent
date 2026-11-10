@@ -58,6 +58,8 @@ type DeviceInfo struct {
 	HostIDValid            bool
 	ModuleID               uint32
 	ModuleIDValid          bool
+	PeerType               uint32
+	PeerTypeValid          bool
 	FabricGUID             string
 	FramebufferMemoryBytes uint64
 }
@@ -80,6 +82,7 @@ var deviceInventoryFields = []dcgm.Short{
 	dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX,
 	dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID,
 	dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID,
+	dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE,
 	dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID,
 	dcgm.DCGM_FI_DEV_FB_TOTAL,
 }
@@ -350,20 +353,24 @@ func updateDeviceInventoryFromFieldValues(devices []DeviceInfo, values []dcgm.Fi
 		case dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER:
 			updateInventoryString(value, &device.ChassisSerial)
 		case dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER:
-			if index, valid := inventoryPlatformIndex(value); valid {
+			if index, valid := inventoryPlatformValue(value); valid {
 				device.SlotNumber, device.SlotNumberValid = index, true
 			}
 		case dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX:
-			if index, valid := inventoryPlatformIndex(value); valid {
+			if index, valid := inventoryPlatformValue(value); valid {
 				device.TrayIndex, device.TrayIndexValid = index, true
 			}
 		case dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID:
-			if index, valid := inventoryPlatformIndex(value); valid {
+			if index, valid := inventoryPlatformValue(value); valid {
 				device.HostID, device.HostIDValid = index, true
 			}
 		case dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID:
-			if index, valid := inventoryPlatformIndex(value); valid {
+			if index, valid := inventoryPlatformValue(value); valid {
 				device.ModuleID, device.ModuleIDValid = index, true
+			}
+		case dcgm.DCGM_FI_DEV_PLATFORM_PEER_TYPE:
+			if peerType, valid := inventoryPlatformValue(value); valid {
+				device.PeerType, device.PeerTypeValid = peerType, true
 			}
 		case dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID:
 			if guid := inventoryFabricGUID(value); guid != "" {
@@ -402,9 +409,9 @@ func inventoryInt64(value *dcgm.FieldValue_v2) (int64, bool) {
 	return value.Int64(), true
 }
 
-func inventoryPlatformIndex(value *dcgm.FieldValue_v2) (uint32, bool) {
+func inventoryPlatformValue(value *dcgm.FieldValue_v2) (uint32, bool) {
 	index, ok := inventoryInt64(value)
-	// NVML platform positions are unsigned bytes; 0xff is an unavailable value.
+	// NVML platform values are unsigned bytes; 0xff is an unavailable value.
 	if !ok || index < 0 || index >= 0xff {
 		return 0, false
 	}

@@ -375,6 +375,7 @@ func (c *csvConverter) writeMachineInfoCSV(outputDir, filename string, data *col
 				{"Slot Number", gpu.SlotNumber},
 				{"Tray Index", gpu.TrayIndex},
 				{"Host ID", gpu.HostID},
+				{"Peer Type", gpu.PeerType},
 				{"Module ID", gpu.ModuleID},
 			} {
 				if field.value != nil {
