@@ -495,6 +495,144 @@ func TestDeviceInventoryOwnsOptionalPlatformValues(t *testing.T) {
 	}
 }
 
+func TestDeviceInventoryEnrichmentPublishesPartialRecovery(t *testing.T) {
+	originalGetSupportedDevices := getSupportedDevicesForInventory
+	originalGetLatestValues := getLatestInventoryValues
+	t.Cleanup(func() {
+		getSupportedDevicesForInventory = originalGetSupportedDevices
+		getLatestInventoryValues = originalGetLatestValues
+	})
+	getSupportedDevicesForInventory = func() ([]uint, error) {
+		t.Fatal("inventory enrichment must not re-enumerate membership")
+		return nil, nil
+	}
+	queryCount := 0
+	getLatestInventoryValues = func(entities []dcgm.GroupEntityPair, _ []dcgm.Short, _ uint) ([]dcgm.FieldValue_v2, error) {
+		wantEntities := []dcgm.GroupEntityPair{
+			{EntityGroupId: dcgm.FE_GPU, EntityId: 7},
+			{EntityGroupId: dcgm.FE_GPU, EntityId: 3},
+		}
+		if !slices.Equal(entities, wantEntities) {
+			t.Fatalf("queried entities = %+v, want fixed membership %+v", entities, wantEntities)
+		}
+		queryCount++
+		switch queryCount {
+		case 1:
+			return []dcgm.FieldValue_v2{
+				stringField(3, dcgm.DCGM_FI_DEV_UUID, "GPU-3"),
+				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER, 26),
+				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX, 16),
+				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID, 0),
+				int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, 3),
+				stringField(3, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, dcgm.DCGM_FT_STR_BLANK),
+			}, nil
+		case 2:
+			return []dcgm.FieldValue_v2{
+				stringField(3, dcgm.DCGM_FI_DEV_UUID, dcgm.DCGM_FT_STR_BLANK),
+				stringField(3, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, "0xb74a5c8b016b6418"),
+			}, nil
+		case 3:
+			return []dcgm.FieldValue_v2{
+				stringField(7, dcgm.DCGM_FI_DEV_UUID, "GPU-7"),
+				stringField(3, dcgm.DCGM_FI_DEV_UUID, "GPU-3"),
+				stringField(3, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, "0xb74a5c8b016b6418"),
+			}, nil
+		default:
+			t.Fatal("complete inventory must stop enrichment queries")
+			return nil, nil
+		}
+	}
+	inventory := newDeviceInventory([]DeviceInfo{
+		{ID: 7, UUID: "GPU-7", MinorNumber: -1},
+		{ID: 3, MinorNumber: -1},
+	}, false)
+	want := []DeviceInfo{
+		{ID: 7, UUID: "GPU-7", MinorNumber: -1},
+		{ID: 3, UUID: "GPU-3", MinorNumber: -1, SlotNumber: 26, SlotNumberValid: true,
+			TrayIndex: 16, TrayIndexValid: true, HostIDValid: true, ModuleID: 3, ModuleIDValid: true},
+	}
+	for query := 1; query <= 4; query++ {
+		if err := inventory.enrichIfIncomplete(); err != nil {
+			t.Fatalf("enrichment %d failed: %v", query, err)
+		}
+		if query >= 2 {
+			want[1].FabricGUID = "0xb74a5c8b016b6418"
+		}
+		if got := inventory.snapshot(); !slices.Equal(got, want) {
+			t.Fatalf("enrichment %d snapshot = %+v, want recovered inventory %+v", query, got, want)
+		}
+		if got, wantComplete := inventory.complete, query >= 3; got != wantComplete {
+			t.Fatalf("enrichment %d complete = %v, want %v", query, got, wantComplete)
+		}
+	}
+	if queryCount != 3 {
+		t.Fatalf("query count = %d, want 3", queryCount)
+	}
+}
+
+func TestDeviceInventoryEnrichmentRetainsKnownValuesOnUnavailableFields(t *testing.T) {
+	originalGetLatestValues := getLatestInventoryValues
+	t.Cleanup(func() { getLatestInventoryValues = originalGetLatestValues })
+	want := []DeviceInfo{{
+		ID: 3, UUID: "GPU-3", BusID: "0000:17:00.0", Brand: "NVIDIA", Model: "GB200",
+		Serial: "serial-3", VBIOSVersion: "96.00.5E.00.01", DriverVersion: "570.86.15",
+		CUDADriverVersion: 12080, MinorNumber: 0, ComputeCapability: 10 << 16,
+		FabricClusterUUID: "cluster-3", FabricCliqueID: 0, FabricCliqueIDValid: true,
+		ChassisSerial: "chassis-3", SlotNumber: 26, SlotNumberValid: true,
+		TrayIndex: 16, TrayIndexValid: true, HostID: 1, HostIDValid: true,
+		ModuleID: 3, ModuleIDValid: true, FabricGUID: "0xb74a5c8b016b6418",
+		FramebufferMemoryBytes: 80 * 1024 * 1024 * 1024,
+	}}
+	inventory := newDeviceInventory(want, false)
+	getLatestInventoryValues = func([]dcgm.GroupEntityPair, []dcgm.Short, uint) ([]dcgm.FieldValue_v2, error) {
+		unavailableTray := int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_TRAY_INDEX, 0)
+		unavailableTray.Status = dcgm.DCGM_ST_NO_DATA
+		unsupportedBrand := stringField(3, dcgm.DCGM_FI_DEV_BRAND, "changed")
+		unsupportedBrand.Status = dcgm.DCGM_ST_NOT_SUPPORTED
+		return []dcgm.FieldValue_v2{
+			int64Field(3, dcgm.DCGM_FI_DEV_UUID, 3),
+			stringField(3, dcgm.DCGM_FI_DEV_PCI_BUSID, ""),
+			unsupportedBrand,
+			stringField(3, dcgm.DCGM_FI_DEV_NAME, dcgm.DCGM_FT_STR_NOT_SUPPORTED),
+			stringField(3, dcgm.DCGM_FI_DEV_SERIAL, dcgm.DCGM_FT_STR_BLANK),
+			int64Field(3, dcgm.DCGM_FI_DEV_VBIOS_VERSION, 0),
+			stringField(3, dcgm.DCGM_FI_DRIVER_VERSION, ""),
+			int64Field(3, dcgm.DCGM_FI_CUDA_DRIVER_VERSION, -1),
+			int64Field(3, dcgm.DCGM_FI_DEV_MINOR_NUMBER, -1),
+			int64Field(3, dcgm.DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY, 0),
+			int64Field(3, dcgm.DCGM_FI_DEV_FABRIC_CLIQUE_ID, -1),
+			stringField(3, dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SERIAL_NUMBER, ""),
+			int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_CHASSIS_SLOT_NUMBER, 0),
+			unavailableTray,
+			int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_HOST_ID, dcgm.DCGM_FT_INT64_BLANK),
+			int64Field(3, dcgm.DCGM_FI_DEV_PLATFORM_MODULE_ID, 255),
+			stringField(3, dcgm.DCGM_FI_DEV_PLATFORM_INFINIBAND_GUID, "invalid"),
+			int64Field(3, dcgm.DCGM_FI_DEV_FB_TOTAL, -1),
+		}, nil
+	}
+	if err := inventory.enrichIfIncomplete(); err != nil {
+		t.Fatal(err)
+	}
+	want[0].SlotNumber = 0
+	if got := inventory.snapshot(); !slices.Equal(got, want) {
+		t.Fatalf("snapshot = %+v, want retained values and valid zero update %+v", got, want)
+	}
+	if inventory.complete {
+		t.Fatal("blank fields must remain eligible for retry")
+	}
+
+	expectedErr := errors.New("field query failed")
+	getLatestInventoryValues = func([]dcgm.GroupEntityPair, []dcgm.Short, uint) ([]dcgm.FieldValue_v2, error) {
+		return nil, expectedErr
+	}
+	if err := inventory.enrichIfIncomplete(); !errors.Is(err, expectedErr) {
+		t.Fatalf("transport error = %v, want %v", err, expectedErr)
+	}
+	if got := inventory.snapshot(); !slices.Equal(got, want) {
+		t.Fatalf("transport failure changed known inventory: %+v", got)
+	}
+}
+
 func stringField(deviceID uint, fieldID dcgm.Short, value string) dcgm.FieldValue_v2 {
 	field := dcgm.FieldValue_v2{
 		EntityGroupId: dcgm.FE_GPU,
