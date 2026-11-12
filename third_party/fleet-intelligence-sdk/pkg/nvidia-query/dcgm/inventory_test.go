@@ -28,6 +28,27 @@ import (
 	dcgmendpoint "github.com/NVIDIA/fleet-intelligence-sdk/pkg/nvidia-query/dcgm/endpoint"
 )
 
+func TestDeviceInfoPeerTypeName(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		device DeviceInfo
+		want   string
+	}{
+		{name: "unavailable"},
+		{name: "invalid cached value", device: DeviceInfo{PeerType: 1}},
+		{name: "direct", device: DeviceInfo{PeerType: 0, PeerTypeValid: true}, want: "directConnected"},
+		{name: "switch", device: DeviceInfo{PeerType: 1, PeerTypeValid: true}, want: "switchConnected"},
+		{name: "future code", device: DeviceInfo{PeerType: 7, PeerTypeValid: true}, want: "PEER_TYPE_7"},
+		{name: "maximum code", device: DeviceInfo{PeerType: ^uint32(0), PeerTypeValid: true}, want: "PEER_TYPE_4294967295"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.device.PeerTypeName(); got != test.want {
+				t.Fatalf("PeerTypeName() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestCollectDeviceInventoryWithContext(t *testing.T) {
 	originalInit := dcgmInitFunc
 	originalGetSupportedDevices := getSupportedDevicesForInventory

@@ -375,12 +375,16 @@ func (c *csvConverter) writeMachineInfoCSV(outputDir, filename string, data *col
 				{"Slot Number", gpu.SlotNumber},
 				{"Tray Index", gpu.TrayIndex},
 				{"Host ID", gpu.HostID},
-				{"Peer Type", gpu.PeerType},
-				{"Module ID", gpu.ModuleID},
 			} {
 				if field.value != nil {
 					records = append(records, []string{prefix + " " + field.name, strconv.FormatUint(uint64(*field.value), 10)})
 				}
+			}
+			if gpu.PeerType != "" {
+				records = append(records, []string{prefix + " Peer Type", gpu.PeerType})
+			}
+			if gpu.ModuleID != nil {
+				records = append(records, []string{prefix + " Module ID", strconv.FormatUint(uint64(*gpu.ModuleID), 10)})
 			}
 			if gpu.FabricGUID != "" {
 				records = append(records, []string{prefix + " GPU Fabric GUID", gpu.FabricGUID})

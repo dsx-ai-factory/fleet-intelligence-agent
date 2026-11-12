@@ -258,7 +258,7 @@ func TestGetMachineGPUInfoHandlesUnavailableInventoryFields(t *testing.T) {
 	assert.Nil(t, info.GPUs[0].TrayIndex)
 	assert.Nil(t, info.GPUs[0].HostID)
 	assert.Nil(t, info.GPUs[0].ModuleID)
-	assert.Nil(t, info.GPUs[0].PeerType)
+	assert.Empty(t, info.GPUs[0].PeerType)
 	assert.Empty(t, info.GPUs[0].FabricGUID)
 }
 
@@ -283,7 +283,7 @@ func TestGetMachineGPUInfoPreservesPlatformPositions(t *testing.T) {
 		require.NotNil(t, gpu.TrayIndex)
 		require.NotNil(t, gpu.HostID)
 		require.NotNil(t, gpu.ModuleID)
-		require.NotNil(t, gpu.PeerType)
+		require.NotEmpty(t, gpu.PeerType)
 		assert.Equal(t, uint32(26), *gpu.SlotNumber)
 		assert.Equal(t, uint32(16), *gpu.TrayIndex)
 		assert.Equal(t, uint32(1), *gpu.HostID)
@@ -291,8 +291,8 @@ func TestGetMachineGPUInfoPreservesPlatformPositions(t *testing.T) {
 	}
 	assert.Equal(t, uint32(0), *info.GPUs[0].ModuleID)
 	assert.Equal(t, uint32(3), *info.GPUs[1].ModuleID)
-	assert.Equal(t, uint32(1), *info.GPUs[0].PeerType)
-	assert.Equal(t, uint32(7), *info.GPUs[1].PeerType)
+	assert.Equal(t, "switchConnected", info.GPUs[0].PeerType)
+	assert.Equal(t, "PEER_TYPE_7", info.GPUs[1].PeerType)
 
 	// Machine information owns its positions independently of the DCGM snapshot.
 	for i := range devices {
@@ -304,12 +304,12 @@ func TestGetMachineGPUInfoPreservesPlatformPositions(t *testing.T) {
 	assert.Equal(t, uint32(1), *info.GPUs[0].HostID)
 	assert.Equal(t, uint32(0), *info.GPUs[0].ModuleID)
 	assert.Equal(t, uint32(3), *info.GPUs[1].ModuleID)
-	assert.Equal(t, uint32(1), *info.GPUs[0].PeerType)
-	assert.Equal(t, uint32(7), *info.GPUs[1].PeerType)
+	assert.Equal(t, "switchConnected", info.GPUs[0].PeerType)
+	assert.Equal(t, "PEER_TYPE_7", info.GPUs[1].PeerType)
 	*info.GPUs[0].SlotNumber = 99
 	assert.Equal(t, uint32(26), *info.GPUs[1].SlotNumber)
-	*info.GPUs[0].PeerType = 99
-	assert.Equal(t, uint32(7), *info.GPUs[1].PeerType)
+	info.GPUs[0].PeerType = "PEER_TYPE_99"
+	assert.Equal(t, "PEER_TYPE_7", info.GPUs[1].PeerType)
 }
 
 func TestGetMachineGPUInfoPlatformValidity(t *testing.T) {
@@ -322,15 +322,16 @@ func TestGetMachineGPUInfoPlatformValidity(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, info.GPUs, 2)
-	for _, index := range []*uint32{info.GPUs[0].SlotNumber, info.GPUs[0].TrayIndex, info.GPUs[0].HostID, info.GPUs[0].ModuleID, info.GPUs[0].PeerType} {
+	for _, index := range []*uint32{info.GPUs[0].SlotNumber, info.GPUs[0].TrayIndex, info.GPUs[0].HostID, info.GPUs[0].ModuleID} {
 		require.NotNil(t, index)
 		assert.Zero(t, *index)
 	}
+	assert.Equal(t, "directConnected", info.GPUs[0].PeerType)
 	assert.Nil(t, info.GPUs[1].SlotNumber)
 	assert.Nil(t, info.GPUs[1].TrayIndex)
 	assert.Nil(t, info.GPUs[1].HostID)
 	assert.Nil(t, info.GPUs[1].ModuleID)
-	assert.Nil(t, info.GPUs[1].PeerType)
+	assert.Empty(t, info.GPUs[1].PeerType)
 }
 
 // TestGetProvider tests provider detection

@@ -3,7 +3,7 @@
 
 module github.com/dsx-ai-factory/fleet-intelligence-agent/otelcol/auth/sakauth
 
-go 1.26.0
+go 1.26.11
 
 require (
 	github.com/stretchr/testify v1.11.1

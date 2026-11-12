@@ -16,7 +16,7 @@ func TestMachineGPUInstancePlatformJSON(t *testing.T) {
 		t.Run(guid, func(t *testing.T) {
 			gpu := MachineGPUInstance{
 				UUID: "GPU-123", SlotNumber: &slot, TrayIndex: &tray,
-				HostID: &host, ModuleID: &zero, PeerType: &zero, FabricGUID: guid,
+				HostID: &host, ModuleID: &zero, PeerType: "directConnected", FabricGUID: guid,
 			}
 			data, err := json.Marshal(gpu)
 			if err != nil {
@@ -28,7 +28,7 @@ func TestMachineGPUInstancePlatformJSON(t *testing.T) {
 			}
 			for key, want := range map[string]string{
 				"slotNumber": "26", "trayIndex": "16", "hostID": "1",
-				"moduleID": "0", "peerType": "0", "fabricGUID": `"` + guid + `"`,
+				"moduleID": "0", "peerType": `"directConnected"`, "fabricGUID": `"` + guid + `"`,
 			} {
 				if string(fields[key]) != want {
 					t.Errorf("JSON %s = %s, want %s", key, fields[key], want)
@@ -38,7 +38,7 @@ func TestMachineGPUInstancePlatformJSON(t *testing.T) {
 			if err := json.Unmarshal(data, &decoded); err != nil {
 				t.Fatal(err)
 			}
-			if decoded.ModuleID == nil || *decoded.ModuleID != 0 || decoded.PeerType == nil || *decoded.PeerType != 0 || decoded.FabricGUID != guid {
+			if decoded.ModuleID == nil || *decoded.ModuleID != 0 || decoded.PeerType != "directConnected" || decoded.FabricGUID != guid {
 				t.Fatalf("zero module ID, peer type, or GUID changed on round trip: %+v", decoded)
 			}
 		})
@@ -54,14 +54,13 @@ func TestMachineGPUInstancePlatformJSON(t *testing.T) {
 
 func TestMachineGPUInfoPlatformTable(t *testing.T) {
 	zero := uint32(0)
-	unknownPeerType := uint32(7)
 	info := MachineGPUInfo{GPUs: []MachineGPUInstance{
-		{UUID: "GPU-123", ModuleID: &zero, PeerType: &unknownPeerType, FabricGUID: "0xb74a5c8b016b6418"},
+		{UUID: "GPU-123", ModuleID: &zero, PeerType: "PEER_TYPE_7", FabricGUID: "0xb74a5c8b016b6418"},
 		{UUID: "GPU-456"},
 	}}
 	var buf bytes.Buffer
 	info.RenderTable(&buf)
-	for _, value := range []string{"SLOT NUMBER", "TRAY INDEX", "HOST ID", "PEER TYPE", "MODULE ID", "GPU FABRIC GUID", "0xb74a5c8b016b6418", "GPU-456", " 7 "} {
+	for _, value := range []string{"SLOT NUMBER", "TRAY INDEX", "HOST ID", "PEER TYPE", "MODULE ID", "GPU FABRIC GUID", "0xb74a5c8b016b6418", "GPU-456", "PEER_TYPE_7"} {
 		if !bytes.Contains(buf.Bytes(), []byte(value)) {
 			t.Errorf("missing %q from table: %s", value, buf.String())
 		}
@@ -72,12 +71,11 @@ func TestMachineGPUInfoPlatformTable(t *testing.T) {
 }
 
 func TestMachineGPUInstancePreservesUnknownPeerType(t *testing.T) {
-	peerType := uint32(7)
-	data, err := json.Marshal(MachineGPUInstance{UUID: "GPU-123", PeerType: &peerType})
+	data, err := json.Marshal(MachineGPUInstance{UUID: "GPU-123", PeerType: "PEER_TYPE_7"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != `{"uuid":"GPU-123","peerType":7}` {
+	if string(data) != `{"uuid":"GPU-123","peerType":"PEER_TYPE_7"}` {
 		t.Fatalf("unknown peer type changed: %s", data)
 	}
 }
