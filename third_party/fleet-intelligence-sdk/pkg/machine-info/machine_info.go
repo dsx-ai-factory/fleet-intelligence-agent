@@ -378,7 +378,7 @@ func GetMachineGPUInfo(devices []nvidiadcgm.DeviceInfo) (*apiv1.MachineGPUInfo, 
 			TrayIndex:    gpuPlatformValue(dev.TrayIndex, dev.TrayIndexValid),
 			HostID:       gpuPlatformValue(dev.HostID, dev.HostIDValid),
 			ModuleID:     gpuPlatformValue(dev.ModuleID, dev.ModuleIDValid),
-			PeerType:     gpuPlatformValue(dev.PeerType, dev.PeerTypeValid),
+			PeerType:     dev.PeerTypeName(),
 			FabricGUID:   dev.FabricGUID,
 		})
 	}

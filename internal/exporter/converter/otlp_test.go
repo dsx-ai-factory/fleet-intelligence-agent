@@ -1153,7 +1153,7 @@ func TestOTLPConverter_ResourceAttributes_IncludesOnlyGPUInfoGPUs(t *testing.T) 
 						TrayIndex:    &tray,
 						HostID:       &host,
 						ModuleID:     &module,
-						PeerType:     &module,
+						PeerType:     "directConnected",
 						FabricGUID:   "0xb74a5c8b016b6418",
 					},
 				},
@@ -1166,7 +1166,7 @@ func TestOTLPConverter_ResourceAttributes_IncludesOnlyGPUInfoGPUs(t *testing.T) 
 
 	attrs := otlpData.Metrics.ResourceMetrics[0].Resource.Attributes
 	gpus := findAttribute(t, attrs, "gpuInfo.gpus").GetStringValue()
-	assert.JSONEq(t, `[{"uuid":"GPU-123","gpuIndex":"0","busID":"0000:01:00.0","sn":"serial-123","minorID":"0","boardID":7,"vbiosVersion":"96.00.68.00.01","chassisSN":"chassis-123","slotNumber":26,"trayIndex":16,"hostID":1,"moduleID":0,"peerType":0,"fabricGUID":"0xb74a5c8b016b6418"}]`, gpus)
+	assert.JSONEq(t, `[{"uuid":"GPU-123","gpuIndex":"0","busID":"0000:01:00.0","sn":"serial-123","minorID":"0","boardID":7,"vbiosVersion":"96.00.68.00.01","chassisSN":"chassis-123","slotNumber":26,"trayIndex":16,"hostID":1,"moduleID":0,"peerType":"directConnected","fabricGUID":"0xb74a5c8b016b6418"}]`, gpus)
 
 	for _, attr := range attrs {
 		assert.NotContains(t, []string{

@@ -441,9 +441,9 @@ type MachineGPUInstance struct {
 	HostID     *uint32 `json:"hostID,omitempty"`
 	ModuleID   *uint32 `json:"moduleID,omitempty"`
 
-	// PeerType is the raw platform-reported NVLink peer connection type.
-	// Preserve unknown codes and distinguish a reported zero from unavailable data.
-	PeerType *uint32 `json:"peerType,omitempty"`
+	// PeerType is the platform-reported NVLink connection type: directConnected
+	// or switchConnected. Unrecognized codes use PEER_TYPE_<number>.
+	PeerType string `json:"peerType,omitempty"`
 
 	// FabricGUID is the platform-reported GPU GUID, preserved as a hexadecimal
 	// string independently of the GPU UUID and fabric cluster UUID.
@@ -458,7 +458,7 @@ func (gi *MachineGPUInfo) RenderTable(wr io.Writer) {
 			if gpu.BoardID != 0 {
 				showBoardID = true
 			}
-			if gpu.SlotNumber != nil || gpu.TrayIndex != nil || gpu.HostID != nil || gpu.ModuleID != nil || gpu.PeerType != nil || gpu.FabricGUID != "" {
+			if gpu.SlotNumber != nil || gpu.TrayIndex != nil || gpu.HostID != nil || gpu.ModuleID != nil || gpu.PeerType != "" || gpu.FabricGUID != "" {
 				showPlatform = true
 			}
 		}
@@ -495,20 +495,27 @@ func (gi *MachineGPUInfo) RenderTable(wr io.Writer) {
 				gpu.ChassisSN,
 			)
 			if showPlatform {
-				for _, platformValue := range []*uint32{gpu.SlotNumber, gpu.TrayIndex, gpu.HostID, gpu.PeerType, gpu.ModuleID} {
-					value := ""
-					if platformValue != nil {
-						value = strconv.FormatUint(uint64(*platformValue), 10)
-					}
-					row = append(row, value)
-				}
-				row = append(row, gpu.FabricGUID)
+				row = append(row,
+					gpuPlatformIndexString(gpu.SlotNumber),
+					gpuPlatformIndexString(gpu.TrayIndex),
+					gpuPlatformIndexString(gpu.HostID),
+					gpu.PeerType,
+					gpuPlatformIndexString(gpu.ModuleID),
+					gpu.FabricGUID,
+				)
 			}
 			table.Append(row)
 		}
 
 		table.Render()
 	}
+}
+
+func gpuPlatformIndexString(value *uint32) string {
+	if value == nil {
+		return ""
+	}
+	return strconv.FormatUint(uint64(*value), 10)
 }
 
 type MachineDiskInfo struct {

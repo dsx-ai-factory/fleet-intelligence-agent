@@ -55,7 +55,7 @@ On supported platforms, GPU information also includes:
 - `trayIndex`: Compute-tray index within the chassis, excluding switch slots.
 - `hostID`: Host index within the slot.
 - `moduleID`: GPU identifier within the host.
-- `peerType`: Raw numeric NVLink peer connection type, such as switch connected or direct connected. Unrecognized codes are preserved; this field does not identify specific peers or report current link health.
+- `peerType`: NVLink peer connection type, decoded as `directConnected` or `switchConnected`. Unrecognized codes use `PEER_TYPE_<number>`; unavailable values are omitted. This field does not identify specific peers or report current link health.
 - `fabricGUID`: Platform-reported GPU fabric identifier, formatted as a lowercase hexadecimal string such as `0xb74a5c8b016b6418`, independently of the GPU UUID.
 
 Available fields appear in the machine-info table, CSV export, OTLP GPU information, and backend inventory requests. Support depends on the platform, driver, and DCGM version. Unavailable fields are omitted from JSON inventory; reported numeric zero values are retained.

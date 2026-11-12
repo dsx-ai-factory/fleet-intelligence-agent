@@ -104,6 +104,25 @@ type deviceInventory struct {
 	complete  bool
 }
 
+// PeerTypeName decodes the cached platform connection type for inventory output.
+// Unavailable values are empty; unrecognized codes retain their numeric identity.
+func (d DeviceInfo) PeerTypeName() string {
+	if !d.PeerTypeValid {
+		return ""
+	}
+	// DCGM forwards NVML's peerType byte. NVIDIA's platform fixtures pin the
+	// nvidia-smi mapping: 0 is Direct Connected and 1 is Switch Connected.
+	// https://github.com/NVIDIA/k8s-test-infra/blob/45bdcb3d473e00a8e3255f29c5238704fa6176d2/pkg/gpu/mocknvml/engine/platform.go
+	switch d.PeerType {
+	case 0:
+		return "directConnected"
+	case 1:
+		return "switchConnected"
+	default:
+		return fmt.Sprintf("PEER_TYPE_%d", d.PeerType)
+	}
+}
+
 func newDeviceInventory(devices []DeviceInfo, complete bool) *deviceInventory {
 	return &deviceInventory{
 		devices:  slices.Clone(devices),

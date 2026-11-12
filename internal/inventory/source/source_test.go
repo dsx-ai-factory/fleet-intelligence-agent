@@ -190,18 +190,18 @@ func TestMachineInfoSourceCollectErrors(t *testing.T) {
 
 func TestMachineInfoSourceCollectGPUPlatformInfo(t *testing.T) {
 	slot, tray, host, module, zero := uint32(26), uint32(16), uint32(1), uint32(3), uint32(0)
-	peerType, unknownPeerType := uint32(1), uint32(7)
+	peerType, unknownPeerType := "switchConnected", "PEER_TYPE_7"
 	gpus := []apiv1.MachineGPUInstance{
 		{
 			UUID: "GPU-1", SlotNumber: &slot, TrayIndex: &tray,
-			HostID: &host, PeerType: &peerType, ModuleID: &module, FabricGUID: "0xb74a5c8b016b6418",
+			HostID: &host, PeerType: peerType, ModuleID: &module, FabricGUID: "0xb74a5c8b016b6418",
 		},
 		{
 			UUID: "GPU-2", SlotNumber: &zero, TrayIndex: &zero,
-			HostID: &zero, PeerType: &zero, ModuleID: &zero, FabricGUID: "0x0000000000000001",
+			HostID: &zero, PeerType: "directConnected", ModuleID: &zero, FabricGUID: "0x0000000000000001",
 		},
 		{UUID: "GPU-3"},
-		{UUID: "GPU-4", PeerType: &unknownPeerType},
+		{UUID: "GPU-4", PeerType: unknownPeerType},
 	}
 	src := NewMachineInfoSource(fakeMachineInfoCollector{info: &machineinfo.MachineInfo{
 		GPUInfo: &apiv1.MachineGPUInfo{GPUs: gpus},
@@ -212,14 +212,14 @@ func TestMachineInfoSourceCollectGPUPlatformInfo(t *testing.T) {
 	require.Equal(t, []inventory.GPUDevice{
 		{
 			UUID: "GPU-1", SlotNumber: &slot, TrayIndex: &tray,
-			HostID: &host, PeerType: &peerType, ModuleID: &module, FabricGUID: "0xb74a5c8b016b6418",
+			HostID: &host, PeerType: peerType, ModuleID: &module, FabricGUID: "0xb74a5c8b016b6418",
 		},
 		{
 			UUID: "GPU-2", SlotNumber: &zero, TrayIndex: &zero,
-			HostID: &zero, PeerType: &zero, ModuleID: &zero, FabricGUID: "0x0000000000000001",
+			HostID: &zero, PeerType: "directConnected", ModuleID: &zero, FabricGUID: "0x0000000000000001",
 		},
 		{UUID: "GPU-3"},
-		{UUID: "GPU-4", PeerType: &unknownPeerType},
+		{UUID: "GPU-4", PeerType: unknownPeerType},
 	}, snap.Resources.GPUInfo.GPUs)
 
 	// The inventory snapshot owns its optional values independently of the cache.
@@ -227,15 +227,15 @@ func TestMachineInfoSourceCollectGPUPlatformInfo(t *testing.T) {
 		require.NotSame(t, gpus[index].SlotNumber, gpu.SlotNumber)
 		require.NotSame(t, gpus[index].TrayIndex, gpu.TrayIndex)
 		require.NotSame(t, gpus[index].HostID, gpu.HostID)
-		require.NotSame(t, gpus[index].PeerType, gpu.PeerType)
 		require.NotSame(t, gpus[index].ModuleID, gpu.ModuleID)
 	}
 	module = 2
 	zero = 4
-	peerType, unknownPeerType = 2, 8
+	gpus[0].PeerType, gpus[1].PeerType, gpus[3].PeerType = "directConnected", "switchConnected", "PEER_TYPE_8"
 	require.Equal(t, uint32(3), *snap.Resources.GPUInfo.GPUs[0].ModuleID)
 	require.Equal(t, uint32(0), *snap.Resources.GPUInfo.GPUs[1].ModuleID)
-	require.Equal(t, uint32(1), *snap.Resources.GPUInfo.GPUs[0].PeerType)
-	require.Equal(t, uint32(0), *snap.Resources.GPUInfo.GPUs[1].PeerType)
-	require.Equal(t, uint32(7), *snap.Resources.GPUInfo.GPUs[3].PeerType)
+	require.Equal(t, "switchConnected", snap.Resources.GPUInfo.GPUs[0].PeerType)
+	require.Equal(t, "directConnected", snap.Resources.GPUInfo.GPUs[1].PeerType)
+	require.Empty(t, snap.Resources.GPUInfo.GPUs[2].PeerType)
+	require.Equal(t, "PEER_TYPE_7", snap.Resources.GPUInfo.GPUs[3].PeerType)
 }

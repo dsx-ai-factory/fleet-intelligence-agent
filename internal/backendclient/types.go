@@ -100,7 +100,7 @@ type GPUDevice struct {
 	SlotNumber   *uint32 `json:"slotNumber,omitempty"`
 	TrayIndex    *uint32 `json:"trayIndex,omitempty"`
 	HostID       *uint32 `json:"hostID,omitempty"`
-	PeerType     *uint32 `json:"peerType,omitempty"`
+	PeerType     string  `json:"peerType,omitempty"`
 	ModuleID     *uint32 `json:"moduleID,omitempty"`
 	FabricGUID   string  `json:"fabricGUID,omitempty"`
 }

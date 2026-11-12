@@ -100,7 +100,7 @@ type GPUDevice struct {
 	SlotNumber   *uint32
 	TrayIndex    *uint32
 	HostID       *uint32
-	PeerType     *uint32
+	PeerType     string
 	ModuleID     *uint32
 	FabricGUID   string
 }
