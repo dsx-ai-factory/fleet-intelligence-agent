@@ -31,7 +31,7 @@ var (
 		pkgmetrics.MetricComponentLabelKey: Name,
 	}
 
-	metricDCGMFIDevInforomConfigValid = prometheus.NewGaugeVec(
+	metricDCGMFIDevInforomConfigValid = pkgmetrics.NewSampledGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "dcgm_fi_dev_inforom_config_valid",
 			Help: "Reads the infoROM from the flash and verifies the checksums",

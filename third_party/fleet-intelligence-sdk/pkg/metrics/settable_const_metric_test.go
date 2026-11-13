@@ -4,11 +4,28 @@
 package metrics
 
 import (
+	"fmt"
+	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/stretchr/testify/require"
 )
+
+func TestSampledMetricExposesMeasurementTimeOverHTTP(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	vec := NewSampledGaugeVec(prometheus.GaugeOpts{Name: "measurement", Help: "source value"}, nil)
+	require.NoError(t, reg.Register(vec))
+	vec.With(nil).SetWithTimestamp(42, 1_793_188_800_123_456)
+	response := httptest.NewRecorder()
+	promhttp.HandlerFor(reg, promhttp.HandlerOpts{}).ServeHTTP(response, httptest.NewRequest("GET", "/metrics", nil))
+	require.Equal(t, 200, response.Code)
+	require.Contains(t, response.Body.String(), "measurement 42 1793188800123\n")
+}
 
 func TestSettableCounterVecEmitsCounterMetric(t *testing.T) {
 	registry := prometheus.NewRegistry()
@@ -41,6 +58,69 @@ func TestSettableCounterVecEmitsCounterMetric(t *testing.T) {
 	if got := family.GetMetric()[0].GetCounter().GetValue(); got != 42 {
 		t.Fatalf("counter value = %v, want 42", got)
 	}
+}
+
+func TestSampledMetricsPreserveMeasurementTime(t *testing.T) {
+	for _, counter := range []bool{false, true} {
+		t.Run(fmt.Sprintf("counter=%t", counter), func(t *testing.T) {
+			vec := NewSampledGaugeVec(prometheus.GaugeOpts{Name: "source_sample", Help: "source sample"}, []string{"device"})
+			kind := dto.MetricType_GAUGE
+			if counter {
+				vec = NewSettableCounterVec(prometheus.CounterOpts{Name: "source_sample", Help: "source sample"}, []string{"device"})
+				kind = dto.MetricType_COUNTER
+			}
+			reg := prometheus.NewRegistry()
+			require.NoError(t, reg.Register(vec))
+			metric := vec.With(prometheus.Labels{"device": "gpu0"})
+			ts := time.Date(2026, 10, 28, 12, 0, 0, 123456000, time.UTC).UnixMicro()
+			for _, sourceTime := range []int64{ts, ts, ts + 60_000_000, 0, -1} {
+				metric.SetWithTimestamp(42, sourceTime)
+				families, err := reg.Gather()
+				require.NoError(t, err)
+				require.Len(t, families, 1)
+				require.Equal(t, kind, families[0].GetType())
+				sample := families[0].GetMetric()[0]
+				if sourceTime > 0 {
+					require.Equal(t, sourceTime/1000, sample.GetTimestampMs())
+				} else {
+					require.Nil(t, sample.TimestampMs, "missing times must use the scraper fallback")
+				}
+			}
+			metric.SetWithTimestamp(43, ts)
+			metric.Set(44)
+			families, err := reg.Gather()
+			require.NoError(t, err)
+			require.Nil(t, families[0].GetMetric()[0].TimestampMs, "Set must clear a previous explicit timestamp")
+		})
+	}
+}
+
+func TestSampledMetricsSetAndGatherAreAtomic(t *testing.T) {
+	vec := NewSampledGaugeVec(prometheus.GaugeOpts{Name: "atomic_sample", Help: "source sample"}, nil)
+	reg := prometheus.NewRegistry()
+	require.NoError(t, reg.Register(vec))
+	metric := vec.With(nil)
+	var writers sync.WaitGroup
+	for writer := range 2 {
+		writers.Add(1)
+		go func() {
+			defer writers.Done()
+			for range 100 {
+				value := int64(writer + 1)
+				metric.SetWithTimestamp(float64(value), value*1000)
+			}
+		}()
+	}
+	for range 100 {
+		families, err := reg.Gather()
+		require.NoError(t, err)
+		if len(families) == 0 {
+			continue
+		}
+		sample := families[0].GetMetric()[0]
+		require.Equal(t, int64(sample.GetGauge().GetValue()), sample.GetTimestampMs())
+	}
+	writers.Wait()
 }
 
 func TestSettableCounterVecResetAndDelete(t *testing.T) {

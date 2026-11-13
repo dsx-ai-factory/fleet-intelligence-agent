@@ -48,6 +48,11 @@ func (s *promScraper) Scrape(_ context.Context) (pkgmetrics.Metrics, error) {
 				UnixMilliseconds: now,
 				Name:             metricFamily.GetName(),
 			}
+			// Source collectors can supply the measurement time. Ordinary metrics
+			// and invalid source timestamps retain the observation-time fallback.
+			if mtRaw.GetTimestampMs() > 0 {
+				m.UnixMilliseconds = mtRaw.GetTimestampMs()
+			}
 
 			labels := make(map[string]string, 0)
 			for _, label := range mtRaw.GetLabel() {

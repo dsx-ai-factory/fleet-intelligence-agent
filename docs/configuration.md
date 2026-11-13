@@ -112,15 +112,22 @@ prevent startup. **Assignments never enable collection of a field or component.*
 Use the same variables under Helm `env`. Restart the agent after changes.
 These overrides apply to `fleetint run`, including offline mode.
 
-**Sampling and export**
+**Sampling and exported timestamps**
 
 Cached reads and scrapes run at the standard interval. A cached read does not
 trigger a new hardware sample. `FLEETINT_COLLECT_INTERVAL` controls export
 frequency separately (default `60s`).
 
-A slower field can return the same sample on successive reads. Exported points
-use scrape timestamps, so values can repeat. Use rate windows that span multiple
-native samples.
+DCGM metrics use native measurement timestamps. Repeated reads of the same sample
+produce one stored point. Missing or nonpositive timestamps fall back to scrape
+time; other metrics keep scrape timestamps. Prometheus clients must honor
+explicit timestamps. Timestamp precision is milliseconds in Prometheus, storage,
+and OTLP, and whole seconds in CSV.
+
+Export lookbacks and retention use first-receipt time when `recorded_at` is
+available, falling back to measurement time for legacy rows. Overlapping
+export windows can include the same point with its original timestamp. Use rate
+windows that span multiple native samples.
 
 ### Send Slurm workload identity to Fleet Intelligence
 

@@ -257,92 +257,92 @@ func (c *component) Check() components.CheckResult {
 					metricDCGMFIDevFBFree.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_FB_USED:
 					metricDCGMFIDevFBUsed.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_FB_TOTAL:
 					metricDCGMFIDevFBTotal.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_FB_USED_PERCENT:
 					metricDCGMFIDevFBUsedPercent.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Float64()))
+					}).SetWithTimestamp(float64(fieldValue.Float64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_UNCORRECTABLE_REMAPPED_ROWS:
 					metricDCGMFIDevUncorrectableRemappedRows.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_CORRECTABLE_REMAPPED_ROWS:
 					metricDCGMFIDevCorrectableRemappedRows.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_ROW_REMAP_FAILURE:
 					metricDCGMFIDevRowRemapFailure.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_ROW_REMAP_PENDING:
 					metricDCGMFIDevRowRemapPending.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_ECC_SBE_VOL_TOTAL:
 					metricDCGMFIDevECCSBEVolTotal.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_ECC_DBE_VOL_TOTAL:
 					metricDCGMFIDevECCDBEVolTotal.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_ECC_SBE_AGG_TOTAL:
 					metricDCGMFIDevECCSBEAggTotal.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_ECC_DBE_AGG_TOTAL:
 					metricDCGMFIDevECCDBAggTotal.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_ECC_SBE_VOL_DEV:
 					metricDCGMFIDevECCSBEVolDev.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_ECC_DBE_VOL_DEV:
 					metricDCGMFIDevECCDBEVolDev.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_ECC_SBE_AGG_DEV:
 					metricDCGMFIDevECCSBEAggDev.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_ECC_DBE_AGG_DEV:
 					metricDCGMFIDevECCDBEAggDev.With(prometheus.Labels{
 						"uuid": deviceData.UUID,
 						"gpu":  fmt.Sprintf("%d", deviceData.DeviceID),
-					}).Set(float64(fieldValue.Int64()))
+					}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_BANKS_REMAP_ROWS_AVAIL_HIGH:
-					metricDCGMFIDevBanksRemapRowsAvailHigh.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).Set(float64(fieldValue.Int64()))
+					metricDCGMFIDevBanksRemapRowsAvailHigh.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_BANKS_REMAP_ROWS_AVAIL_LOW:
-					metricDCGMFIDevBanksRemapRowsAvailLow.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).Set(float64(fieldValue.Int64()))
+					metricDCGMFIDevBanksRemapRowsAvailLow.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_BANKS_REMAP_ROWS_AVAIL_MAX:
-					metricDCGMFIDevBanksRemapRowsAvailMax.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).Set(float64(fieldValue.Int64()))
+					metricDCGMFIDevBanksRemapRowsAvailMax.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_BANKS_REMAP_ROWS_AVAIL_NONE:
-					metricDCGMFIDevBanksRemapRowsAvailNone.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).Set(float64(fieldValue.Int64()))
+					metricDCGMFIDevBanksRemapRowsAvailNone.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				case dcgm.DCGM_FI_DEV_BANKS_REMAP_ROWS_AVAIL_PARTIAL:
-					metricDCGMFIDevBanksRemapRowsAvailPartial.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).Set(float64(fieldValue.Int64()))
+					metricDCGMFIDevBanksRemapRowsAvailPartial.With(prometheus.Labels{"uuid": deviceData.UUID, "gpu": fmt.Sprintf("%d", deviceData.DeviceID)}).SetWithTimestamp(float64(fieldValue.Int64()), fieldValue.TS)
 				}
 			}
 		}

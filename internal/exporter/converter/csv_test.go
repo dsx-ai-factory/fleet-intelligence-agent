@@ -87,6 +87,8 @@ func TestCSVConverter_Convert_Metrics(t *testing.T) {
 	// Should have header + 2 data rows
 	assert.Len(t, records, 3)
 	assert.Equal(t, []string{"timestamp", "component", "metric_name", "value", "labels"}, records[0])
+	assert.Equal(t, time.UnixMilli(metrics[0].UnixMilliseconds).UTC().Format(time.RFC3339), records[1][0],
+		"CSV must retain the measurement time and its existing whole-second format")
 }
 
 func TestCSVConverter_Convert_Events(t *testing.T) {
