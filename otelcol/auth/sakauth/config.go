@@ -18,6 +18,7 @@ package sakauth
 import (
 	"fmt"
 	"net/url"
+	"strings"
 
 	"go.opentelemetry.io/collector/config/configopaque"
 	"go.opentelemetry.io/collector/config/configtls"
@@ -33,7 +34,8 @@ type Config struct {
 	// requests. Required to pass the API gateway that sits in front of the backend
 	// receiver. The customer identity is derived by the backend from the SAK and
 	// embedded in the returned JWT's assertion.customer_id claim.
-	// Injected from a Kubernetes Secret via environment variable.
+	// Injected from a Kubernetes Secret via environment variable. Leading and
+	// trailing whitespace is ignored; whitespace-only values are rejected.
 	SAKToken configopaque.String `mapstructure:"sak_token"`
 
 	// TLS configures certificate verification for the enrollment endpoint.
@@ -51,7 +53,7 @@ func (c *Config) Validate() error {
 	if endpoint.User != nil || endpoint.Fragment != "" {
 		return fmt.Errorf("sakauth: enroll_endpoint must not contain credentials or a fragment")
 	}
-	if c.SAKToken == "" {
+	if strings.TrimSpace(string(c.SAKToken)) == "" {
 		return fmt.Errorf("sakauth: sak_token is required")
 	}
 	if c.TLS.Insecure {

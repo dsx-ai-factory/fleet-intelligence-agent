@@ -88,6 +88,8 @@ Common values (defaults from `values.yaml`):
 | `otelGateway.podAnnotations` | `{}` | Gateway pod annotations. |
 | `otelGateway.service.annotations` | `{}` | Gateway Service annotations. |
 
+The telemetry gateway trims leading and trailing whitespace from its enrollment token before authentication and rejects whitespace-only values. Characters inside the token are preserved.
+
 ### Custom labels and annotations
 
 ```yaml

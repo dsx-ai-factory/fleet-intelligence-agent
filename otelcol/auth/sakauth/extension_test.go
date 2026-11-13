@@ -95,6 +95,48 @@ func TestConfigValidateRequiresSecureEndpoint(t *testing.T) {
 	require.NotContains(t, cfg.SAKToken.String(), "sak-token")
 }
 
+func TestWhitespaceOnlyEnrollmentTokenIsRejected(t *testing.T) {
+	for _, token := range []string{"", "\n", " \t\r\n", "\u2003"} {
+		cfg := &Config{
+			EnrollEndpoint: "https://backend.example/enroll",
+			SAKToken:       configopaque.String(token),
+		}
+		require.EqualError(t, cfg.Validate(), "sakauth: sak_token is required")
+		_, err := newSAKAuthExtension(cfg)
+		require.EqualError(t, err, "sakauth: sak_token is required")
+	}
+}
+
+func TestEnrollmentTrimsOnlySurroundingTokenWhitespace(t *testing.T) {
+	cases := []struct{ name, token, expected string }{
+		{"bare", "sak-token", "sak-token"},
+		{"LF", "sak-token\n", "sak-token"},
+		{"CRLF", "sak-token\r\n", "sak-token"},
+		{"surrounding", " \t\r\nsak-token \t\r\n", "sak-token"},
+		{"unicode", "\u2003sak-token\u2003", "sak-token"},
+		{"internal space", " first second ", "first second"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			authorization := make(chan string, 1)
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				authorization <- r.Header.Get("Authorization")
+				_, _ = io.WriteString(w, `{"jwtAssertion":"test-jwt"}`)
+			}))
+			defer server.Close()
+			ext, err := newSAKAuthExtension(&Config{
+				EnrollEndpoint: server.URL + "/enroll",
+				SAKToken:       configopaque.String(tc.token),
+			})
+			require.NoError(t, err)
+			ext.client = server.Client()
+			require.NoError(t, ext.Start(context.Background(), nil))
+			require.Equal(t, "Bearer "+tc.expected, <-authorization)
+			require.Equal(t, "test-jwt", ext.getJWT())
+		})
+	}
+}
+
 func TestEnrollResponseToken(t *testing.T) {
 	require.Equal(t, "current", (enrollResponse{
 		JWTAssertion:       "current",
@@ -172,7 +214,7 @@ func TestEnrollmentAndUnauthorizedRefresh(t *testing.T) {
 
 	ext, err := newSAKAuthExtension(&Config{
 		EnrollEndpoint: server.URL + "/enroll",
-		SAKToken:       configopaque.String("sak-token"),
+		SAKToken:       configopaque.String(" \tsak-token\r\n"),
 	})
 	require.NoError(t, err)
 	ext.client = server.Client()
