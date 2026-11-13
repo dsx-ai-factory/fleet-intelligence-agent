@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -159,7 +160,7 @@ func (e *sakAuthExtension) performEnrollment(ctx context.Context) (string, error
 	if err != nil {
 		return "", fmt.Errorf("failed to build enrollment request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+string(e.cfg.SAKToken))
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(e.cfg.SAKToken)))
 	req.Header.Set("User-Agent", "fleetint-otelcol")
 
 	resp, err := e.client.Do(req)

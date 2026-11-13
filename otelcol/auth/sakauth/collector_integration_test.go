@@ -146,7 +146,7 @@ func TestCollectorGatewayEndToEnd(t *testing.T) {
 extensions:
   sakauth:
     enroll_endpoint: %[1]s/enroll
-    sak_token: integration-sak
+    sak_token: ${env:FLEETINT_TEST_ENROLLMENT_TOKEN}
     tls:
       ca_file: %[4]s
   health_check:
@@ -187,7 +187,7 @@ service:
 	logFile, err := os.Create(logPath)
 	require.NoError(t, err)
 	cmd := exec.CommandContext(ctx, collectorBinary, "--config="+configPath)
-	cmd.Env = os.Environ()
+	cmd.Env = append(os.Environ(), "FLEETINT_TEST_ENROLLMENT_TOKEN= \tintegration-sak\r\n")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	require.NoError(t, cmd.Start())
