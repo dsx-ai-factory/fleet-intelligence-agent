@@ -94,6 +94,9 @@ func (w *httpWriter) Send(ctx context.Context, data *collector.HealthData, metri
 		"machine_id", data.MachineID)
 
 	var newToken string
+	// sendErrs collects per-signal send failures so a metrics failure does not
+	// stop logs from being attempted, but is still reported to the caller.
+	var sendErrs []error
 
 	// Send metrics first
 	if otlpData.Metrics != nil && len(otlpData.Metrics.ResourceMetrics) > 0 && metricsEndpoint != "" {
@@ -109,6 +112,7 @@ func (w *httpWriter) Send(ctx context.Context, data *collector.HealthData, metri
 				"error", err,
 				"size_bytes", len(metricsBytes))
 			// Continue to send logs even if metrics fail
+			sendErrs = append(sendErrs, fmt.Errorf("failed to send metrics data: %w", err))
 		} else if token != "" {
 			newToken = token
 		}
@@ -123,13 +127,19 @@ func (w *httpWriter) Send(ctx context.Context, data *collector.HealthData, metri
 
 		token, err := w.sendOTLPRequestWithRetry(ctx, logsBytes, "logs", data.CollectionID, data.MachineID, logsEndpoint, maxRetries, authToken)
 		if err != nil {
-			return newToken, fmt.Errorf("failed to send critical logs data (includes events): %w", err)
+			sendErrs = append(sendErrs, fmt.Errorf("failed to send critical logs data (includes events): %w", err))
 		} else if token != "" {
 			newToken = token
 		}
 	}
 
-	log.Logger.Infow("Successfully sent health data to both endpoints", "metrics_endpoint", metricsEndpoint, "logs_endpoint", logsEndpoint)
+	// Return any refreshed token alongside the error so the caller can still
+	// persist it when only one signal failed.
+	if err := errors.Join(sendErrs...); err != nil {
+		return newToken, err
+	}
+
+	log.Logger.Infow("Successfully sent health data", "metrics_endpoint", metricsEndpoint, "logs_endpoint", logsEndpoint)
 	return newToken, nil
 }
 

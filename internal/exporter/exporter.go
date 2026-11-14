@@ -240,15 +240,11 @@ func (e *healthExporter) exportToHTTP(ctx context.Context, data *collector.Healt
 		log.Logger.Warnw("No auth token configured, exporting without authentication")
 	}
 
-	newToken, err := e.httpWriter.Send(ctx, data, e.options.config.MetricsEndpoint, e.options.config.LogsEndpoint, e.options.config.RetryMaxAttempts, e.options.config.AuthToken)
-	if err != nil {
-		return fmt.Errorf("failed to send data: %w", err)
-	}
+	newToken, sendErr := e.httpWriter.Send(ctx, data, e.options.config.MetricsEndpoint, e.options.config.LogsEndpoint, e.options.config.RetryMaxAttempts, e.options.config.AuthToken)
 
-	// Log the timestamp of the export on successful export - this won't be logged if not enrolled
-	log.Logger.Infow("Successfully exported health data to", "timestamp", time.Now().UTC())
-
-	// If we received a new JWT token, update it in metadata and config
+	// If we received a new JWT token, update it in metadata and config.
+	// This runs even when Send returned an error, because one signal may have
+	// succeeded and returned a refreshed token while the other failed.
 	if newToken != "" && newToken != e.options.config.AuthToken {
 		log.Logger.Info("Updating JWT token from server response")
 
@@ -260,6 +256,13 @@ func (e *healthExporter) exportToHTTP(ctx context.Context, data *collector.Healt
 			log.Logger.Infow("Successfully updated JWT token")
 		}
 	}
+
+	if sendErr != nil {
+		return fmt.Errorf("failed to send data: %w", sendErr)
+	}
+
+	// Log the timestamp of the export on successful export - this won't be logged if not enrolled
+	log.Logger.Infow("Successfully exported health data to", "timestamp", time.Now().UTC())
 
 	return nil
 }
