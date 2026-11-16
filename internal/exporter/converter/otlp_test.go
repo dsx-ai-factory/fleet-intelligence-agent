@@ -32,6 +32,7 @@ import (
 
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/collector"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/machineinfo"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/version"
 )
 
 func TestNewOTLPConverter(t *testing.T) {
@@ -1122,6 +1123,46 @@ func TestOTLPConverter_ResourceAttributesOmitEmptyOptionalValues(t *testing.T) {
 	_, computeZoneExists := attrMap["compute_zone"]
 	assert.False(t, nodeGroupExists)
 	assert.False(t, computeZoneExists)
+}
+
+func TestOTLPConverter_ReportsAgentVersion(t *testing.T) {
+	const agentVersion = "9.8.7-test"
+	originalVersion := version.Version
+	version.Version = agentVersion
+	t.Cleanup(func() { version.Version = originalVersion })
+
+	data := &collector.HealthData{
+		Timestamp: time.Now(),
+		MachineID: "test-machine-123",
+	}
+
+	converter := NewOTLPConverter()
+	for i := range 2 {
+		otlpData := converter.Convert(data)
+
+		rm := otlpData.Metrics.ResourceMetrics[0]
+		require.Len(t, rm.ScopeMetrics, 1)
+		assert.Equal(t, "fleetint-exporter", rm.ScopeMetrics[0].Scope.GetName(), "conversion %d", i)
+		assert.Equal(t, agentVersion, rm.ScopeMetrics[0].Scope.GetVersion(), "conversion %d", i)
+
+		rl := otlpData.Logs.ResourceLogs[0]
+		require.Len(t, rl.ScopeLogs, 1)
+		assert.Equal(t, "fleetint-exporter", rl.ScopeLogs[0].Scope.GetName(), "conversion %d", i)
+		assert.Equal(t, agentVersion, rl.ScopeLogs[0].Scope.GetVersion(), "conversion %d", i)
+
+		for signal, attrs := range map[string][]*commonv1.KeyValue{
+			"metrics": rm.Resource.Attributes,
+			"logs":    rl.Resource.Attributes,
+		} {
+			var serviceVersions []string
+			for _, attr := range attrs {
+				if attr.Key == "service.version" {
+					serviceVersions = append(serviceVersions, attr.Value.GetStringValue())
+				}
+			}
+			assert.Equal(t, []string{agentVersion}, serviceVersions, "%s resource, conversion %d", signal, i)
+		}
+	}
 }
 
 func TestOTLPConverter_ResourceAttributes_IncludesOnlyGPUInfoGPUs(t *testing.T) {

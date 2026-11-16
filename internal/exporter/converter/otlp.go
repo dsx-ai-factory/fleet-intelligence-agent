@@ -34,6 +34,7 @@ import (
 	resourcev1 "go.opentelemetry.io/proto/otlp/resource/v1"
 
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/collector"
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/version"
 )
 
 var (
@@ -74,7 +75,7 @@ func (c *otlpConverter) Convert(data *collector.HealthData) *OTLPData {
 					{
 						Scope: &commonv1.InstrumentationScope{
 							Name:    "fleetint-exporter",
-							Version: "1.0.0",
+							Version: version.Version,
 						},
 						Metrics: c.convertMetricsToOTLP(data),
 					},
@@ -92,7 +93,7 @@ func (c *otlpConverter) Convert(data *collector.HealthData) *OTLPData {
 					{
 						Scope: &commonv1.InstrumentationScope{
 							Name:    "fleetint-exporter",
-							Version: "1.0.0",
+							Version: version.Version,
 						},
 						LogRecords: c.convertToOTLPLogs(data),
 					},
@@ -116,6 +117,7 @@ func (c *otlpConverter) createOTLPResource(data *collector.HealthData) *resource
 				Value: &commonv1.AnyValue_StringValue{StringValue: "fleet-intelligence-agent"},
 			},
 		},
+		{Key: "service.version", Value: stringAnyValue(version.Version)},
 		{
 			Key: "machine.id",
 			Value: &commonv1.AnyValue{
