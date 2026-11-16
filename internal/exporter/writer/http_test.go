@@ -579,6 +579,81 @@ func TestHTTPWriter_Send_LogsFailure(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to send critical logs data")
 }
 
+func TestHTTPWriter_Send_SignalFailures(t *testing.T) {
+	tests := []struct {
+		name            string
+		metricsStatus   int
+		logsStatus      int
+		wantErrContains []string
+	}{
+		{
+			name:            "metrics_fail_logs_still_sent",
+			metricsStatus:   http.StatusInternalServerError,
+			logsStatus:      http.StatusOK,
+			wantErrContains: []string{"failed to send metrics data"},
+		},
+		{
+			name:            "both_fail",
+			metricsStatus:   http.StatusInternalServerError,
+			logsStatus:      http.StatusInternalServerError,
+			wantErrContains: []string{"failed to send metrics data", "failed to send critical logs data"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logsRequests := 0
+
+			metricsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.metricsStatus)
+			}))
+			defer metricsServer.Close()
+
+			logsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				logsRequests++
+				if tt.logsStatus == http.StatusOK {
+					w.Header().Set("jwt_assertion", "refreshed-token")
+				}
+				w.WriteHeader(tt.logsStatus)
+			}))
+			defer logsServer.Close()
+
+			testData := &collector.HealthData{
+				Timestamp:    time.Now(),
+				MachineID:    "test-machine",
+				CollectionID: "test-collection",
+			}
+
+			otlpConverter := &mockOTLPConverter{
+				convertFunc: func(data *collector.HealthData) *converter.OTLPData {
+					return &converter.OTLPData{
+						Metrics: &metricsv1.MetricsData{
+							ResourceMetrics: []*metricsv1.ResourceMetrics{{}},
+						},
+						Logs: &logsv1.LogsData{
+							ResourceLogs: []*logsv1.ResourceLogs{{}},
+						},
+					}
+				},
+			}
+
+			writer := NewHTTPWriter(&http.Client{}, otlpConverter)
+			newToken, err := writer.Send(context.Background(), testData, metricsServer.URL, logsServer.URL, 1, "test-token")
+
+			require.Error(t, err)
+			for _, want := range tt.wantErrContains {
+				assert.Contains(t, err.Error(), want)
+			}
+			assert.Equal(t, 1, logsRequests, "logs should still be attempted after a metrics failure")
+			if tt.logsStatus == http.StatusOK {
+				assert.Equal(t, "refreshed-token", newToken, "token from the successful signal should be returned with the error")
+			} else {
+				assert.Empty(t, newToken)
+			}
+		})
+	}
+}
+
 func TestHTTPError_Error(t *testing.T) {
 	tests := []struct {
 		name     string

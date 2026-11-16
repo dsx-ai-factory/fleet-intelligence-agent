@@ -1525,6 +1525,49 @@ func TestExportUsesSeparateContextsForCollectionAndHTTP(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestExportToHTTPPersistsTokenOnPartialFailure verifies that a refreshed token
+// returned alongside a send error (one signal succeeded, the other failed) is
+// still persisted, and the error is still returned.
+func TestExportToHTTPPersistsTokenOnPartialFailure(t *testing.T) {
+	cfg := &config.HealthExporterConfig{
+		Interval:        metav1.Duration{Duration: 1 * time.Minute},
+		Timeout:         metav1.Duration{Duration: 30 * time.Second},
+		MetricsEndpoint: "https://metrics.example.com",
+		LogsEndpoint:    "https://logs.example.com",
+		AuthToken:       "old-token",
+	}
+
+	ctx := context.Background()
+	tmpDB := setupTestDB(t)
+	defer tmpDB.Close()
+
+	exporter, err := New(ctx,
+		WithConfig(cfg),
+		WithDatabaseConnections(tmpDB, tmpDB),
+		WithMachineID("test-machine-id"),
+	)
+	require.NoError(t, err)
+	he := exporter.(*healthExporter)
+
+	mockHTTPWriter := &MockHTTPWriter{}
+	mockHTTPWriter.
+		On("Send", mock.Anything, mock.Anything, cfg.MetricsEndpoint, cfg.LogsEndpoint, cfg.RetryMaxAttempts, "old-token").
+		Return("refreshed-token", assert.AnError)
+	he.httpWriter = mockHTTPWriter
+
+	err = he.exportToHTTP(ctx, &collector.HealthData{MachineID: "test-machine", Timestamp: time.Now()})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, assert.AnError)
+
+	assert.Equal(t, "refreshed-token", he.options.config.AuthToken, "token should be refreshed in config")
+	storedToken, err := pkgmetadata.ReadMetadata(ctx, tmpDB, pkgmetadata.MetadataKeyToken)
+	require.NoError(t, err)
+	assert.Equal(t, "refreshed-token", storedToken, "token should be persisted to database")
+
+	mockHTTPWriter.AssertExpectations(t)
+	require.NoError(t, exporter.Stop())
+}
+
 // TestExportHTTPWithReturnedToken tests handling of JWT token returned from server
 func TestExportHTTPWithReturnedToken(t *testing.T) {
 	newJWT := "new-jwt-token-from-server"
