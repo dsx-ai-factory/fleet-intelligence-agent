@@ -17,9 +17,11 @@ package writer
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -241,7 +243,7 @@ func TestHTTPWriter_Send_RetryOnFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
 		if attempts < 3 {
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(http.StatusServiceUnavailable)
 		} else {
 			w.WriteHeader(http.StatusOK)
 		}
@@ -281,7 +283,7 @@ func TestHTTPWriter_Send_RetryExhausted(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
 
@@ -650,6 +652,121 @@ func TestHTTPWriter_Send_SignalFailures(t *testing.T) {
 			} else {
 				assert.Empty(t, newToken)
 			}
+		})
+	}
+}
+
+func TestHTTPWriter_Send_NonRetryableStatus(t *testing.T) {
+	for _, status := range []int{
+		http.StatusBadRequest,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusInternalServerError,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			t.Parallel()
+
+			var attempts atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				attempts.Add(1)
+				w.WriteHeader(status)
+			}))
+			defer server.Close()
+
+			otlpConverter := &mockOTLPConverter{
+				convertFunc: func(data *collector.HealthData) *converter.OTLPData {
+					return &converter.OTLPData{
+						Metrics: &metricsv1.MetricsData{
+							ResourceMetrics: []*metricsv1.ResourceMetrics{{}},
+						},
+					}
+				},
+			}
+			testData := &collector.HealthData{
+				Timestamp:    time.Now(),
+				MachineID:    "test-machine",
+				CollectionID: "test-collection",
+			}
+
+			writer := NewHTTPWriter(&http.Client{}, otlpConverter)
+			start := time.Now()
+			_, err := writer.Send(context.Background(), testData, server.URL, "", 3, "test-token")
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "non-retryable error on attempt 1")
+			assert.Equal(t, int32(1), attempts.Load(), "a non-retryable status must not be retried")
+			assert.Less(t, time.Since(start), defaultRetryDelay, "a non-retryable status must not wait for a retry")
+		})
+	}
+}
+
+func TestHTTPWriter_Send_RetryableStatus(t *testing.T) {
+	for _, status := range []int{
+		http.StatusTooManyRequests,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			t.Parallel()
+
+			var attempts atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if attempts.Add(1) == 1 {
+					w.WriteHeader(status)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			otlpConverter := &mockOTLPConverter{
+				convertFunc: func(data *collector.HealthData) *converter.OTLPData {
+					return &converter.OTLPData{
+						Metrics: &metricsv1.MetricsData{
+							ResourceMetrics: []*metricsv1.ResourceMetrics{{}},
+						},
+					}
+				},
+			}
+			testData := &collector.HealthData{
+				Timestamp:    time.Now(),
+				MachineID:    "test-machine",
+				CollectionID: "test-collection",
+			}
+
+			writer := NewHTTPWriter(&http.Client{}, otlpConverter)
+			_, err := writer.Send(context.Background(), testData, server.URL, "", 2, "test-token")
+
+			require.NoError(t, err)
+			assert.Equal(t, int32(2), attempts.Load(), "a retryable status must be retried")
+		})
+	}
+}
+
+func TestIsRetryableError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "transport_error", err: assert.AnError, want: true},
+		{name: "401", err: &HTTPError{StatusCode: http.StatusUnauthorized}, want: true},
+		{name: "429", err: &HTTPError{StatusCode: http.StatusTooManyRequests}, want: true},
+		{name: "502", err: &HTTPError{StatusCode: http.StatusBadGateway}, want: true},
+		{name: "503", err: &HTTPError{StatusCode: http.StatusServiceUnavailable}, want: true},
+		{name: "504", err: &HTTPError{StatusCode: http.StatusGatewayTimeout}, want: true},
+		{name: "wrapped_503", err: fmt.Errorf("send: %w", &HTTPError{StatusCode: http.StatusServiceUnavailable}), want: true},
+		{name: "307", err: &HTTPError{StatusCode: http.StatusTemporaryRedirect}, want: false},
+		{name: "400", err: &HTTPError{StatusCode: http.StatusBadRequest}, want: false},
+		{name: "403", err: &HTTPError{StatusCode: http.StatusForbidden}, want: false},
+		{name: "404", err: &HTTPError{StatusCode: http.StatusNotFound}, want: false},
+		{name: "500", err: &HTTPError{StatusCode: http.StatusInternalServerError}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isRetryableError(tt.err))
 		})
 	}
 }

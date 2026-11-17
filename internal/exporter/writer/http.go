@@ -195,6 +195,17 @@ func (w *httpWriter) sendOTLPRequestWithRetry(ctx context.Context, reqData []byt
 			}
 		}
 
+		// Stop early when another attempt cannot succeed, for example on 400 or 403.
+		if !isRetryableError(err) {
+			log.Logger.Errorw("Request failed with a non-retryable error",
+				"data_type", dataType,
+				"collection_id", collectionID,
+				"endpoint", endpoint,
+				"attempt", attempt,
+				"error", err)
+			return "", fmt.Errorf("non-retryable error on attempt %d: %w", attempt, err)
+		}
+
 		// If this was the last attempt, don't wait
 		if attempt >= maxRetries {
 			break
@@ -306,6 +317,29 @@ func (w *httpWriter) isUnauthorizedError(err error) bool {
 	}
 
 	return false
+}
+
+// isRetryableError reports whether a failed OTLP request can succeed when it is
+// sent again. Errors without an HTTP response, such as a refused connection or a
+// timeout, are retried. Of the HTTP errors, only 401 (the JWT refresh path), 429,
+// 502, 503 and 504 are retried. Other statuses, such as 400, 403, 404 and 500,
+// return the same result on every attempt.
+func isRetryableError(err error) bool {
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		return true
+	}
+
+	switch httpErr.StatusCode {
+	case http.StatusUnauthorized,
+		http.StatusTooManyRequests,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
 }
 
 // calculateJitter returns a random duration between 0 and maxJitter to prevent thundering herd
