@@ -17,9 +17,11 @@ package writer
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -241,7 +243,7 @@ func TestHTTPWriter_Send_RetryOnFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
 		if attempts < 3 {
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(http.StatusServiceUnavailable)
 		} else {
 			w.WriteHeader(http.StatusOK)
 		}
@@ -281,7 +283,7 @@ func TestHTTPWriter_Send_RetryExhausted(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
 
@@ -651,6 +653,280 @@ func TestHTTPWriter_Send_SignalFailures(t *testing.T) {
 				assert.Empty(t, newToken)
 			}
 		})
+	}
+}
+
+func TestHTTPWriter_Send_NonRetryableStatus(t *testing.T) {
+	for _, status := range []int{
+		http.StatusBadRequest,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusInternalServerError,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			t.Parallel()
+
+			var attempts atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				attempts.Add(1)
+				w.WriteHeader(status)
+			}))
+			defer server.Close()
+
+			otlpConverter := &mockOTLPConverter{
+				convertFunc: func(data *collector.HealthData) *converter.OTLPData {
+					return &converter.OTLPData{
+						Metrics: &metricsv1.MetricsData{
+							ResourceMetrics: []*metricsv1.ResourceMetrics{{}},
+						},
+					}
+				},
+			}
+			testData := &collector.HealthData{
+				Timestamp:    time.Now(),
+				MachineID:    "test-machine",
+				CollectionID: "test-collection",
+			}
+
+			writer := NewHTTPWriter(&http.Client{}, otlpConverter)
+			start := time.Now()
+			_, err := writer.Send(context.Background(), testData, server.URL, "", 3, "test-token")
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "non-retryable error on attempt 1")
+			assert.Equal(t, int32(1), attempts.Load(), "a non-retryable status must not be retried")
+			assert.Less(t, time.Since(start), defaultRetryDelay, "a non-retryable status must not wait for a retry")
+		})
+	}
+}
+
+func TestHTTPWriter_Send_RetryableStatus(t *testing.T) {
+	for _, status := range []int{
+		http.StatusTooManyRequests,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			t.Parallel()
+
+			var attempts atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if attempts.Add(1) == 1 {
+					w.WriteHeader(status)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			otlpConverter := &mockOTLPConverter{
+				convertFunc: func(data *collector.HealthData) *converter.OTLPData {
+					return &converter.OTLPData{
+						Metrics: &metricsv1.MetricsData{
+							ResourceMetrics: []*metricsv1.ResourceMetrics{{}},
+						},
+					}
+				},
+			}
+			testData := &collector.HealthData{
+				Timestamp:    time.Now(),
+				MachineID:    "test-machine",
+				CollectionID: "test-collection",
+			}
+
+			writer := NewHTTPWriter(&http.Client{}, otlpConverter)
+			_, err := writer.Send(context.Background(), testData, server.URL, "", 2, "test-token")
+
+			require.NoError(t, err)
+			assert.Equal(t, int32(2), attempts.Load(), "a retryable status must be retried")
+		})
+	}
+}
+
+func TestIsRetryableError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "transport_error", err: assert.AnError, want: true},
+		{name: "401", err: &HTTPError{StatusCode: http.StatusUnauthorized}, want: false},
+		{name: "429", err: &HTTPError{StatusCode: http.StatusTooManyRequests}, want: true},
+		{name: "502", err: &HTTPError{StatusCode: http.StatusBadGateway}, want: true},
+		{name: "503", err: &HTTPError{StatusCode: http.StatusServiceUnavailable}, want: true},
+		{name: "504", err: &HTTPError{StatusCode: http.StatusGatewayTimeout}, want: true},
+		{name: "wrapped_503", err: fmt.Errorf("send: %w", &HTTPError{StatusCode: http.StatusServiceUnavailable}), want: true},
+		{name: "307", err: &HTTPError{StatusCode: http.StatusTemporaryRedirect}, want: false},
+		{name: "400", err: &HTTPError{StatusCode: http.StatusBadRequest}, want: false},
+		{name: "403", err: &HTTPError{StatusCode: http.StatusForbidden}, want: false},
+		{name: "404", err: &HTTPError{StatusCode: http.StatusNotFound}, want: false},
+		{name: "500", err: &HTTPError{StatusCode: http.StatusInternalServerError}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isRetryableError(tt.err))
+		})
+	}
+}
+
+func TestHTTPWriter_Send_UnauthorizedAfterRefreshNotRetried(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	otlpConverter := &mockOTLPConverter{
+		convertFunc: func(data *collector.HealthData) *converter.OTLPData {
+			return &converter.OTLPData{
+				Metrics: &metricsv1.MetricsData{
+					ResourceMetrics: []*metricsv1.ResourceMetrics{{}},
+				},
+			}
+		},
+	}
+	testData := &collector.HealthData{
+		Timestamp:    time.Now(),
+		MachineID:    "test-machine",
+		CollectionID: "test-collection",
+	}
+
+	writer := NewHTTPWriter(&http.Client{}, otlpConverter)
+	writer.SetJWTRefreshFunc(func(ctx context.Context) (string, error) {
+		return "new-token", nil
+	})
+	start := time.Now()
+	_, err := writer.Send(context.Background(), testData, server.URL, "", 3, "old-token")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-retryable error on attempt 1")
+	assert.Equal(t, int32(2), attempts.Load(), "only the request with the refreshed token may follow the first 401")
+	assert.Less(t, time.Since(start), defaultRetryDelay, "a 401 after the refresh must not wait for a retry")
+}
+
+func TestHTTPWriter_Send_RetryAfter(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			t.Parallel()
+
+			var attempts atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if attempts.Add(1) == 1 {
+					w.Header().Set("Retry-After", "1")
+					w.WriteHeader(status)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			otlpConverter := &mockOTLPConverter{
+				convertFunc: func(data *collector.HealthData) *converter.OTLPData {
+					return &converter.OTLPData{
+						Metrics: &metricsv1.MetricsData{
+							ResourceMetrics: []*metricsv1.ResourceMetrics{{}},
+						},
+					}
+				},
+			}
+			testData := &collector.HealthData{
+				Timestamp:    time.Now(),
+				MachineID:    "test-machine",
+				CollectionID: "test-collection",
+			}
+
+			writer := NewHTTPWriter(&http.Client{}, otlpConverter)
+			start := time.Now()
+			_, err := writer.Send(context.Background(), testData, server.URL, "", 2, "test-token")
+			elapsed := time.Since(start)
+
+			require.NoError(t, err)
+			assert.Equal(t, int32(2), attempts.Load())
+			assert.GreaterOrEqual(t, elapsed, time.Second, "the retry must wait for Retry-After")
+			assert.Less(t, elapsed, defaultRetryDelay, "Retry-After must replace the default delay")
+		})
+	}
+}
+
+func TestHTTPWriter_sendOTLPRequest_RetryAfter(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+		status int
+		want   time.Duration
+	}{
+		{name: "429", status: http.StatusTooManyRequests, header: "7", want: 7 * time.Second},
+		{name: "503", status: http.StatusServiceUnavailable, header: "7", want: 7 * time.Second},
+		{name: "503_without_header", status: http.StatusServiceUnavailable, want: 0},
+		{name: "502_ignores_header", status: http.StatusBadGateway, header: "7", want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tt.header != "" {
+					w.Header().Set("Retry-After", tt.header)
+				}
+				w.WriteHeader(tt.status)
+			}))
+			defer server.Close()
+
+			writer := NewHTTPWriter(&http.Client{}, &mockOTLPConverter{}).(*httpWriter)
+			_, err := writer.sendOTLPRequest(context.Background(), []byte{}, "metrics", "test-collection-id", "test-machine-id", server.URL, "test-token")
+
+			var httpErr *HTTPError
+			require.ErrorAs(t, err, &httpErr)
+			assert.Equal(t, tt.want, httpErr.RetryAfter)
+		})
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	now := time.Date(2026, time.November, 20, 12, 0, 0, 0, time.UTC)
+	date := func(d time.Duration) string { return now.Add(d).Format(http.TimeFormat) }
+
+	tests := []struct {
+		name  string
+		value string
+		want  time.Duration
+	}{
+		{name: "empty", value: "", want: 0},
+		{name: "seconds", value: "2", want: 2 * time.Second},
+		{name: "seconds_with_spaces", value: " 3 ", want: 3 * time.Second},
+		{name: "zero", value: "0", want: 0},
+		{name: "negative", value: "-1", want: 0},
+		{name: "at_cap", value: "60", want: maxRetryAfter},
+		{name: "above_cap", value: "3600", want: maxRetryAfter},
+		{name: "date", value: date(10 * time.Second), want: 10 * time.Second},
+		{name: "date_in_past", value: date(-10 * time.Second), want: 0},
+		{name: "date_above_cap", value: date(2 * time.Hour), want: maxRetryAfter},
+		{name: "invalid", value: "soon", want: 0},
+		{name: "fractional", value: "1.5", want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, parseRetryAfter(tt.value, now))
+		})
+	}
+}
+
+func TestRetryDelay(t *testing.T) {
+	delay, jitter := retryDelay(&HTTPError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 3 * time.Second})
+	assert.Equal(t, 3*time.Second, delay)
+	assert.Zero(t, jitter)
+
+	for _, err := range []error{
+		assert.AnError,
+		&HTTPError{StatusCode: http.StatusServiceUnavailable},
+	} {
+		delay, jitter = retryDelay(err)
+		assert.Equal(t, defaultRetryDelay+jitter, delay)
+		assert.GreaterOrEqual(t, jitter, time.Duration(0))
+		assert.Less(t, jitter, defaultRetryDelay/2)
 	}
 }
 
