@@ -17,10 +17,12 @@ package writer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -33,6 +35,7 @@ import (
 	resourcev1 "go.opentelemetry.io/proto/otlp/resource/v1"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/collector"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/converter"
 )
@@ -805,6 +808,114 @@ func TestHTTPWriter_Send_UnauthorizedAfterRefreshNotRetried(t *testing.T) {
 	assert.Contains(t, err.Error(), "non-retryable error on attempt 1")
 	assert.Equal(t, int32(2), attempts.Load(), "only the request with the refreshed token may follow the first 401")
 	assert.Less(t, time.Since(start), defaultRetryDelay, "a 401 after the refresh must not wait for a retry")
+}
+
+// refreshTest sends to a server that accepts only "new-token", with refresh as
+// the JWT refresh, and counts the requests and refreshes.
+func refreshTest(t *testing.T, maxRetries int, refresh func(call int32) (string, error)) (attempts, refreshes int32, err error) {
+	t.Helper()
+	var attemptCount, refreshCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attemptCount.Add(1)
+		if r.Header.Get("Authorization") == "Bearer new-token" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	otlpConverter := &mockOTLPConverter{
+		convertFunc: func(data *collector.HealthData) *converter.OTLPData {
+			return &converter.OTLPData{
+				Metrics: &metricsv1.MetricsData{
+					ResourceMetrics: []*metricsv1.ResourceMetrics{{}},
+				},
+			}
+		},
+	}
+	testData := &collector.HealthData{
+		Timestamp:    time.Now(),
+		MachineID:    "test-machine",
+		CollectionID: "test-collection",
+	}
+
+	writer := NewHTTPWriter(&http.Client{}, otlpConverter)
+	writer.SetJWTRefreshFunc(func(ctx context.Context) (string, error) {
+		return refresh(refreshCount.Add(1))
+	})
+	_, err = writer.Send(context.Background(), testData, server.URL, "", maxRetries, "old-token")
+	return attemptCount.Load(), refreshCount.Load(), err
+}
+
+// The refresh errors as refreshJWTToken returns them for a backend that is
+// temporarily unavailable or does not answer in time.
+func temporaryRefreshErrors() map[string]error {
+	return map[string]error{
+		"503": fmt.Errorf("failed to refresh JWT token: %w", &backendclient.HTTPStatusError{StatusCode: http.StatusServiceUnavailable}),
+		"timeout": fmt.Errorf("failed to refresh JWT token: %w",
+			&url.Error{Op: "Post", URL: "https://backend.example/v1/agent/enroll", Err: context.DeadlineExceeded}),
+	}
+}
+
+func TestHTTPWriter_Send_TemporaryRefreshFailureRetried(t *testing.T) {
+	for name, refreshErr := range temporaryRefreshErrors() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			attempts, refreshes, err := refreshTest(t, 3, func(call int32) (string, error) {
+				if call == 1 {
+					return "", refreshErr
+				}
+				return "new-token", nil
+			})
+
+			require.NoError(t, err)
+			assert.Equal(t, int32(2), refreshes, "the refresh must be tried again on the next attempt")
+			assert.Equal(t, int32(3), attempts, "old token, old token after the failed refresh, then the new token")
+		})
+	}
+}
+
+func TestHTTPWriter_Send_TemporaryRefreshFailureExhaustsRetries(t *testing.T) {
+	for name, refreshErr := range temporaryRefreshErrors() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			attempts, refreshes, err := refreshTest(t, 2, func(int32) (string, error) {
+				return "", refreshErr
+			})
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "failed after 2 attempts")
+			assert.ErrorIs(t, err, refreshErr)
+			assert.Equal(t, int32(2), attempts)
+			assert.Equal(t, int32(2), refreshes)
+		})
+	}
+}
+
+func TestHTTPWriter_Send_PermanentRefreshFailureNotRetried(t *testing.T) {
+	for name, refreshErr := range map[string]error{
+		"rejected SAK token": fmt.Errorf("failed to refresh JWT token: %w", &backendclient.HTTPStatusError{StatusCode: http.StatusForbidden}),
+		"no SAK token":       errors.New("no SAK token available for JWT refresh"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			start := time.Now()
+			attempts, refreshes, err := refreshTest(t, 3, func(int32) (string, error) {
+				return "", refreshErr
+			})
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "non-retryable JWT refresh error on attempt 1")
+			assert.ErrorIs(t, err, refreshErr)
+			assert.Equal(t, int32(1), attempts)
+			assert.Equal(t, int32(1), refreshes)
+			assert.Less(t, time.Since(start), defaultRetryDelay, "a permanent refresh failure must not wait for a retry")
+		})
+	}
 }
 
 func TestHTTPWriter_Send_RetryAfter(t *testing.T) {

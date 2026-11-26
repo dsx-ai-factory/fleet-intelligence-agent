@@ -220,24 +220,37 @@ func mapEnrollError(err error) error {
 		return err
 	}
 
+	var message string
 	switch statusErr.StatusCode {
 	case http.StatusBadRequest:
-		return fmt.Errorf("the token used in the enrollment is not in the correct format")
+		message = "the token used in the enrollment is not in the correct format"
 	case http.StatusUnauthorized:
-		return fmt.Errorf("the token used in the enrollment is incorrect")
+		message = "the token used in the enrollment is incorrect"
 	case http.StatusForbidden:
-		return fmt.Errorf("the token used in the enrollment is incorrect/expired")
+		message = "the token used in the enrollment is incorrect/expired"
 	case http.StatusNotFound:
-		return fmt.Errorf("the endpoint is not found")
+		message = "the endpoint is not found"
 	case http.StatusTooManyRequests:
-		return fmt.Errorf("please retry after some time; server is under heavy load")
+		message = "please retry after some time; server is under heavy load"
 	case http.StatusBadGateway:
-		return fmt.Errorf("some temporary issue caused enrollment to fail")
+		message = "some temporary issue caused enrollment to fail"
 	case http.StatusServiceUnavailable:
-		return fmt.Errorf("service is unavailable currently")
+		message = "service is unavailable currently"
 	case http.StatusGatewayTimeout:
-		return fmt.Errorf("service is experiencing load and is slow to respond")
+		message = "service is experiencing load and is slow to respond"
 	default:
 		return err
 	}
+	return &enrollError{message: message, err: err}
 }
+
+// enrollError keeps the readable enrollment message while letting callers see
+// the status, so a JWT refresh that failed with a 503 can be retried.
+type enrollError struct {
+	err     error
+	message string
+}
+
+func (e *enrollError) Error() string { return e.message }
+
+func (e *enrollError) Unwrap() error { return e.err }

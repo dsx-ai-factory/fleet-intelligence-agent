@@ -339,6 +339,10 @@ func TestMapEnrollErrorStatuses(t *testing.T) {
 	for status, want := range cases {
 		got := mapEnrollError(&HTTPStatusError{StatusCode: status})
 		require.ErrorContains(t, got, want)
+		// The status stays reachable, so a JWT refresh can tell a 503 from a rejected token.
+		var statusErr *HTTPStatusError
+		require.ErrorAs(t, got, &statusErr)
+		require.Equal(t, status, statusErr.StatusCode)
 	}
 
 	other := &HTTPStatusError{StatusCode: http.StatusTeapot}

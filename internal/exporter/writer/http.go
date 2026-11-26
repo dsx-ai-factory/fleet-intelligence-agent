@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -30,6 +31,7 @@ import (
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/collector"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/converter"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/validation/outbound"
@@ -191,6 +193,12 @@ func (w *httpWriter) sendOTLPRequestWithRetry(ctx context.Context, reqData []byt
 					"error", refreshErr,
 					"data_type", dataType,
 					"collection_id", collectionID)
+				if !isRetryableRefreshError(refreshErr) {
+					return "", fmt.Errorf("non-retryable JWT refresh error on attempt %d: %w", attempt, refreshErr)
+				}
+				// A temporary refresh failure is retried like a failed send; the
+				// next 401 attempts the refresh again.
+				err, lastErr = refreshErr, refreshErr
 			} else {
 				log.Logger.Infow("Successfully refreshed JWT token, retrying request",
 					"data_type", dataType,
@@ -341,8 +349,11 @@ func isRetryableError(err error) bool {
 	if !errors.As(err, &httpErr) {
 		return true
 	}
+	return isRetryableStatus(httpErr.StatusCode)
+}
 
-	switch httpErr.StatusCode {
+func isRetryableStatus(code int) bool {
+	switch code {
 	case http.StatusTooManyRequests,
 		http.StatusBadGateway,
 		http.StatusServiceUnavailable,
@@ -351,6 +362,18 @@ func isRetryableError(err error) bool {
 	default:
 		return false
 	}
+}
+
+// isRetryableRefreshError reports whether a failed JWT refresh can succeed on a
+// later attempt: the backend could not be reached or timed out, or it answered
+// 429, 502, 503 or 504. A rejected SAK token or missing enrollment data cannot.
+func isRetryableRefreshError(err error) bool {
+	var statusErr *backendclient.HTTPStatusError
+	if errors.As(err, &statusErr) {
+		return isRetryableStatus(statusErr.StatusCode)
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
 }
 
 // retryDelay returns how long to wait before the next attempt, and the jitter
