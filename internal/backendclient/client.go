@@ -192,17 +192,23 @@ func (c *client) doJSON(ctx context.Context, method string, pathElems []string, 
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes+1))
 	if err != nil {
-		return fmt.Errorf("failed to read backend response: %w", err)
-	}
-	if len(data) > maxResponseBodyBytes {
-		return fmt.Errorf("backend response too large (max %d bytes)", maxResponseBodyBytes)
+		err = fmt.Errorf("failed to read backend response: %w", err)
+	} else if len(data) > maxResponseBodyBytes {
+		err = fmt.Errorf("backend response too large (max %d bytes)", maxResponseBodyBytes)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if err != nil {
+			// Keep the status reachable, so a 503 with an unreadable body is still retried.
+			return fmt.Errorf("%w; %w", &HTTPStatusError{StatusCode: resp.StatusCode}, err)
+		}
 		return &HTTPStatusError{
 			StatusCode: resp.StatusCode,
 			Body:       string(bytes.TrimSpace(data)),
 		}
+	}
+	if err != nil {
+		return err
 	}
 
 	if respBody == nil || len(bytes.TrimSpace(data)) == 0 {

@@ -853,6 +853,8 @@ func refreshTest(t *testing.T, maxRetries int, refresh func(call int32) (string,
 func temporaryRefreshErrors() map[string]error {
 	return map[string]error{
 		"503": fmt.Errorf("failed to refresh JWT token: %w", &backendclient.HTTPStatusError{StatusCode: http.StatusServiceUnavailable}),
+		"503 with an oversized body": fmt.Errorf("failed to refresh JWT token: %w", fmt.Errorf("%w; %w",
+			&backendclient.HTTPStatusError{StatusCode: http.StatusServiceUnavailable}, errors.New("backend response too large (max 1048576 bytes)"))),
 		"timeout": fmt.Errorf("failed to refresh JWT token: %w",
 			&url.Error{Op: "Post", URL: "https://backend.example/v1/agent/enroll", Err: context.DeadlineExceeded}),
 	}

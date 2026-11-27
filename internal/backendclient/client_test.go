@@ -19,12 +19,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -293,6 +295,39 @@ func TestClient_ResponseValidationAndErrors(t *testing.T) {
 		c := NewWithHTTPClient(mustParseURL(t, server.URL), server.Client())
 		_, err := c.GetNonce(context.Background(), "node-1", "jwt-token")
 		require.ErrorContains(t, err, "response too large")
+	})
+
+	t.Run("oversized error response body keeps the status", func(t *testing.T) {
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(strings.Repeat("a", maxResponseBodyBytes+10)))
+		}))
+		defer server.Close()
+
+		c := NewWithHTTPClient(mustParseURL(t, server.URL), server.Client())
+		_, err := c.GetNonce(context.Background(), "node-1", "jwt-token")
+		require.ErrorContains(t, err, "response too large")
+		var statusErr *HTTPStatusError
+		require.ErrorAs(t, err, &statusErr)
+		require.Equal(t, http.StatusServiceUnavailable, statusErr.StatusCode)
+	})
+
+	t.Run("unreadable error response body keeps the status", func(t *testing.T) {
+		readErr := errors.New("connection reset")
+		httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Body:       io.NopCloser(iotest.ErrReader(readErr)),
+				Header:     make(http.Header),
+			}, nil
+		})}
+
+		c := NewWithHTTPClient(mustParseURL(t, "https://backend.example"), httpClient)
+		_, err := c.GetNonce(context.Background(), "node-1", "jwt-token")
+		require.ErrorIs(t, err, readErr)
+		var statusErr *HTTPStatusError
+		require.ErrorAs(t, err, &statusErr)
+		require.Equal(t, http.StatusServiceUnavailable, statusErr.StatusCode)
 	})
 }
 
