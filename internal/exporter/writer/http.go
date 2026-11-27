@@ -22,12 +22,16 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/NVIDIA/fleet-intelligence-sdk/pkg/log"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/backendclient"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/collector"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/exporter/converter"
 	"github.com/dsx-ai-factory/fleet-intelligence-agent/internal/validation/outbound"
@@ -36,6 +40,10 @@ import (
 const (
 	// defaultRetryDelay is the default delay between retry attempts
 	defaultRetryDelay = 5 * time.Second
+
+	// maxRetryAfter caps the wait a server can request with Retry-After, so a
+	// large value cannot hold an export for a long time.
+	maxRetryAfter = 60 * time.Second
 )
 
 // HTTPError represents an HTTP error with status code
@@ -43,6 +51,9 @@ type HTTPError struct {
 	StatusCode int
 	Status     string
 	Message    string
+	// RetryAfter is the wait the server requested with Retry-After on a 429 or
+	// 503 response, capped at maxRetryAfter. Zero means no usable value.
+	RetryAfter time.Duration
 }
 
 func (e *HTTPError) Error() string {
@@ -182,6 +193,12 @@ func (w *httpWriter) sendOTLPRequestWithRetry(ctx context.Context, reqData []byt
 					"error", refreshErr,
 					"data_type", dataType,
 					"collection_id", collectionID)
+				if !isRetryableRefreshError(refreshErr) {
+					return "", fmt.Errorf("non-retryable JWT refresh error on attempt %d: %w", attempt, refreshErr)
+				}
+				// A temporary refresh failure is retried like a failed send; the
+				// next 401 attempts the refresh again.
+				err, lastErr = refreshErr, refreshErr
 			} else {
 				log.Logger.Infow("Successfully refreshed JWT token, retrying request",
 					"data_type", dataType,
@@ -195,14 +212,23 @@ func (w *httpWriter) sendOTLPRequestWithRetry(ctx context.Context, reqData []byt
 			}
 		}
 
+		// Stop early when another attempt cannot succeed, for example on 400 or 403.
+		if !isRetryableError(err) {
+			log.Logger.Errorw("Request failed with a non-retryable error",
+				"data_type", dataType,
+				"collection_id", collectionID,
+				"endpoint", endpoint,
+				"attempt", attempt,
+				"error", err)
+			return "", fmt.Errorf("non-retryable error on attempt %d: %w", attempt, err)
+		}
+
 		// If this was the last attempt, don't wait
 		if attempt >= maxRetries {
 			break
 		}
 
-		// Add jitter (0-50% of base delay) to prevent thundering herd
-		jitter := calculateJitter(defaultRetryDelay / 2)
-		delay := defaultRetryDelay + jitter
+		delay, jitter := retryDelay(err)
 		log.Logger.Warnw("Request failed, retrying",
 			"data_type", dataType,
 			"collection_id", collectionID,
@@ -273,11 +299,15 @@ func (w *httpWriter) sendOTLPRequest(ctx context.Context, reqData []byte, dataTy
 
 	// Check response status
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", &HTTPError{
+		httpErr := &HTTPError{
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,
 			Message:    "request failed",
 		}
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
+			httpErr.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		}
+		return "", httpErr
 	}
 
 	// Check for JWT token refresh in response headers
@@ -306,6 +336,88 @@ func (w *httpWriter) isUnauthorizedError(err error) bool {
 	}
 
 	return false
+}
+
+// isRetryableError reports whether a failed OTLP request can succeed when it is
+// sent again. Errors without an HTTP response, such as a refused connection or a
+// timeout, are retried. Of the HTTP errors, only 429, 502, 503 and 504 are
+// retried. Other statuses, such as 400, 401, 403, 404 and 500, return the same
+// result on every attempt. A 401 gets one retry with a refreshed JWT before this
+// check, so a second 401 means the refreshed token was rejected too.
+func isRetryableError(err error) bool {
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		return true
+	}
+	return isRetryableStatus(httpErr.StatusCode)
+}
+
+func isRetryableStatus(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+// isRetryableRefreshError reports whether a failed JWT refresh can succeed on a
+// later attempt: the backend could not be reached or timed out, or it answered
+// 429, 502, 503 or 504. A rejected SAK token or missing enrollment data cannot.
+func isRetryableRefreshError(err error) bool {
+	var statusErr *backendclient.HTTPStatusError
+	if errors.As(err, &statusErr) {
+		return isRetryableStatus(statusErr.StatusCode)
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
+}
+
+// retryDelay returns how long to wait before the next attempt, and the jitter
+// it includes. A Retry-After value from the server is used as is; otherwise the
+// delay is defaultRetryDelay plus jitter of up to half of it, to prevent a
+// thundering herd.
+func retryDelay(err error) (time.Duration, time.Duration) {
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) && httpErr.RetryAfter > 0 {
+		return httpErr.RetryAfter, 0
+	}
+
+	jitter := calculateJitter(defaultRetryDelay / 2)
+	return defaultRetryDelay + jitter, jitter
+}
+
+// parseRetryAfter parses a Retry-After header value, either delay-seconds or an
+// HTTP date, into a wait from now. It returns zero for an empty, invalid or past
+// value, and caps the result at maxRetryAfter.
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+
+	var wait time.Duration
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		if seconds >= int64(maxRetryAfter/time.Second) {
+			return maxRetryAfter
+		}
+		wait = time.Duration(seconds) * time.Second
+	} else if at, err := http.ParseTime(value); err == nil {
+		wait = at.Sub(now)
+	} else {
+		return 0
+	}
+
+	if wait <= 0 {
+		return 0
+	}
+	return min(wait, maxRetryAfter)
 }
 
 // calculateJitter returns a random duration between 0 and maxJitter to prevent thundering herd
